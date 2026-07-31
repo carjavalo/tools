@@ -586,14 +586,17 @@ export default function GestionUsuarios({
                                 value={form.data.rol}
                                 onValueChange={(v) => {
                                     form.setData('rol', v);
-                                    // La especialidad solo aplica a médicos.
-                                    if (v !== 'Medico') {
-                                        form.setData('codesp', '');
-                                    }
-                                    // El médico no inicia sesión: se descarta
-                                    // el correo, que queda oculto.
+                                    // La especialidad no se pide en ningún rol.
+                                    form.setData('codesp', '');
+                                    // Del médico solo se registran su nombre y
+                                    // su documento: el resto de campos quedan
+                                    // ocultos y se descarta lo ya escrito.
                                     if (v === 'Medico') {
                                         form.setData('email', '');
+                                        form.setData('Telefono1', '');
+                                        form.setData('telefono2', '');
+                                        form.setData('Direccion', '');
+                                        form.setData('Eps', '');
                                     }
                                     // Médico y paciente no usan contraseña.
                                     if (v === 'Medico' || v === 'paciente') {
@@ -618,34 +621,6 @@ export default function GestionUsuarios({
                             </Select>
                             <InputError message={form.errors.rol} />
                         </div>
-
-                        {/* Especialidad: solo visible/obligatoria si el rol es Medico */}
-                        {form.data.rol === 'Medico' && (
-                            <div className="grid gap-2 sm:col-span-2">
-                                <Label htmlFor="codesp">Especialidad *</Label>
-                                <Select
-                                    value={form.data.codesp}
-                                    onValueChange={(v) =>
-                                        form.setData('codesp', v)
-                                    }
-                                >
-                                    <SelectTrigger id="codesp">
-                                        <SelectValue placeholder="Seleccione la especialidad del médico" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {especialidadesList.map((esp) => (
-                                            <SelectItem
-                                                key={esp.id}
-                                                value={String(esp.espcodser)}
-                                            >
-                                                {esp.espcodser} — {esp.Nombre}
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                                <InputError message={form.errors.codesp} />
-                            </div>
-                        )}
 
                         <div className="grid gap-2">
                             <Label htmlFor="name">Nombres *</Label>
@@ -738,61 +713,90 @@ export default function GestionUsuarios({
                             </div>
                         )}
 
-                        <div className="grid gap-2">
-                            <Label htmlFor="Telefono1">Teléfono 1</Label>
-                            <Input
-                                id="Telefono1"
-                                value={form.data.Telefono1}
-                                onChange={(e) =>
-                                    form.setData('Telefono1', e.target.value)
-                                }
-                            />
-                            <InputError message={form.errors.Telefono1} />
-                        </div>
+                        {/* El médico solo lleva identificación y nombre. */}
+                        {form.data.rol !== 'Medico' && (
+                            <>
+                                <div className="grid gap-2">
+                                    <Label htmlFor="Telefono1">
+                                        Teléfono 1
+                                    </Label>
+                                    <Input
+                                        id="Telefono1"
+                                        value={form.data.Telefono1}
+                                        onChange={(e) =>
+                                            form.setData(
+                                                'Telefono1',
+                                                e.target.value,
+                                            )
+                                        }
+                                    />
+                                    <InputError
+                                        message={form.errors.Telefono1}
+                                    />
+                                </div>
 
-                        <div className="grid gap-2">
-                            <Label htmlFor="telefono2">Teléfono 2</Label>
-                            <Input
-                                id="telefono2"
-                                value={form.data.telefono2}
-                                onChange={(e) =>
-                                    form.setData('telefono2', e.target.value)
-                                }
-                            />
-                            <InputError message={form.errors.telefono2} />
-                        </div>
+                                <div className="grid gap-2">
+                                    <Label htmlFor="telefono2">
+                                        Teléfono 2
+                                    </Label>
+                                    <Input
+                                        id="telefono2"
+                                        value={form.data.telefono2}
+                                        onChange={(e) =>
+                                            form.setData(
+                                                'telefono2',
+                                                e.target.value,
+                                            )
+                                        }
+                                    />
+                                    <InputError
+                                        message={form.errors.telefono2}
+                                    />
+                                </div>
 
-                        <div className="grid gap-2 sm:col-span-2">
-                            <Label htmlFor="Direccion">Dirección</Label>
-                            <Input
-                                id="Direccion"
-                                value={form.data.Direccion}
-                                onChange={(e) =>
-                                    form.setData('Direccion', e.target.value)
-                                }
-                            />
-                            <InputError message={form.errors.Direccion} />
-                        </div>
+                                <div className="grid gap-2 sm:col-span-2">
+                                    <Label htmlFor="Direccion">Dirección</Label>
+                                    <Input
+                                        id="Direccion"
+                                        value={form.data.Direccion}
+                                        onChange={(e) =>
+                                            form.setData(
+                                                'Direccion',
+                                                e.target.value,
+                                            )
+                                        }
+                                    />
+                                    <InputError
+                                        message={form.errors.Direccion}
+                                    />
+                                </div>
 
-                        <div className="grid gap-2 sm:col-span-2">
-                            <Label htmlFor="Eps">EPS</Label>
-                            <Select
-                                value={form.data.Eps}
-                                onValueChange={(v) => form.setData('Eps', v)}
-                            >
-                                <SelectTrigger id="Eps">
-                                    <SelectValue placeholder="Seleccione la EPS" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {epsList.map((e) => (
-                                        <SelectItem key={e.id} value={e.Nombre}>
-                                            {e.Nombre}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                            <InputError message={form.errors.Eps} />
-                        </div>
+                                <div className="grid gap-2 sm:col-span-2">
+                                    <Label htmlFor="Eps">EPS</Label>
+                                    <Select
+                                        value={form.data.Eps}
+                                        onValueChange={(v) =>
+                                            form.setData('Eps', v)
+                                        }
+                                    >
+                                        <SelectTrigger id="Eps">
+                                            <SelectValue placeholder="Seleccione la EPS" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {epsList.map((e) => (
+                                                <SelectItem
+                                                    key={e.id}
+                                                    value={e.Nombre}
+                                                >
+                                                    {e.Nombre}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                    <InputError message={form.errors.Eps} />
+                                </div>
+                            </>
+                        )}
 
                         {/* Médico y paciente no inician sesión: sin contraseña. */}
                         {form.data.rol !== 'Medico' &&

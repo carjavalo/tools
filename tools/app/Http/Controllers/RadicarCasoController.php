@@ -381,11 +381,11 @@ class RadicarCasoController extends Controller
             'telefono2' => ['nullable', 'string', 'max:50'],
             'Direccion' => ['nullable', 'string', 'max:80'],
             'Eps' => ['nullable', 'string', 'max:120'],
-            // Especialidad del médico: obligatoria solo cuando el rol es "Medico".
+            // La especialidad ya no se pide en el formulario; se conserva la
+            // columna y se acepta si llega, pero nunca es obligatoria.
             'codesp' => [
                 'nullable',
                 'exclude_unless:rol,Medico',
-                'required_if:rol,Medico',
                 'string',
                 'max:10',
                 'exists:especialidad,espcodser',
@@ -527,11 +527,11 @@ class RadicarCasoController extends Controller
             'telefono2' => ['nullable', 'string', 'max:50'],
             'Direccion' => ['nullable', 'string', 'max:80'],
             'Eps' => ['nullable', 'string', 'max:120'],
-            // Especialidad del médico: obligatoria solo cuando el rol es "Medico".
+            // La especialidad ya no se pide en el formulario; se conserva la
+            // columna y se acepta si llega, pero nunca es obligatoria.
             'codesp' => [
                 'nullable',
                 'exclude_unless:rol,Medico',
-                'required_if:rol,Medico',
                 'string',
                 'max:10',
                 'exists:especialidad,espcodser',

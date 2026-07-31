@@ -736,3 +736,31 @@ test('crear medico no exige correo ni contraseña', function () {
         ->and($medico->password)->toBeNull()
         ->and($medico->codesp)->toBe('137');
 });
+
+test('un medico se crea solo con nombre, apellidos y documento', function () {
+    $user = User::factory()->create();
+    Role::firstOrCreate(['Nombre' => 'Medico'], ['Estado' => true]);
+
+    // Sin especialidad, correo, contraseña, teléfonos, dirección ni EPS:
+    // son los únicos campos que el formulario pide para el rol Medico.
+    $this->actingAs($user)->postJson('/tools/radicar-solicitud/crear-paciente', [
+        'rol' => 'Medico',
+        'name' => 'Ana',
+        'Apellido1' => 'Gómez',
+        'apellido2' => 'Ruiz',
+        'tipo_Docu' => 'Cédula de Ciudadanía',
+        'Numero_D' => '123123',
+    ])->assertOk();
+
+    $medico = User::where('Numero_D', '123123')->firstOrFail();
+    expect($medico->rol)->toBe('Medico')
+        ->and($medico->name)->toBe('Ana')
+        ->and($medico->Apellido1)->toBe('Gómez')
+        ->and($medico->apellido2)->toBe('Ruiz')
+        ->and($medico->tipo_Docu)->toBe('Cédula de Ciudadanía')
+        ->and($medico->codesp)->toBeNull()
+        ->and($medico->email)->toBeNull()
+        ->and($medico->password)->toBeNull()
+        ->and($medico->Telefono1)->toBeNull()
+        ->and($medico->Eps)->toBeNull();
+});

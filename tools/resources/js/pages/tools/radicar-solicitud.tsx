@@ -3472,11 +3472,18 @@ export default function RadicarSolicitud({
                                 value={nuevoUsuario.rol}
                                 onValueChange={(v) => {
                                     setU('rol', v);
-                                    // La especialidad solo aplica a médicos.
-                                    if (v !== 'Medico') setU('codesp', '');
-                                    // El médico no inicia sesión: se descarta
-                                    // el correo, que queda oculto.
-                                    if (v === 'Medico') setU('email', '');
+                                    // La especialidad no se pide en ningún rol.
+                                    setU('codesp', '');
+                                    // Del médico solo se registran su nombre y
+                                    // su documento: el resto de campos quedan
+                                    // ocultos y se descarta lo ya escrito.
+                                    if (v === 'Medico') {
+                                        setU('email', '');
+                                        setU('Telefono1', '');
+                                        setU('telefono2', '');
+                                        setU('Direccion', '');
+                                        setU('Eps', '');
+                                    }
                                     // Médico y paciente no usan contraseña.
                                     if (v === 'Medico' || v === 'paciente') {
                                         setU('password', '');
@@ -3501,41 +3508,6 @@ export default function RadicarSolicitud({
                                 </span>
                             )}
                         </div>
-
-                        {/* Especialidad: solo visible/obligatoria si el rol es Medico */}
-                        {nuevoUsuario.rol === 'Medico' && (
-                            <div className="grid gap-2">
-                                <Label>Especialidad *</Label>
-                                <Select
-                                    value={nuevoUsuario.codesp}
-                                    onValueChange={(v) => setU('codesp', v)}
-                                >
-                                    <SelectTrigger>
-                                        <SelectValue placeholder="Seleccione la especialidad del médico" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {especialidadesList
-                                            .filter((esp) => esp.espcodser)
-                                            .map((esp) => (
-                                                <SelectItem
-                                                    key={esp.id}
-                                                    value={String(
-                                                        esp.espcodser,
-                                                    )}
-                                                >
-                                                    {esp.espcodser} —{' '}
-                                                    {esp.Nombre}
-                                                </SelectItem>
-                                            ))}
-                                    </SelectContent>
-                                </Select>
-                                {userErrors.codesp && (
-                                    <span className="text-xs text-red-600">
-                                        {userErrors.codesp}
-                                    </span>
-                                )}
-                            </div>
-                        )}
 
                         <div className="grid gap-4 sm:grid-cols-2">
                             <div className="grid gap-2">
@@ -3625,58 +3597,76 @@ export default function RadicarSolicitud({
                                     )}
                                 </div>
                             )}
-                            <div className="grid gap-2">
-                                <Label>Teléfono 1</Label>
-                                <Input
-                                    value={nuevoUsuario.Telefono1}
-                                    onChange={(e) =>
-                                        setU('Telefono1', e.target.value)
-                                    }
-                                />
-                            </div>
-                            <div className="grid gap-2">
-                                <Label>Teléfono 2</Label>
-                                <Input
-                                    value={nuevoUsuario.telefono2}
-                                    onChange={(e) =>
-                                        setU('telefono2', e.target.value)
-                                    }
-                                />
-                            </div>
-                        </div>
-
-                        <div className="grid gap-2">
-                            <Label>Dirección</Label>
-                            <Input
-                                value={nuevoUsuario.Direccion}
-                                onChange={(e) =>
-                                    setU('Direccion', e.target.value)
-                                }
-                            />
-                        </div>
-                        <div className="grid gap-2">
-                            <Label>EPS</Label>
-                            <Select
-                                value={nuevoUsuario.Eps}
-                                onValueChange={(v) => setU('Eps', v)}
-                            >
-                                <SelectTrigger>
-                                    <SelectValue placeholder="Seleccione la EPS" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {epsList.map((e) => (
-                                        <SelectItem key={e.id} value={e.Nombre}>
-                                            {e.Nombre}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                            {userErrors.Eps && (
-                                <span className="text-xs text-red-600">
-                                    {userErrors.Eps}
-                                </span>
+                            {/* El médico solo lleva identificación y nombre. */}
+                            {nuevoUsuario.rol !== 'Medico' && (
+                                <>
+                                    <div className="grid gap-2">
+                                        <Label>Teléfono 1</Label>
+                                        <Input
+                                            value={nuevoUsuario.Telefono1}
+                                            onChange={(e) =>
+                                                setU(
+                                                    'Telefono1',
+                                                    e.target.value,
+                                                )
+                                            }
+                                        />
+                                    </div>
+                                    <div className="grid gap-2">
+                                        <Label>Teléfono 2</Label>
+                                        <Input
+                                            value={nuevoUsuario.telefono2}
+                                            onChange={(e) =>
+                                                setU(
+                                                    'telefono2',
+                                                    e.target.value,
+                                                )
+                                            }
+                                        />
+                                    </div>
+                                </>
                             )}
                         </div>
+
+                        {nuevoUsuario.rol !== 'Medico' && (
+                            <>
+                                <div className="grid gap-2">
+                                    <Label>Dirección</Label>
+                                    <Input
+                                        value={nuevoUsuario.Direccion}
+                                        onChange={(e) =>
+                                            setU('Direccion', e.target.value)
+                                        }
+                                    />
+                                </div>
+                                <div className="grid gap-2">
+                                    <Label>EPS</Label>
+                                    <Select
+                                        value={nuevoUsuario.Eps}
+                                        onValueChange={(v) => setU('Eps', v)}
+                                    >
+                                        <SelectTrigger>
+                                            <SelectValue placeholder="Seleccione la EPS" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {epsList.map((e) => (
+                                                <SelectItem
+                                                    key={e.id}
+                                                    value={e.Nombre}
+                                                >
+                                                    {e.Nombre}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                    {userErrors.Eps && (
+                                        <span className="text-xs text-red-600">
+                                            {userErrors.Eps}
+                                        </span>
+                                    )}
+                                </div>
+                            </>
+                        )}
 
                         {/* Médico y paciente no inician sesión: sin contraseña. */}
                         {nuevoUsuario.rol !== 'Medico' &&
