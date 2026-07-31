@@ -1,0 +1,38 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -nA3 \"ssr\" config/inertia.php)",
+      "Bash(npx tsc *)",
+      "Bash(npm run *)",
+      "Bash(cd /c/xampp/htdocs/tools/tools && echo \"===sidebar sub-menu exports===\" && grep -nE \"SidebarMenuSub|SidebarMenuSubItem|SidebarMenuSubButton\" resources/js/components/ui/sidebar.tsx | head; echo \"\"; echo \"===collapsible component===\" && cat resources/js/components/ui/collapsible.tsx 2>/dev/null; echo \"\"; echo \"===ChevronRight icon===\" && ls node_modules/lucide-react/dist/esm/icons/chevron-right.js >/dev/null 2>&1 && echo \"OK ChevronRight\")",
+      "Bash(php artisan *)",
+      "Bash(php import_eps.php)",
+      "PowerShell(Start-Sleep -Seconds 2; Write-Output \"=== Puerto 8005 ===\"; Get-NetTCPConnection -LocalPort 8005 -State Listen -ErrorAction SilentlyContinue | Select-Object LocalAddress, LocalPort, State | Format-Table -AutoSize; Write-Output \"=== Prueba HTTP local ===\"; try { $r = Invoke-WebRequest -Uri \"http://127.0.0.1:8005/login\" -UseBasicParsing -TimeoutSec 8; Write-Output \\(\"HTTP \" + $r.StatusCode + \" - el servidor responde OK\"\\) } catch { Write-Output \\(\"Error al conectar: \" + $_.Exception.Message\\) })",
+      "Read(//c/Users/cvalderrama/Downloads/**)",
+      "Read(//c/Users/cvalderrama/Desktop/**)",
+      "Read(//c/Users/cvalderrama/**)",
+      "Bash(php inspect_cuvs.php)",
+      "Bash(php import_cuvs.php)",
+      "Bash(/c/xampp/php/php.exe _cuvs_parse.php)",
+      "Bash(cd /c/xampp/htdocs/tools/tools && rm -f database/migrations/2026_06_19_000001_widen_nombre_in_cuvs_table.php && echo \"old migration removed\")",
+      "Bash(/c/xampp/php/php.exe _cuvs_import.php)",
+      "Bash(/c/xampp/php/php.exe artisan *)",
+      "Bash(/c/xampp/php/php.exe _cuvs_unique.php)",
+      "Bash(/c/xampp/php/php.exe -i)",
+      "Bash(/c/xampp/php/php.exe --ini)",
+      "Bash(/c/xampp/php/php.exe _motivo_create.php)",
+      "Bash(php -l app/Http/Middleware/CheckPermisoVista.php)",
+      "Bash(php -r ' *)",
+      "Bash(grep -rn 'protected $table' C:/xampp/htdocs/tools/tools/app/Models/RadicarCaso.php)",
+      "Bash(\"C:/xampp/mysql/bin/mysql.exe\" -u root -h 127.0.0.1 -P 3306 tools -e \"SELECT \\(SELECT COUNT\\(*\\) FROM radicarcaso\\) AS casos, \\(SELECT COUNT\\(*\\) FROM trazabilidad_caso\\) AS traza;\")",
+      "Bash(\"C:/xampp/mysql/bin/mysql.exe\" -u root tools -e \"SELECT COUNT\\(*\\) casos FROM radicarcaso; SELECT COUNT\\(*\\) seg FROM seguimiento_caso; SELECT COUNT\\(*\\) traza FROM trazabilidad_caso; SELECT rol, COUNT\\(*\\) FROM users GROUP BY rol;\")",
+      "Bash(/c/xampp/mysql/bin/mysql.exe -h 127.0.0.1 -P 3306 -u root tools -e \"SELECT COUNT\\(*\\) AS casos FROM RadicarCaso;\")",
+      "Bash(/c/xampp/mysql/bin/mysql.exe -h 127.0.0.1 -P 3306 -u root tools -e \"SHOW TABLES LIKE '%eguimiento%'; SHOW TABLES LIKE '%razab%';\")",
+      "Read(//c/xampp/mysql/bin/**)",
+      "Bash(./mysql.exe -uroot tools -e \"SELECT id, cod_SubEspecialidad, Nombre, codespcodser, Estado FROM subespecialidad;\")",
+      "Bash(./mysql.exe -uroot tools -e \"SHOW TABLES;\")",
+      "Bash(./mysql.exe -uroot tools -e \"SELECT COUNT\\(*\\) total, SUM\\(codsubesp IS NULL\\) nulos, SUM\\(codsubesp=''\\) vacios FROM radicarcaso; SELECT codsubesp, COUNT\\(*\\) FROM radicarcaso GROUP BY codsubesp LIMIT 10; SELECT COUNT\\(*\\) tot_seg, SUM\\(codsubesp IS NULL\\) nulos FROM seguimiento_caso;\")",
+      "Bash(php \"C:/Users/CVALDE~1/AppData/Local/Temp/claude/C--xampp-htdocs-tools/34cbc55f-24b3-4240-b3a3-6344995714cc/scratchpad/probe2.php\")"
+    ]
+  }
+}

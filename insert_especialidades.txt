@@ -1,0 +1,97 @@
+-- ============================================================================
+-- INSERT de especialidades para la tabla `especialidad`
+--
+-- Origen de los datos (COD MINSALUD, espcodSERVINTE, Nombre):
+--   ESPECIALIDADES TRATANTES HUV DEPURADAS - PARA MINESI.xlsx  (109 filas)
+-- Filtro aplicado (solo se insertan las que existen ahí):
+--   solo especialidades sistemas.xls  (34 nombres distintos)
+--
+-- Mapeo de columnas:
+--   COD MINSALUD    -> especialidad.codminsal
+--   espcodSERVINTE  -> especialidad.espcodser
+--   Nombre          -> especialidad.Nombre   (tal cual viene del archivo MINESI)
+--   Estado          -> 1 (activa)   |   Observacion -> NULL
+--
+-- Resultado del cruce: 21 de 34 coinciden por nombre; 13 no coinciden y quedan
+-- al final de este archivo, comentadas, para que decidas cuáles aplicar.
+--
+-- Notas importantes:
+--   * `espcodser` tiene índice UNIQUE. Se usa INSERT IGNORE para que el script
+--     sea repetible y no falle por filas ya existentes.
+--   * La tabla ya tiene UROLOGÍA (id=1, espcodser 300): esa fila se ignorará.
+--   * El cruce se hizo normalizando mayúsculas, tildes y espacios sobrantes.
+--     En "solo especialidades sistemas" hay nombres repetidos que solo se
+--     diferencian por un espacio final (Oftalmologia / "Oftalmologia ", etc.);
+--     se contaron como uno solo.
+-- ============================================================================
+
+INSERT IGNORE INTO `especialidad`
+    (`codminsal`, `espcodser`, `Nombre`, `Estado`, `Observacion`, `created_at`, `updated_at`)
+VALUES
+    ('Q09',     '300', 'UROLOGÍA',                     1, NULL, NOW(), NOW()), -- Urologia
+    ('Q01',     '137', 'CIRUGIA GENERAL',              1, NULL, NOW(), NOW()), -- Cirugia General
+    ('Q03',     '110', 'CIRUGÍA PLÁSTICA',             1, NULL, NOW(), NOW()), -- Cirugia Plastica
+    ('Q02',     '811', 'CIRUGÍA PEDIÁTRICA',           1, NULL, NOW(), NOW()), -- Cirugia Pediatrica
+    ('Q0106',   '150', 'CIRUGIA ONCOLOGICA',           1, NULL, NOW(), NOW()), -- Cirugia Oncologica
+    ('Q08',     '521', 'OTORRINOLARINGOLOGÍA',         1, NULL, NOW(), NOW()), -- Otorrinolaringologia
+    ('Q05',     '443', 'NEUROCIRUGÍA',                 1, NULL, NOW(), NOW()), -- Neurocirugia
+    ('Q06',     '480', 'OFTALMOLOGÍA',                 1, NULL, NOW(), NOW()), -- Oftalmologia
+    ('Q0401',   '340', 'GINECOLOGÍA ONCOLÓGICA',       1, NULL, NOW(), NOW()), -- Ginecologia Oncologica
+    ('Q0107',   '160', 'COLOPROCTOLOGÍA',              1, NULL, NOW(), NOW()), -- Coloproctologia
+    ('Q04',     '341', 'GINECOLOGÍA Y OBSTETRICIA',    1, NULL, NOW(), NOW()), -- Ginecologia y Obstetricia
+    ('Q0805',   '154', 'NEUROTOLOGIA',                 1, NULL, NOW(), NOW()), -- Neurotologia
+    ('M0202',   '230', 'DOLOR Y CUIDADOS PALIATIVOS',  1, NULL, NOW(), NOW()), -- Dolor y cuidados paliativos
+    ('Q0104',   '134', 'CIRUGIA DEL TORAX',            1, NULL, NOW(), NOW()), -- Cirugia del Torax
+    ('M1510',   '813', 'GASTROENTEROLOGÍA PEDIÁTRICA', 1, NULL, NOW(), NOW()), -- Gastroenterologia Pediatrica
+    ('Q0901',   '309', 'UROLOGÍA PEDIÁTRICA',          1, NULL, NOW(), NOW()), -- Urologia Pediatrica
+    ('M15',     '550', 'PEDIATRÍA',                    1, NULL, NOW(), NOW()), -- Pediatria
+    ('M1305',   '709', 'GASTROENTEROLOGÍA',            1, NULL, NOW(), NOW()), -- Gastroenterologia
+    ('M1501',   '803', 'CARDIOLOGIA PEDIATRICA',       1, NULL, NOW(), NOW()), -- Cardiologia Pediatrica
+    ('D0304',   '783', 'RADIOLOGÍA INTERVENCIONISTA',  1, NULL, NOW(), NOW()), -- Radiologia Intervencionista
+    ('Q0704',   'CXM', 'CIRUGIA DE MANO',              1, NULL, NOW(), NOW()); -- Cirugia  de mano
+
+
+-- ============================================================================
+-- PENDIENTES DE DECISIÓN — 13 nombres de "solo especialidades sistemas" que no
+-- tienen un nombre idéntico en el archivo MINESI.
+--
+-- A) Equivalencia clara. Descomenta las filas que quieras aplicar.
+-- ============================================================================
+
+-- INSERT IGNORE INTO `especialidad`
+--     (`codminsal`, `espcodser`, `Nombre`, `Estado`, `Observacion`, `created_at`, `updated_at`)
+-- VALUES
+--     ('Q07',     '500', 'ORTOPEDIA Y TRAUMATOLOGÍA',     1, NULL, NOW(), NOW()), -- Ortopedia (204 casos)
+--     ('P09',     'S03', 'ODONTOLOGÍA',                   1, NULL, NOW(), NOW()), -- Odontologia general (33)
+--     ('Q0108',   'CXT', 'CIRUGIA DE TRASPLANTE',         1, NULL, NOW(), NOW()), -- Cirugia Transplantes (7)
+--     ('Q0113',   'CIP', 'CIRUGIA GENERAL Y LAPAROSCOPIA',1, NULL, NOW(), NOW()), -- Cirugia Laparoscopia (3) + Cirugia Laparoscopica (1)
+--     ('Q0101',   '102', 'CIRUGIA CARDIOVAS',             1, NULL, NOW(), NOW()); -- Cirugia Cardiovascular (1)
+--
+-- Ojo: 'CIRUGIA CARDIOVAS' viene truncado así en el archivo MINESI. Si quieres
+-- el nombre completo, cámbialo a 'CIRUGIA CARDIOVASCULAR' antes de aplicar.
+
+-- ============================================================================
+-- B) Ambiguos: hay más de un candidato en MINESI. Elige uno.
+-- ============================================================================
+--
+--   Maxilofacial (32 casos)  ->  OD07   / 040 / CIRUGÍA MAXILOFACIAL
+--                            ->  OD0702 / 188 / CIRUGIA ORAL Y MAXILOFACIAL
+--
+--   Hemodinamia (3 casos)    ->  M130101 / CAH / CARDIOLOGIA INTERVENSIONISTA Y
+--                                (nombre también truncado en el archivo origen)
+
+-- ============================================================================
+-- C) Duplicados del mismo concepto: ya quedaron cubiertos por el INSERT de
+--    arriba, no hay nada que aplicar.
+-- ============================================================================
+--
+--   Ginecologia (196)                  -> ya cubierto por GINECOLOGÍA Y OBSTETRICIA (Q04/341)
+--   CX ONCO (2)                        -> ya cubierto por CIRUGIA ONCOLOGICA (Q0106/150)
+--   Gastroenterlogia Pediatrica (3)    -> error de digitación de Gastroenterologia Pediatrica (M1510/813)
+
+-- ============================================================================
+-- D) Sin equivalente en el archivo MINESI. Hay que crearlas a mano o descartarlas.
+-- ============================================================================
+--
+--   Bariatrica (3 casos)
+--   Endoscopia Pediatrica (1 caso)   -- lo más cercano: Q0111 / 136 / CIRUGIA GASTRO Y ENDOSCOPIA

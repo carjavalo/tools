@@ -1,0 +1,2 @@
+[28-Oct-2025 08:46:49 America/New_York] PHP Warning:  Version warning: Imagick was compiled against ImageMagick version 1692 but version 1693 is loaded. Imagick will run but may behave surprisingly in Unknown on line 0
+[28-Oct-2025 08:46:49 America/New_York] PHP Fatal error:  Composer detected issues in your platform: Your Composer dependencies require a PHP version ">= 8.2.0". You are running 8.1.33. in /home/uoxclxvl/tools.huv.gov.co/tools/vendor/composer/platform_check.php on line 24

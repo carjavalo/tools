@@ -1,0 +1,6 @@
+#!/usr/bin/env php
+<?php
+
+// Proxy: reenvia la ejecucion al artisan real dentro de la subcarpeta 'tools'.
+chdir(__DIR__ . DIRECTORY_SEPARATOR . 'tools');
+require __DIR__ . DIRECTORY_SEPARATOR . 'tools' . DIRECTORY_SEPARATOR . 'artisan';
