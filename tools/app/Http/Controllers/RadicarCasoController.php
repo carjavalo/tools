@@ -433,9 +433,9 @@ class RadicarCasoController extends Controller
             'Nombre' => ['required', 'string', 'max:120'],
             'Observacion' => ['nullable', 'string', 'max:300'],
         ], [
-            'espcodser.unique' => 'Ya existe una especialidad con ese código de servicio.',
+            'espcodser.unique' => 'Ya existe una especialidad con ese código Servinte.',
         ], [
-            'espcodser' => 'código de servicio',
+            'espcodser' => 'código Servinte',
             'codminsal' => 'código MinSalud',
             'Nombre' => 'nombre',
             'Observacion' => 'observación',

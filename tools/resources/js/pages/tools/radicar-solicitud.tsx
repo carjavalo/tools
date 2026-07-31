@@ -3340,7 +3340,7 @@ export default function RadicarSolicitud({
                     >
                         <div className="grid gap-4 sm:grid-cols-2">
                             <div className="grid gap-2">
-                                <Label>Código de servicio *</Label>
+                                <Label>Código Servinte *</Label>
                                 <Input
                                     value={nuevaEsp.espcodser}
                                     onChange={(e) =>
