@@ -31,6 +31,8 @@ class RadicarCaso extends Model
         'codMed',
         'Ndocumento',
         'convenio',
+        'copago',
+        'valor_copago',
         'estRad',
         'fentregapro',
         'codestsecundario',
@@ -52,6 +54,8 @@ class RadicarCaso extends Model
     protected function casts(): array
     {
         return [
+            'copago' => 'boolean',
+            'valor_copago' => 'decimal:2',
             'fentregapro' => 'date:Y-m-d',
             'fecreci' => 'date:Y-m-d',
             'fecAutorizacion' => 'date:Y-m-d',

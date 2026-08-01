@@ -50,6 +50,8 @@ class RadicarCasoController extends Controller
         'codMed' => 'Médico',
         'Ndocumento' => 'Identificación del paciente',
         'convenio' => 'Convenio',
+        'copago' => 'Copago',
+        'valor_copago' => 'Valor del copago',
         'estRad' => 'Estado Actual',
         'fentregapro' => 'Entrega a Programación',
         'codestsecundario' => 'Estado Secundario',
@@ -641,6 +643,15 @@ class RadicarCasoController extends Controller
             // nombre, teléfonos y EPS de la vista.
             'Ndocumento' => ['required', 'string', 'max:20', Rule::exists('users', 'Numero_D')],
             'convenio' => ['required', 'string', 'max:25', Rule::exists('convenio', 'nit_Convenio')],
+            // Copago: el valor solo se exige (y solo se guarda) si está marcado.
+            'copago' => ['boolean'],
+            'valor_copago' => [
+                'exclude_if:copago,false',
+                'required_if:copago,true',
+                'numeric',
+                'min:0',
+                'max:99999999999.99',
+            ],
             'estRad' => ['required', 'string', 'max:5'],
             'fentregapro' => ['required', 'date'],
             // Estado secundario se retiró de la vista de Nueva Radicación: lo
@@ -670,6 +681,7 @@ class RadicarCasoController extends Controller
             'codMed' => 'médico',
             'Ndocumento' => 'identificación',
             'convenio' => 'convenio',
+            'valor_copago' => 'valor del copago',
             'estRad' => 'estado actual',
             'fentregapro' => 'entrega a programación',
             'codestsecundario' => 'estado secundario',
@@ -679,6 +691,12 @@ class RadicarCasoController extends Controller
             'ObservacionTFX' => 'OB TFX',
             'ObservacionCCX' => 'observación CCX',
         ]);
+
+        // Sin copago no se guarda ningún valor asociado.
+        if (! $request->boolean('copago')) {
+            $data['copago'] = false;
+            $data['valor_copago'] = null;
+        }
 
         // El caso, sus procedimientos y su bitácora se guardan o fallan juntos:
         // una radicación sin su registro de creación quedaría fuera del informe.
@@ -726,6 +744,15 @@ class RadicarCasoController extends Controller
         $data = $request->validate([
             'codMed' => ['required', 'string', 'max:20'],
             'estRad' => ['required', 'string', 'max:5'],
+            // Copago: el valor solo se exige (y solo se guarda) si está marcado.
+            'copago' => ['boolean'],
+            'valor_copago' => [
+                'exclude_if:copago,false',
+                'required_if:copago,true',
+                'numeric',
+                'min:0',
+                'max:99999999999.99',
+            ],
             'fentregapro' => ['required', 'date'],
             'fecreci' => ['required', 'date'],
             'fecAutorizacion' => ['required', 'date'],
@@ -741,11 +768,19 @@ class RadicarCasoController extends Controller
         ], [
             'codMed' => 'médico',
             'estRad' => 'estado actual',
+            'valor_copago' => 'valor del copago',
             'fentregapro' => 'entrega a programación',
             'fecreci' => 'fecha recibido / devolución',
             'fecAutorizacion' => 'fecha autorización',
             'fechavenautorizacion' => 'fecha vencimiento autorización',
         ]);
+
+        // Sin copago no se conserva un valor viejo: quedaría un monto colgado
+        // en un caso que dice no tener copago.
+        if (! $request->boolean('copago')) {
+            $data['copago'] = false;
+            $data['valor_copago'] = null;
+        }
 
         // El cambio y su registro en la bitácora van juntos: si algo falla, no
         // puede quedar un dato modificado sin rastro de quién lo modificó.
@@ -1014,6 +1049,8 @@ class RadicarCasoController extends Controller
                 'estado' => $estados[(int) $caso->estRad] ?? '—',
                 'medico' => $this->nombreUsuario($med) ?? '—',
                 'subespecialidad' => $subesp[$caso->codsubesp] ?? '—',
+                'copago' => (bool) $caso->copago,
+                'valorCopago' => $caso->valor_copago,
             ];
         };
 
@@ -1179,11 +1216,18 @@ class RadicarCasoController extends Controller
     {
         $plano = $this->valorPlano($valor);
 
+        // El copago es booleano: "No" es un valor con significado, no un vacío,
+        // así que se resuelve antes de tratar la cadena vacía como "sin dato".
+        if ($campo === 'copago') {
+            return in_array($plano, ['1', 'true'], true) ? 'Sí' : 'No';
+        }
+
         if ($plano === '') {
             return '—';
         }
 
         $nombre = match ($campo) {
+            'valor_copago' => '$'.number_format((float) $plano, 2, ',', '.'),
             'estRad' => EstRadicado::find($plano)?->Nombre,
             'codestsecundario' => EstRadisecundario::find($plano)?->Nombre,
             'estcod' => Motivo::find($plano)?->Nombre,
@@ -1373,6 +1417,8 @@ class RadicarCasoController extends Controller
                 : '—',
             'fechaRecibido' => optional($caso->created_at)->format('Y-m-d'),
             'estadoActual' => $estado?->Nombre ?? '—',
+            'copago' => (bool) $caso->copago,
+            'valorCopago' => $caso->valor_copago,
             // Valores crudos para el modal de Modificar Radicado.
             'codMed' => $caso->codMed,
             'estRad' => $caso->estRad,

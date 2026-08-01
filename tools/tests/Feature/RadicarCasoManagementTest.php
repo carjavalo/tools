@@ -518,6 +518,126 @@ test('un caso con cambios nunca se rotula como sin cambios registrados', functio
     expect($filas->pluck('campo'))->toContain('Estado Actual');
 });
 
+test('el copago se guarda con su valor y queda en la bitacora', function () {
+    $admin = User::factory()->create();
+    $cups = Cups::create(['Nombre' => 'Proc', 'Estado' => true]);
+    $caso = RadicarCaso::create(['Ndocumento' => '9100', 'estRad' => '1']);
+
+    $this->actingAs($admin)->putJson("/tools/radicar-solicitud/{$caso->codrad}", [
+        'codMed' => (string) $admin->id,
+        'estRad' => '1',
+        'copago' => true,
+        'valor_copago' => 85000.50,
+        'fentregapro' => '2026-07-31',
+        'fecreci' => '2026-07-30',
+        'fecAutorizacion' => '2026-07-29',
+        'fechavenautorizacion' => '2026-08-29',
+        'procedimientos' => [['cusv_id' => $cups->id, 'N_Autorizacion' => 'A1']],
+    ])->assertOk();
+
+    $caso->refresh();
+    expect($caso->copago)->toBeTrue()
+        ->and((float) $caso->valor_copago)->toBe(85000.50);
+
+    $this->assertDatabaseHas('trazabilidad_caso', [
+        'codrad' => $caso->codrad,
+        'campo' => 'copago',
+        'etiqueta' => 'Copago',
+        'anterior' => 'No',
+        'nuevo' => 'Sí',
+    ]);
+});
+
+test('marcar copago sin valor es rechazado', function () {
+    $admin = User::factory()->create();
+    $cups = Cups::create(['Nombre' => 'Proc', 'Estado' => true]);
+    $caso = RadicarCaso::create(['Ndocumento' => '9200', 'estRad' => '1']);
+
+    $this->actingAs($admin)
+        ->putJson("/tools/radicar-solicitud/{$caso->codrad}", [
+            'codMed' => (string) $admin->id,
+            'estRad' => '1',
+            'copago' => true,
+            'fentregapro' => '2026-07-31',
+            'fecreci' => '2026-07-30',
+            'fecAutorizacion' => '2026-07-29',
+            'fechavenautorizacion' => '2026-08-29',
+            'procedimientos' => [['cusv_id' => $cups->id, 'N_Autorizacion' => 'A1']],
+        ])
+        ->assertStatus(422)
+        ->assertJsonValidationErrors(['valor_copago']);
+});
+
+test('desmarcar el copago borra el valor guardado', function () {
+    $admin = User::factory()->create();
+    $cups = Cups::create(['Nombre' => 'Proc', 'Estado' => true]);
+    $caso = RadicarCaso::create([
+        'Ndocumento' => '9300',
+        'estRad' => '1',
+        'copago' => true,
+        'valor_copago' => 50000,
+    ]);
+
+    $this->actingAs($admin)->putJson("/tools/radicar-solicitud/{$caso->codrad}", [
+        'codMed' => (string) $admin->id,
+        'estRad' => '1',
+        'copago' => false,
+        // Aunque llegue un valor, sin copago no debe conservarse.
+        'valor_copago' => 50000,
+        'fentregapro' => '2026-07-31',
+        'fecreci' => '2026-07-30',
+        'fecAutorizacion' => '2026-07-29',
+        'fechavenautorizacion' => '2026-08-29',
+        'procedimientos' => [['cusv_id' => $cups->id, 'N_Autorizacion' => 'A1']],
+    ])->assertOk();
+
+    $caso->refresh();
+    expect($caso->copago)->toBeFalse()
+        ->and($caso->valor_copago)->toBeNull();
+});
+
+test('el copago aparece en la grilla de informes', function () {
+    $user = User::factory()->create();
+    $conCopago = RadicarCaso::create([
+        'Ndocumento' => '9500',
+        'estRad' => '1',
+        'copago' => true,
+        'valor_copago' => 85000.50,
+    ]);
+    $sinCopago = RadicarCaso::create(['Ndocumento' => '9501', 'estRad' => '1']);
+
+    $rows = collect(
+        $this->actingAs($user)
+            ->getJson('/tools/radicar-solicitud/informe')
+            ->assertOk()
+            ->json('rows')
+    );
+
+    $con = $rows->firstWhere('codrad', $conCopago->codrad);
+    $sin = $rows->firstWhere('codrad', $sinCopago->codrad);
+
+    expect($con['copago'])->toBeTrue()
+        ->and($con['valorCopago'])->toBe('85000.50')
+        ->and($sin['copago'])->toBeFalse()
+        ->and($sin['valorCopago'])->toBeNull();
+});
+
+test('el copago viaja en la consulta del caso', function () {
+    $user = User::factory()->create();
+    $caso = RadicarCaso::create([
+        'Ndocumento' => '9400',
+        'estRad' => '1',
+        'copago' => true,
+        'valor_copago' => 12345.67,
+    ]);
+
+    $this->actingAs($user)
+        ->getJson('/tools/radicar-solicitud/buscar-caso?q='.$caso->codrad)
+        ->assertOk()
+        ->assertJsonPath('caso.copago', true)
+        ->assertJsonPath('caso.valorCopago', '12345.67');
+});
+
 test('borrar un caso borra tambien su bitacora', function () {
     $admin = User::factory()->create();
     $caso = RadicarCaso::create(['Ndocumento' => '8400', 'estRad' => '1']);

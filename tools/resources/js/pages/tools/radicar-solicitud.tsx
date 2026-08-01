@@ -1,4 +1,5 @@
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
     Dialog,
     DialogContent,
@@ -169,6 +170,8 @@ interface CasoDetalle {
     medico: string;
     fechaRecibido: string | null;
     estadoActual: string;
+    copago: boolean;
+    valorCopago: string | number | null;
     codMed: string | null;
     estRad: string | null;
     fecreci: string | null;
@@ -193,6 +196,8 @@ interface InformeRow {
     documento: string;
     fechaRecibido: string | null;
     estado: string;
+    copago: boolean;
+    valorCopago: string | number | null;
     medico: string;
     motivo: string;
     estadoSecundario: string;
@@ -214,6 +219,8 @@ type RadicarForm = {
     Ndocumento: string;
     convenio: string;
     estRad: string;
+    copago: boolean;
+    valor_copago: string;
     fentregapro: string;
     estcod: string;
     fecAutorizacion: string;
@@ -274,6 +281,19 @@ const EMPTY_INF = {
     subespecialidad: '',
     estado: '',
 };
+
+/** Muestra un monto en pesos; '—' cuando no hay valor. */
+function formatoMoneda(valor: string | number | null | undefined): string {
+    if (valor === null || valor === undefined || valor === '') return '—';
+    const n = Number(valor);
+    if (Number.isNaN(n)) return String(valor);
+
+    return new Intl.NumberFormat('es-CO', {
+        style: 'currency',
+        currency: 'COP',
+        minimumFractionDigits: 0,
+    }).format(n);
+}
 
 /** Lee el token XSRF de la cookie para enviarlo en peticiones POST por fetch. */
 function getXsrfToken(): string {
@@ -499,6 +519,8 @@ export default function RadicarSolicitud({
     const [modif, setModif] = useState({
         codMed: '',
         estRad: '',
+        copago: false,
+        valor_copago: '',
         fentregapro: '',
         fecreci: '',
         fecAutorizacion: '',
@@ -529,6 +551,8 @@ export default function RadicarSolicitud({
         Ndocumento: '',
         convenio: '',
         estRad: defaultEstadoId ? String(defaultEstadoId) : '',
+        copago: false,
+        valor_copago: '',
         // Se precarga con la fecha actual, igual que "Fecha Recibido (Manual)".
         fentregapro: today,
         estcod: '',
@@ -962,6 +986,9 @@ export default function RadicarSolicitud({
         setModif({
             codMed: caso.codMed ?? '',
             estRad: caso.estRad ?? '',
+            copago: caso.copago ?? false,
+            valor_copago:
+                caso.valorCopago != null ? String(caso.valorCopago) : '',
             fentregapro: caso.entregaProg ?? '',
             fecreci: caso.fecreci ?? '',
             fecAutorizacion: caso.fechaAutorizacion ?? '',
@@ -1825,6 +1852,58 @@ export default function RadicarSolicitud({
                                             </span>
                                         )}
                                     </Field>
+
+                                    <Field label="Copago">
+                                        <div className="flex items-center gap-3">
+                                            <label className="flex h-9 cursor-pointer items-center gap-2 text-sm">
+                                                <Checkbox
+                                                    checked={form.data.copago}
+                                                    onCheckedChange={(v) => {
+                                                        const marcado =
+                                                            v === true;
+                                                        form.setData(
+                                                            'copago',
+                                                            marcado,
+                                                        );
+                                                        // Al desmarcar no queda
+                                                        // un valor colgado.
+                                                        if (!marcado) {
+                                                            form.setData(
+                                                                'valor_copago',
+                                                                '',
+                                                            );
+                                                        }
+                                                    }}
+                                                />
+                                                <span className="text-foreground">
+                                                    Aplica
+                                                </span>
+                                            </label>
+                                            {form.data.copago && (
+                                                <Input
+                                                    type="number"
+                                                    min="0"
+                                                    step="0.01"
+                                                    value={
+                                                        form.data.valor_copago
+                                                    }
+                                                    onChange={(e) =>
+                                                        form.setData(
+                                                            'valor_copago',
+                                                            e.target.value,
+                                                        )
+                                                    }
+                                                    placeholder="Valor"
+                                                    className="flex-1"
+                                                />
+                                            )}
+                                        </div>
+                                        {form.errors.valor_copago && (
+                                            <span className="text-xs text-red-600">
+                                                {form.errors.valor_copago}
+                                            </span>
+                                        )}
+                                    </Field>
                                 </div>
 
                                 {/* Bloque de procedimientos / autorizaciones */}
@@ -2358,6 +2437,21 @@ export default function RadicarSolicitud({
                                             <Dato
                                                 label="Vencimiento Aut."
                                                 value={caso.vencimientoAut}
+                                            />
+                                            <Dato
+                                                label="Copago"
+                                                value={
+                                                    caso.copago ? (
+                                                        <span className="font-semibold text-foreground">
+                                                            Sí —{' '}
+                                                            {formatoMoneda(
+                                                                caso.valorCopago,
+                                                            )}
+                                                        </span>
+                                                    ) : (
+                                                        'No'
+                                                    )
+                                                }
                                             />
                                         </div>
                                     </div>
@@ -3163,6 +3257,9 @@ export default function RadicarSolicitud({
                                                     Estado
                                                 </th>
                                                 <th className="px-3 py-2 font-medium">
+                                                    Copago
+                                                </th>
+                                                <th className="px-3 py-2 font-medium">
                                                     Médico
                                                 </th>
                                                 <th className="px-3 py-2 font-medium">
@@ -3249,6 +3346,20 @@ export default function RadicarSolicitud({
                                                     </td>
                                                     <td className="px-3 py-2">
                                                         {r.estado}
+                                                    </td>
+                                                    <td className="px-3 py-2 whitespace-nowrap">
+                                                        {r.copago ? (
+                                                            <span className="font-medium text-foreground">
+                                                                Sí ·{' '}
+                                                                {formatoMoneda(
+                                                                    r.valorCopago,
+                                                                )}
+                                                            </span>
+                                                        ) : (
+                                                            <span className="text-muted-foreground">
+                                                                No
+                                                            </span>
+                                                        )}
                                                     </td>
                                                     <td className="px-3 py-2">
                                                         {r.medico}
@@ -3888,6 +3999,45 @@ export default function RadicarSolicitud({
                                     )
                                 }
                             />
+                        </div>
+                        <div className="grid gap-2 sm:col-span-2">
+                            <Label>Copago</Label>
+                            <div className="flex items-center gap-3">
+                                <label className="flex h-9 cursor-pointer items-center gap-2 text-sm">
+                                    <Checkbox
+                                        checked={modif.copago}
+                                        onCheckedChange={(v) => {
+                                            const marcado = v === true;
+                                            setModif((prev) => ({
+                                                ...prev,
+                                                copago: marcado,
+                                                valor_copago: marcado
+                                                    ? prev.valor_copago
+                                                    : '',
+                                            }));
+                                        }}
+                                    />
+                                    <span className="text-foreground">
+                                        Aplica
+                                    </span>
+                                </label>
+                                {modif.copago && (
+                                    <Input
+                                        type="number"
+                                        min="0"
+                                        step="0.01"
+                                        value={modif.valor_copago}
+                                        onChange={(e) =>
+                                            setModifField(
+                                                'valor_copago',
+                                                e.target.value,
+                                            )
+                                        }
+                                        placeholder="Valor"
+                                        className="flex-1"
+                                    />
+                                )}
+                            </div>
                         </div>
                         <div className="grid gap-2 sm:col-span-2">
                             <Label>OB TFX</Label>
