@@ -16,6 +16,8 @@ use App\Models\SeguimientoCaso;
 use App\Models\SubEspecialidad;
 use App\Models\TrazabilidadCaso;
 use App\Models\User;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 use Inertia\Testing\AssertableInertia as Assert;
 
 test('guests cannot access radicar solicitud', function () {
@@ -620,6 +622,100 @@ test('el copago aparece en la grilla de informes', function () {
         ->and($con['valorCopago'])->toBe('85000.50')
         ->and($sin['copago'])->toBeFalse()
         ->and($sin['valorCopago'])->toBeNull();
+});
+
+test('el paquete se sube, se reemplaza y borra el archivo anterior', function () {
+    Storage::fake('public');
+    $admin = User::factory()->create();
+    $cups = Cups::create(['Nombre' => 'Proc', 'Estado' => true]);
+    $caso = RadicarCaso::create(['Ndocumento' => '9600', 'estRad' => '1']);
+
+    $base = [
+        'codMed' => (string) $admin->id,
+        'estRad' => '1',
+        'copago' => false,
+        'fentregapro' => '2026-07-31',
+        'fecreci' => '2026-07-30',
+        'fecAutorizacion' => '2026-07-29',
+        'fechavenautorizacion' => '2026-08-29',
+        'procedimientos' => [['cusv_id' => $cups->id, 'N_Autorizacion' => 'A1']],
+    ];
+
+    $this->actingAs($admin)->put("/tools/radicar-solicitud/{$caso->codrad}", $base + [
+        'paquete' => UploadedFile::fake()->create('uno.pdf', 1024, 'application/pdf'),
+    ])->assertOk();
+
+    $primero = $caso->refresh()->paquete;
+    expect($primero)->not->toBeNull();
+    Storage::disk('public')->assertExists($primero);
+
+    // Al reemplazarlo, el anterior no debe quedar ocupando disco.
+    $this->actingAs($admin)->put("/tools/radicar-solicitud/{$caso->codrad}", $base + [
+        'paquete' => UploadedFile::fake()->create('dos.pdf', 512, 'application/pdf'),
+    ])->assertOk();
+
+    $segundo = $caso->refresh()->paquete;
+    expect($segundo)->not->toBe($primero);
+    Storage::disk('public')->assertExists($segundo);
+    Storage::disk('public')->assertMissing($primero);
+
+    // Sin archivo nuevo se conserva el que ya tenía.
+    $this->actingAs($admin)
+        ->put("/tools/radicar-solicitud/{$caso->codrad}", $base)
+        ->assertOk();
+    expect($caso->refresh()->paquete)->toBe($segundo);
+});
+
+test('el paquete rechaza archivos que no sean PDF o pasen de 30 MB', function () {
+    Storage::fake('public');
+    $admin = User::factory()->create();
+    $cups = Cups::create(['Nombre' => 'Proc', 'Estado' => true]);
+    $caso = RadicarCaso::create(['Ndocumento' => '9700', 'estRad' => '1']);
+
+    $base = [
+        'codMed' => (string) $admin->id,
+        'estRad' => '1',
+        'copago' => false,
+        'fentregapro' => '2026-07-31',
+        'fecreci' => '2026-07-30',
+        'fecAutorizacion' => '2026-07-29',
+        'fechavenautorizacion' => '2026-08-29',
+        'procedimientos' => [['cusv_id' => $cups->id, 'N_Autorizacion' => 'A1']],
+    ];
+
+    $this->actingAs($admin)
+        ->putJson("/tools/radicar-solicitud/{$caso->codrad}", $base + [
+            'paquete' => UploadedFile::fake()->create('grande.pdf', 31 * 1024, 'application/pdf'),
+        ])
+        ->assertStatus(422)
+        ->assertJsonValidationErrors(['paquete']);
+
+    $this->actingAs($admin)
+        ->putJson("/tools/radicar-solicitud/{$caso->codrad}", $base + [
+            'paquete' => UploadedFile::fake()->create('hoja.xlsx', 10),
+        ])
+        ->assertStatus(422)
+        ->assertJsonValidationErrors(['paquete']);
+
+    expect($caso->refresh()->paquete)->toBeNull();
+});
+
+test('borrar un caso borra tambien el PDF del paquete', function () {
+    Storage::fake('public');
+    $admin = User::factory()->create();
+    $caso = RadicarCaso::create(['Ndocumento' => '9800', 'estRad' => '1']);
+    $ruta = UploadedFile::fake()
+        ->create('adj.pdf', 100, 'application/pdf')
+        ->store('paquetes', 'public');
+    $caso->update(['paquete' => $ruta]);
+
+    Storage::disk('public')->assertExists($ruta);
+
+    $this->actingAs($admin)
+        ->deleteJson("/tools/radicar-solicitud/{$caso->codrad}")
+        ->assertOk();
+
+    Storage::disk('public')->assertMissing($ruta);
 });
 
 test('el copago viaja en la consulta del caso', function () {

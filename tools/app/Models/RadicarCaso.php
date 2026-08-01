@@ -33,6 +33,7 @@ class RadicarCaso extends Model
         'convenio',
         'copago',
         'valor_copago',
+        'paquete',
         'estRad',
         'fentregapro',
         'codestsecundario',

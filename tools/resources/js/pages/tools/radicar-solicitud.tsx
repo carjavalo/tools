@@ -172,6 +172,8 @@ interface CasoDetalle {
     estadoActual: string;
     copago: boolean;
     valorCopago: string | number | null;
+    paquete: string | null;
+    paqueteUrl: string | null;
     codMed: string | null;
     estRad: string | null;
     fecreci: string | null;
@@ -198,6 +200,7 @@ interface InformeRow {
     estado: string;
     copago: boolean;
     valorCopago: string | number | null;
+    paqueteUrl: string | null;
     medico: string;
     motivo: string;
     estadoSecundario: string;
@@ -221,6 +224,7 @@ type RadicarForm = {
     estRad: string;
     copago: boolean;
     valor_copago: string;
+    paquete: File | null;
     fentregapro: string;
     estcod: string;
     fecAutorizacion: string;
@@ -521,6 +525,7 @@ export default function RadicarSolicitud({
         estRad: '',
         copago: false,
         valor_copago: '',
+        paquete: null as File | null,
         fentregapro: '',
         fecreci: '',
         fecAutorizacion: '',
@@ -553,6 +558,7 @@ export default function RadicarSolicitud({
         estRad: defaultEstadoId ? String(defaultEstadoId) : '',
         copago: false,
         valor_copago: '',
+        paquete: null as File | null,
         // Se precarga con la fecha actual, igual que "Fecha Recibido (Manual)".
         fentregapro: today,
         estcod: '',
@@ -989,6 +995,9 @@ export default function RadicarSolicitud({
             copago: caso.copago ?? false,
             valor_copago:
                 caso.valorCopago != null ? String(caso.valorCopago) : '',
+            // Solo se manda si el usuario sube uno nuevo; de lo contrario el
+            // caso conserva el PDF que ya tenía.
+            paquete: null,
             fentregapro: caso.entregaProg ?? '',
             fecreci: caso.fecreci ?? '',
             fecAutorizacion: caso.fechaAutorizacion ?? '',
@@ -1050,21 +1059,44 @@ export default function RadicarSolicitud({
         if (!caso) return;
         setModifSaving(true);
         setModifError(null);
+
+        // Va como multipart porque puede llevar el PDF del paquete. PHP no
+        // interpreta el cuerpo de un PUT multipart, así que se envía por POST
+        // con _method=PUT y Laravel lo enruta al método de actualización.
+        const fd = new FormData();
+        fd.append('_method', 'PUT');
+        fd.append('codMed', modif.codMed);
+        fd.append('estRad', modif.estRad);
+        fd.append('copago', modif.copago ? '1' : '0');
+        if (modif.copago) {
+            fd.append('valor_copago', modif.valor_copago);
+        }
+        fd.append('fentregapro', modif.fentregapro);
+        fd.append('fecreci', modif.fecreci);
+        fd.append('fecAutorizacion', modif.fecAutorizacion);
+        fd.append('fechavenautorizacion', modif.fechavenautorizacion);
+        fd.append('ObservacionTFX', modif.ObservacionTFX);
+        if (modif.paquete) {
+            fd.append('paquete', modif.paquete);
+        }
         // Se descartan renglones de CUPS sin código seleccionado.
-        const payload = {
-            ...modif,
-            procedimientos: modif.procedimientos.filter(
-                (p) => p.cusv_id !== '',
-            ),
-        };
+        modif.procedimientos
+            .filter((p) => p.cusv_id !== '')
+            .forEach((p, i) => {
+                fd.append(`procedimientos[${i}][cusv_id]`, p.cusv_id);
+                fd.append(
+                    `procedimientos[${i}][N_Autorizacion]`,
+                    p.N_Autorizacion,
+                );
+            });
+
         fetch(`/tools/radicar-solicitud/${caso.codrad}`, {
-            method: 'PUT',
+            method: 'POST',
             headers: {
-                'Content-Type': 'application/json',
                 Accept: 'application/json',
                 'X-XSRF-TOKEN': getXsrfToken(),
             },
-            body: JSON.stringify(payload),
+            body: fd,
         })
             .then(async (r) => {
                 if (r.status === 422) {
@@ -1904,6 +1936,30 @@ export default function RadicarSolicitud({
                                             </span>
                                         )}
                                     </Field>
+
+                                    <Field label="Paquete (PDF, máx. 30 MB)">
+                                        <Input
+                                            type="file"
+                                            accept="application/pdf"
+                                            onChange={(e) =>
+                                                form.setData(
+                                                    'paquete',
+                                                    e.target.files?.[0] ?? null,
+                                                )
+                                            }
+                                            className="cursor-pointer file:mr-2 file:cursor-pointer file:rounded file:border-0 file:bg-muted file:px-2 file:py-0.5 file:text-xs"
+                                        />
+                                        {form.data.paquete && (
+                                            <span className="truncate text-xs text-muted-foreground">
+                                                {form.data.paquete.name}
+                                            </span>
+                                        )}
+                                        {form.errors.paquete && (
+                                            <span className="text-xs text-red-600">
+                                                {form.errors.paquete}
+                                            </span>
+                                        )}
+                                    </Field>
                                 </div>
 
                                 {/* Bloque de procedimientos / autorizaciones */}
@@ -2450,6 +2506,25 @@ export default function RadicarSolicitud({
                                                         </span>
                                                     ) : (
                                                         'No'
+                                                    )
+                                                }
+                                            />
+                                            <Dato
+                                                label="Paquete"
+                                                value={
+                                                    caso.paqueteUrl ? (
+                                                        <a
+                                                            href={
+                                                                caso.paqueteUrl
+                                                            }
+                                                            target="_blank"
+                                                            rel="noreferrer"
+                                                            className="font-medium text-[#2d3e83] underline dark:text-white"
+                                                        >
+                                                            {caso.paquete}
+                                                        </a>
+                                                    ) : (
+                                                        '—'
                                                     )
                                                 }
                                             />
@@ -3260,6 +3335,9 @@ export default function RadicarSolicitud({
                                                     Copago
                                                 </th>
                                                 <th className="px-3 py-2 font-medium">
+                                                    Paquete
+                                                </th>
+                                                <th className="px-3 py-2 font-medium">
                                                     Médico
                                                 </th>
                                                 <th className="px-3 py-2 font-medium">
@@ -3358,6 +3436,24 @@ export default function RadicarSolicitud({
                                                         ) : (
                                                             <span className="text-muted-foreground">
                                                                 No
+                                                            </span>
+                                                        )}
+                                                    </td>
+                                                    <td className="px-3 py-2">
+                                                        {r.paqueteUrl ? (
+                                                            <a
+                                                                href={
+                                                                    r.paqueteUrl
+                                                                }
+                                                                target="_blank"
+                                                                rel="noreferrer"
+                                                                className="font-medium text-[#2d3e83] underline dark:text-white"
+                                                            >
+                                                                Ver PDF
+                                                            </a>
+                                                        ) : (
+                                                            <span className="text-muted-foreground">
+                                                                —
                                                             </span>
                                                         )}
                                                     </td>
@@ -4038,6 +4134,43 @@ export default function RadicarSolicitud({
                                     />
                                 )}
                             </div>
+                        </div>
+                        <div className="grid gap-2 sm:col-span-2">
+                            <Label>Paquete (PDF, máx. 30 MB)</Label>
+                            <Input
+                                type="file"
+                                accept="application/pdf"
+                                onChange={(e) =>
+                                    setModif((prev) => ({
+                                        ...prev,
+                                        paquete: e.target.files?.[0] ?? null,
+                                    }))
+                                }
+                                className="cursor-pointer file:mr-2 file:cursor-pointer file:rounded file:border-0 file:bg-muted file:px-2 file:py-0.5 file:text-xs"
+                            />
+                            <span className="text-xs text-muted-foreground">
+                                {modif.paquete ? (
+                                    <>
+                                        Se reemplazará por: {modif.paquete.name}
+                                    </>
+                                ) : caso?.paqueteUrl ? (
+                                    <>
+                                        Actual:{' '}
+                                        <a
+                                            href={caso.paqueteUrl}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            className="underline"
+                                        >
+                                            {caso.paquete}
+                                        </a>
+                                        . Sube uno nuevo solo si quieres
+                                        reemplazarlo.
+                                    </>
+                                ) : (
+                                    'Sin archivo adjunto.'
+                                )}
+                            </span>
                         </div>
                         <div className="grid gap-2 sm:col-span-2">
                             <Label>OB TFX</Label>

@@ -52,6 +52,7 @@ class RadicarCasoController extends Controller
         'convenio' => 'Convenio',
         'copago' => 'Copago',
         'valor_copago' => 'Valor del copago',
+        'paquete' => 'Paquete (PDF)',
         'estRad' => 'Estado Actual',
         'fentregapro' => 'Entrega a Programación',
         'codestsecundario' => 'Estado Secundario',
@@ -632,6 +633,8 @@ class RadicarCasoController extends Controller
      */
     public function store(Request $request): RedirectResponse
     {
+        $this->normalizarCopago($request);
+
         // Todos los campos diligenciables de la vista de Nueva Radicación son
         // obligatorios para cualquier rol. Subespecialidad, Motivo, Estado
         // Secundario y Fecha Recibido / Devolución no se exigen porque no
@@ -652,6 +655,8 @@ class RadicarCasoController extends Controller
                 'min:0',
                 'max:99999999999.99',
             ],
+            // Paquete: documento PDF opcional adjunto a la radicación.
+            'paquete' => $this->reglasPaquete(),
             'estRad' => ['required', 'string', 'max:5'],
             'fentregapro' => ['required', 'date'],
             // Estado secundario se retiró de la vista de Nueva Radicación: lo
@@ -698,6 +703,9 @@ class RadicarCasoController extends Controller
             $data['valor_copago'] = null;
         }
 
+        // El PDF se guarda en disco y en la columna queda solo su ruta.
+        $data['paquete'] = $this->guardarPaquete($request, null);
+
         // El caso, sus procedimientos y su bitácora se guardan o fallan juntos:
         // una radicación sin su registro de creación quedaría fuera del informe.
         $caso = DB::transaction(function () use ($data, $request) {
@@ -741,6 +749,8 @@ class RadicarCasoController extends Controller
      */
     public function actualizarCaso(Request $request, RadicarCaso $caso): JsonResponse
     {
+        $this->normalizarCopago($request);
+
         $data = $request->validate([
             'codMed' => ['required', 'string', 'max:20'],
             'estRad' => ['required', 'string', 'max:5'],
@@ -753,6 +763,8 @@ class RadicarCasoController extends Controller
                 'min:0',
                 'max:99999999999.99',
             ],
+            // Paquete: si no se sube uno nuevo, se conserva el que ya tenía.
+            'paquete' => $this->reglasPaquete(),
             'fentregapro' => ['required', 'date'],
             'fecreci' => ['required', 'date'],
             'fecAutorizacion' => ['required', 'date'],
@@ -781,6 +793,10 @@ class RadicarCasoController extends Controller
             $data['copago'] = false;
             $data['valor_copago'] = null;
         }
+
+        // Sin archivo nuevo se mantiene el que ya estaba; con uno nuevo, el
+        // anterior se borra del disco.
+        $data['paquete'] = $this->guardarPaquete($request, $caso->paquete);
 
         // El cambio y su registro en la bitácora van juntos: si algo falla, no
         // puede quedar un dato modificado sin rastro de quién lo modificó.
@@ -897,6 +913,12 @@ class RadicarCasoController extends Controller
     public function destroyCaso(Request $request, RadicarCaso $caso): JsonResponse
     {
         abort_unless($request->user()?->isSuperAdmin() ?? false, 403);
+
+        // El PDF del paquete se va con el caso: si no, queda ocupando disco
+        // sin ninguna fila que lo referencie.
+        if ($caso->paquete) {
+            Storage::disk('public')->delete($caso->paquete);
+        }
 
         CupsAnezado::where('codRadicado', (string) $caso->codrad)->delete();
         SeguimientoCaso::where('codrad', $caso->codrad)->delete();
@@ -1051,6 +1073,9 @@ class RadicarCasoController extends Controller
                 'subespecialidad' => $subesp[$caso->codsubesp] ?? '—',
                 'copago' => (bool) $caso->copago,
                 'valorCopago' => $caso->valor_copago,
+                'paqueteUrl' => $caso->paquete
+                    ? Storage::disk('public')->url($caso->paquete)
+                    : null,
             ];
         };
 
@@ -1228,6 +1253,8 @@ class RadicarCasoController extends Controller
 
         $nombre = match ($campo) {
             'valor_copago' => '$'.number_format((float) $plano, 2, ',', '.'),
+            // De la ruta guardada solo interesa el nombre del archivo.
+            'paquete' => basename($plano),
             'estRad' => EstRadicado::find($plano)?->Nombre,
             'codestsecundario' => EstRadisecundario::find($plano)?->Nombre,
             'estcod' => Motivo::find($plano)?->Nombre,
@@ -1337,6 +1364,51 @@ class RadicarCasoController extends Controller
     }
 
     /**
+     * Deja 'copago' como booleano real en la petición.
+     *
+     * El formulario viaja como multipart porque lleva el PDF del paquete, y
+     * ahí un booleano llega como '1' o '0'. Las reglas exclude_if/required_if
+     * solo convierten sus parámetros a booleano cuando el campo comparado ya
+     * lo es: sin esta normalización, 'required_if:copago,true' nunca se
+     * dispararía y se podría guardar un copago sin valor.
+     */
+    private function normalizarCopago(Request $request): void
+    {
+        $request->merge(['copago' => $request->boolean('copago')]);
+    }
+
+    /**
+     * Regla de validación del PDF del paquete. 30 MB expresados en kilobytes,
+     * que es la unidad que espera la regla 'max' de Laravel para archivos.
+     *
+     * @return array<int, string>
+     */
+    private function reglasPaquete(): array
+    {
+        return ['nullable', 'file', 'mimes:pdf', 'max:'.(30 * 1024)];
+    }
+
+    /**
+     * Guarda el PDF del paquete si viene en la petición y devuelve su ruta.
+     * Al reemplazarlo elimina el anterior para no dejar archivos huérfanos
+     * ocupando disco.
+     */
+    private function guardarPaquete(Request $request, ?string $anterior): ?string
+    {
+        $archivo = $request->file('paquete');
+
+        if (! $archivo) {
+            return $anterior;
+        }
+
+        if ($anterior) {
+            Storage::disk('public')->delete($anterior);
+        }
+
+        return $archivo->store('paquetes', 'public');
+    }
+
+    /**
      * Firma legible de las cotizaciones de un caso, para comparar el antes y
      * el después cuando se guardan en bloque.
      */
@@ -1419,6 +1491,10 @@ class RadicarCasoController extends Controller
             'estadoActual' => $estado?->Nombre ?? '—',
             'copago' => (bool) $caso->copago,
             'valorCopago' => $caso->valor_copago,
+            'paquete' => $caso->paquete ? basename($caso->paquete) : null,
+            'paqueteUrl' => $caso->paquete
+                ? Storage::disk('public')->url($caso->paquete)
+                : null,
             // Valores crudos para el modal de Modificar Radicado.
             'codMed' => $caso->codMed,
             'estRad' => $caso->estRad,
