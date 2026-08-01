@@ -80,6 +80,7 @@ Route::prefix('tools')->name('tools.')->group(function () {
         Route::get('radicar-solicitud/editar-paciente', [App\Http\Controllers\RadicarCasoController::class, 'editarPaciente'])->name('radicar-solicitud.editar-paciente');
         Route::put('radicar-solicitud/paciente/{user}', [App\Http\Controllers\RadicarCasoController::class, 'actualizarPaciente'])->name('radicar-solicitud.actualizar-paciente');
         Route::get('radicar-solicitud/buscar-caso', [App\Http\Controllers\RadicarCasoController::class, 'buscarCaso'])->name('radicar-solicitud.buscar-caso');
+        Route::get('radicar-solicitud/{caso}/paquete', [App\Http\Controllers\RadicarCasoController::class, 'verPaquete'])->name('radicar-solicitud.paquete');
         Route::get('radicar-solicitud/informe', [App\Http\Controllers\RadicarCasoController::class, 'informe'])->name('radicar-solicitud.informe');
         Route::post('radicar-solicitud/{caso}/seguimiento', [App\Http\Controllers\RadicarCasoController::class, 'aplicarModificacion'])->name('radicar-solicitud.seguimiento');
         Route::put('radicar-solicitud/{caso}', [App\Http\Controllers\RadicarCasoController::class, 'actualizarCaso'])->name('radicar-solicitud.actualizar-caso');

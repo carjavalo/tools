@@ -700,6 +700,81 @@ test('el paquete rechaza archivos que no sean PDF o pasen de 30 MB', function ()
     expect($caso->refresh()->paquete)->toBeNull();
 });
 
+test('las fechas del caso llegan como Y-m-d y no en formato ISO', function () {
+    $user = User::factory()->create();
+    $caso = RadicarCaso::create([
+        'Ndocumento' => '9920',
+        'estRad' => '1',
+        'fecreci' => '2026-07-30',
+        'fentregapro' => '2026-07-30',
+        'fecAutorizacion' => '2026-05-04',
+        'fechavenautorizacion' => '2026-11-04',
+    ]);
+
+    // Sin formatear saldrían como 2026-07-30T00:00:00.000000Z, que además
+    // deja vacío el <input type="date"> del modal Modificar Radicado.
+    $this->actingAs($user)
+        ->getJson('/tools/radicar-solicitud/buscar-caso?q='.$caso->codrad)
+        ->assertOk()
+        ->assertJsonPath('caso.fecreci', '2026-07-30')
+        ->assertJsonPath('caso.entregaProg', '2026-07-30')
+        ->assertJsonPath('caso.fechaAutorizacion', '2026-05-04')
+        ->assertJsonPath('caso.vencimientoAut', '2026-11-04');
+});
+
+test('las fechas del informe llegan como Y-m-d', function () {
+    $user = User::factory()->create();
+    $caso = RadicarCaso::create(['Ndocumento' => '9930', 'estRad' => '1']);
+    SeguimientoCaso::create([
+        'codrad' => $caso->codrad,
+        'user_id' => $user->id,
+        'fecreci' => '2026-07-15',
+        'venc_anestesia' => '2026-09-01',
+    ]);
+
+    $fila = collect(
+        $this->actingAs($user)
+            ->getJson('/tools/radicar-solicitud/informe?consecutivo='.$caso->codrad)
+            ->assertOk()
+            ->json('rows')
+    )->firstWhere('tipo', 'Seguimiento');
+
+    expect($fila['fechaRecibidoDev'])->toBe('2026-07-15')
+        ->and($fila['vencAnestesia'])->toBe('2026-09-01');
+});
+
+test('el paquete se visualiza en linea por una ruta protegida', function () {
+    Storage::fake('public');
+    $user = User::factory()->create();
+    $caso = RadicarCaso::create(['Ndocumento' => '9900', 'estRad' => '1']);
+    $ruta = UploadedFile::fake()
+        ->create('paquete.pdf', 200, 'application/pdf')
+        ->store('paquetes', 'public');
+    $caso->update(['paquete' => $ruta]);
+
+    $res = $this->actingAs($user)
+        ->get("/tools/radicar-solicitud/{$caso->codrad}/paquete")
+        ->assertOk();
+
+    // Inline para que el navegador lo muestre en vez de descargarlo.
+    expect($res->headers->get('Content-Type'))->toBe('application/pdf');
+    expect($res->headers->get('Content-Disposition'))->toContain('inline');
+
+    // Un invitado no puede verlo.
+    auth()->logout();
+    $this->get("/tools/radicar-solicitud/{$caso->codrad}/paquete")
+        ->assertRedirect(route('login'));
+});
+
+test('un caso sin paquete responde 404 al pedir el PDF', function () {
+    $user = User::factory()->create();
+    $caso = RadicarCaso::create(['Ndocumento' => '9910', 'estRad' => '1']);
+
+    $this->actingAs($user)
+        ->get("/tools/radicar-solicitud/{$caso->codrad}/paquete")
+        ->assertNotFound();
+});
+
 test('borrar un caso borra tambien el PDF del paquete', function () {
     Storage::fake('public');
     $admin = User::factory()->create();

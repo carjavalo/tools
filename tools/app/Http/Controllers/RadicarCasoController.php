@@ -1143,8 +1143,8 @@ class RadicarCasoController extends Controller
                 'estadoSecundario' => $estadosSec[(int) $s->codestsecundario] ?? '—',
                 // La subespecialidad del seguimiento manda sobre la del caso.
                 'subespecialidad' => $subesp[$s->codsubesp] ?? $base['subespecialidad'],
-                'fechaRecibidoDev' => $s->fecreci,
-                'vencAnestesia' => $s->venc_anestesia,
+                'fechaRecibidoDev' => optional($s->fecreci)->format('Y-m-d'),
+                'vencAnestesia' => optional($s->venc_anestesia)->format('Y-m-d'),
                 'observacion' => $s->ObservacionCCX,
                 'estadoQx' => $s->estado_qx ?? '—',
                 'usuario' => $this->nombreUsuario($s->user) ?? '—',
@@ -1378,6 +1378,27 @@ class RadicarCasoController extends Controller
     }
 
     /**
+     * Muestra el PDF del paquete dentro del navegador.
+     *
+     * Se sirve por esta ruta y no por la URL pública de storage para que el
+     * archivo quede sujeto a los mismos permisos que la vista: solo lo ve
+     * quien puede entrar a Radicar Solicitud. Va con Content-Disposition
+     * inline para que el navegador lo muestre en lugar de descargarlo.
+     */
+    public function verPaquete(Request $request, RadicarCaso $caso)
+    {
+        abort_unless($caso->paquete, 404);
+
+        $disco = Storage::disk('public');
+        abort_unless($disco->exists($caso->paquete), 404);
+
+        return response()->file($disco->path($caso->paquete), [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' => 'inline; filename="'.basename($caso->paquete).'"',
+        ]);
+    }
+
+    /**
      * Regla de validación del PDF del paquete. 30 MB expresados en kilobytes,
      * que es la unidad que espera la regla 'max' de Laravel para archivos.
      *
@@ -1492,16 +1513,21 @@ class RadicarCasoController extends Controller
             'copago' => (bool) $caso->copago,
             'valorCopago' => $caso->valor_copago,
             'paquete' => $caso->paquete ? basename($caso->paquete) : null,
+            // Se sirve por la ruta protegida, no por la URL pública del disco.
             'paqueteUrl' => $caso->paquete
-                ? Storage::disk('public')->url($caso->paquete)
+                ? route('tools.radicar-solicitud.paquete', $caso->codrad)
                 : null,
             // Valores crudos para el modal de Modificar Radicado.
             'codMed' => $caso->codMed,
             'estRad' => $caso->estRad,
-            'fecreci' => $caso->fecreci,
-            'entregaProg' => $caso->fentregapro,
-            'fechaAutorizacion' => $caso->fecAutorizacion,
-            'vencimientoAut' => $caso->fechavenautorizacion,
+            // Se formatean aquí: el casteo 'date:Y-m-d' solo aplica cuando se
+            // serializa el modelo entero. Al meter el Carbon suelto en este
+            // arreglo saldría como 2026-07-30T00:00:00.000000Z, que además
+            // deja vacío el <input type="date"> de Modificar Radicado.
+            'fecreci' => optional($caso->fecreci)->format('Y-m-d'),
+            'entregaProg' => optional($caso->fentregapro)->format('Y-m-d'),
+            'fechaAutorizacion' => optional($caso->fecAutorizacion)->format('Y-m-d'),
+            'vencimientoAut' => optional($caso->fechavenautorizacion)->format('Y-m-d'),
             'ObservacionTFX' => $caso->ObservacionTFX,
             'procedimientos' => $procedimientos,
             'autorizaciones' => $procs->pluck('N_Autorizacion')->filter()->values(),

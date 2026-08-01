@@ -27,6 +27,7 @@ import {
     BarChart3,
     CheckCircle2,
     ChevronDown,
+    Eye,
     FilePlus2,
     FileText,
     LoaderCircle,
@@ -518,6 +519,8 @@ export default function RadicarSolicitud({
     const [borrarOpen, setBorrarOpen] = useState(false);
     // Modificar radicado (botón del Historial)
     const [modifOpen, setModifOpen] = useState(false);
+    // Visor del PDF del paquete dentro de la misma vista.
+    const [paqueteOpen, setPaqueteOpen] = useState(false);
     const [modifSaving, setModifSaving] = useState(false);
     const [modifError, setModifError] = useState<string | null>(null);
     const [modif, setModif] = useState({
@@ -2513,16 +2516,19 @@ export default function RadicarSolicitud({
                                                 label="Paquete"
                                                 value={
                                                     caso.paqueteUrl ? (
-                                                        <a
-                                                            href={
-                                                                caso.paqueteUrl
+                                                        <button
+                                                            type="button"
+                                                            onClick={() =>
+                                                                setPaqueteOpen(
+                                                                    true,
+                                                                )
                                                             }
-                                                            target="_blank"
-                                                            rel="noreferrer"
-                                                            className="font-medium text-[#2d3e83] underline dark:text-white"
+                                                            title={`Visualizar ${caso.paquete}`}
+                                                            className="inline-flex items-center gap-1.5 rounded-md bg-[#2d3e83]/10 px-2.5 py-1 text-xs font-medium text-[#2d3e83] transition-colors hover:bg-[#2d3e83]/20 dark:bg-white/10 dark:text-white"
                                                         >
-                                                            {caso.paquete}
-                                                        </a>
+                                                            <Eye className="size-3.5" />
+                                                            Ver PDF
+                                                        </button>
                                                     ) : (
                                                         '—'
                                                     )
@@ -3976,6 +3982,39 @@ export default function RadicarSolicitud({
                                 <LoaderCircle className="size-4 animate-spin" />
                             )}
                             Eliminar
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Visor del paquete: se muestra dentro de la vista, sin salir de
+                ella y sin exponer la ruta del archivo en el disco. */}
+            <Dialog open={paqueteOpen} onOpenChange={setPaqueteOpen}>
+                <DialogContent className="max-w-5xl">
+                    <DialogHeader>
+                        <DialogTitle>
+                            Paquete — Caso #{caso?.codrad}
+                        </DialogTitle>
+                        <DialogDescription>
+                            {caso?.paquete ?? 'Documento adjunto'}
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    {caso?.paqueteUrl && (
+                        <iframe
+                            src={caso.paqueteUrl}
+                            title={`Paquete del caso ${caso.codrad}`}
+                            className="h-[75vh] w-full rounded-lg border"
+                        />
+                    )}
+
+                    <DialogFooter>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => setPaqueteOpen(false)}
+                        >
+                            Cerrar
                         </Button>
                     </DialogFooter>
                 </DialogContent>
