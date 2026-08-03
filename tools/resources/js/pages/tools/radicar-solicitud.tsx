@@ -300,6 +300,44 @@ function formatoMoneda(valor: string | number | null | undefined): string {
     }).format(n);
 }
 
+/**
+ * Convierte una respuesta fallida en un mensaje que diga qué pasó.
+ *
+ * Un texto genérico obliga a ir al log del servidor para saber si fue la
+ * sesión, el tamaño del archivo o un error de la aplicación; aquí se
+ * distinguen los casos que el usuario puede resolver por su cuenta.
+ */
+async function mensajeDeError(r: Response): Promise<string> {
+    if (r.status === 419) {
+        return 'Tu sesión expiró. Recarga la página (F5) e intenta de nuevo.';
+    }
+    if (r.status === 413) {
+        return 'El archivo es demasiado grande para el servidor. Sube un PDF más liviano o pide que aumenten el límite de subida.';
+    }
+    if (r.status === 403) {
+        return 'No tienes permiso para realizar esta acción.';
+    }
+    if (r.status === 401) {
+        return 'Tu sesión se cerró. Vuelve a iniciar sesión.';
+    }
+
+    // El servidor puede responder JSON con un mensaje útil.
+    try {
+        const d = await r.clone().json();
+        if (typeof d?.message === 'string' && d.message !== '') {
+            return `${d.message} (error ${r.status})`;
+        }
+    } catch {
+        // La respuesta no era JSON: se usa el mensaje por código.
+    }
+
+    if (r.status >= 500) {
+        return `El servidor respondió con un error ${r.status}. Revisa storage/logs/laravel.log para el detalle.`;
+    }
+
+    return `No fue posible completar la operación (error ${r.status}).`;
+}
+
 /** Lee el token XSRF de la cookie para enviarlo en peticiones POST por fetch. */
 function getXsrfToken(): string {
     const m = document.cookie.match(/XSRF-TOKEN=([^;]+)/);
@@ -1111,7 +1149,7 @@ export default function RadicarSolicitud({
                     return null;
                 }
                 if (!r.ok) {
-                    setModifError('No fue posible modificar el radicado.');
+                    setModifError(await mensajeDeError(r));
                     return null;
                 }
                 return r.json();
@@ -1253,7 +1291,7 @@ export default function RadicarSolicitud({
                     return null;
                 }
                 if (!r.ok) {
-                    setCotError('No fue posible guardar las cotizaciones.');
+                    setCotError(await mensajeDeError(r));
                     return null;
                 }
                 return r.json();

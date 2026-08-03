@@ -743,6 +743,39 @@ test('las fechas del informe llegan como Y-m-d', function () {
         ->and($fila['vencAnestesia'])->toBe('2026-09-01');
 });
 
+test('modificar el radicado funciona por POST con _method=PUT y multipart', function () {
+    // Es exactamente lo que hace el modal Modificar Radicado: PHP no
+    // interpreta el cuerpo de un PUT multipart, así que el navegador manda
+    // POST con _method=PUT. Las demás pruebas usan ->put() y no cubren
+    // este camino.
+    Storage::fake('public');
+    $admin = User::factory()->create();
+    $cups = Cups::create(['Nombre' => 'Proc', 'Estado' => true]);
+    $caso = RadicarCaso::create(['Ndocumento' => '9940', 'estRad' => '1']);
+
+    $this->actingAs($admin)->post("/tools/radicar-solicitud/{$caso->codrad}", [
+        '_method' => 'PUT',
+        'codMed' => (string) $admin->id,
+        'estRad' => '1',
+        'copago' => '1',
+        'valor_copago' => '3600000',
+        'fentregapro' => '2026-08-07',
+        'fecreci' => '2026-08-07',
+        'fecAutorizacion' => '2026-08-07',
+        'fechavenautorizacion' => '2026-08-14',
+        'ObservacionTFX' => 'pendientes de tramite',
+        'paquete' => UploadedFile::fake()->create('adj.pdf', 300, 'application/pdf'),
+        'procedimientos' => [
+            ['cusv_id' => (string) $cups->id, 'N_Autorizacion' => '36235'],
+        ],
+    ])->assertOk();
+
+    $caso->refresh();
+    expect($caso->copago)->toBeTrue()
+        ->and((float) $caso->valor_copago)->toBe(3600000.0)
+        ->and($caso->paquete)->not->toBeNull();
+});
+
 test('el paquete se visualiza en linea por una ruta protegida', function () {
     Storage::fake('public');
     $user = User::factory()->create();
