@@ -1882,7 +1882,7 @@ export default function RadicarSolicitud({
                                 {/* Fila 4 */}
                                 <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
                                     {/*
-                                        Fecha Recibido / Devolución no se
+                                        Fecha Recibido no se
                                         diligencia en esta vista: la registra
                                         otro rol desde el seguimiento del caso.
                                     */}
@@ -3024,7 +3024,7 @@ export default function RadicarSolicitud({
                                                         </SelectContent>
                                                     </Select>
                                                 </Field>
-                                                <Field label="Fecha Recibido / Devolución">
+                                                <Field label="Fecha Recibido">
                                                     <Input
                                                         type="date"
                                                         value={seg.fecreci}
@@ -3394,7 +3394,7 @@ export default function RadicarSolicitud({
                                                     Subespecialidad
                                                 </th>
                                                 <th className="px-3 py-2 font-medium">
-                                                    Fec. Rec/Dev
+                                                    Fec. Recibido
                                                 </th>
                                                 <th className="px-3 py-2 font-medium">
                                                     Venc. Anest.
@@ -4138,7 +4138,7 @@ export default function RadicarSolicitud({
                             />
                         </div>
                         <div className="grid gap-2">
-                            <Label>Fecha Recibido / Devolución *</Label>
+                            <Label>Fecha Recibido *</Label>
                             <Input
                                 type="date"
                                 value={modif.fecreci}

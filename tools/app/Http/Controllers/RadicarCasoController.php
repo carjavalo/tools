@@ -56,7 +56,7 @@ class RadicarCasoController extends Controller
         'estRad' => 'Estado Actual',
         'fentregapro' => 'Entrega a Programación',
         'codestsecundario' => 'Estado Secundario',
-        'fecreci' => 'Fecha Recibido / Devolución',
+        'fecreci' => 'Fecha Recibido',
         'estcod' => 'Motivo',
         'fecAutorizacion' => 'Fecha Autorización',
         'fechavenautorizacion' => 'Fecha Vencimiento Autorización',
@@ -637,7 +637,7 @@ class RadicarCasoController extends Controller
 
         // Todos los campos diligenciables de la vista de Nueva Radicación son
         // obligatorios para cualquier rol. Subespecialidad, Motivo, Estado
-        // Secundario y Fecha Recibido / Devolución no se exigen porque no
+        // Secundario y Fecha Recibido no se exigen porque no
         // están en la vista.
         $data = $request->validate([
             'Codesp' => ['required', 'string', 'max:10'],
@@ -662,7 +662,7 @@ class RadicarCasoController extends Controller
             // Estado secundario se retiró de la vista de Nueva Radicación: lo
             // diligencia otro rol desde el seguimiento del caso.
             'codestsecundario' => ['nullable', 'string', 'max:5'],
-            // Fecha Recibido / Devolución tampoco está en la vista.
+            // Fecha Recibido tampoco está en la vista.
             'fecreci' => ['nullable', 'date'],
             'fecAutorizacion' => ['required', 'date'],
             'fechavenautorizacion' => ['required', 'date'],
@@ -690,7 +690,7 @@ class RadicarCasoController extends Controller
             'estRad' => 'estado actual',
             'fentregapro' => 'entrega a programación',
             'codestsecundario' => 'estado secundario',
-            'fecreci' => 'fecha recibido / devolución',
+            'fecreci' => 'fecha recibido',
             'fecAutorizacion' => 'fecha autorización',
             'fechavenautorizacion' => 'fecha vencimiento autorización',
             'ObservacionTFX' => 'OB TFX',
@@ -708,34 +708,41 @@ class RadicarCasoController extends Controller
 
         // El caso, sus procedimientos y su bitácora se guardan o fallan juntos:
         // una radicación sin su registro de creación quedaría fuera del informe.
-        $caso = DB::transaction(function () use ($data, $request) {
-            $caso = RadicarCaso::create(Arr::except($data, ['procedimientos']));
+        try {
+            $caso = DB::transaction(function () use ($data, $request) {
+                $caso = RadicarCaso::create(Arr::except($data, ['procedimientos']));
 
-            foreach ($request->input('procedimientos', []) as $proc) {
-                if (empty($proc['cusv_id'])) {
-                    continue;
+                foreach ($request->input('procedimientos', []) as $proc) {
+                    if (empty($proc['cusv_id'])) {
+                        continue;
+                    }
+
+                    CupsAnezado::create([
+                        'codRadicado' => (string) $caso->codrad,
+                        'cusv_id' => (int) $proc['cusv_id'],
+                        'N_Autorizacion' => $proc['N_Autorizacion'] ?? '',
+                    ]);
                 }
 
-                CupsAnezado::create([
-                    'codRadicado' => (string) $caso->codrad,
-                    'cusv_id' => (int) $proc['cusv_id'],
-                    'N_Autorizacion' => $proc['N_Autorizacion'] ?? '',
-                ]);
-            }
+                // Trazabilidad: deja el evento de creación para que la radicación
+                // aparezca en el informe desde el primer día, con o sin cambios.
+                $this->registrarEvento(
+                    $caso->codrad,
+                    $request,
+                    'creacion',
+                    'Radicación creada',
+                    null,
+                    'Estado inicial: '.$this->valorLegible('estRad', $caso->estRad),
+                );
 
-            // Trazabilidad: deja el evento de creación para que la radicación
-            // aparezca en el informe desde el primer día, con o sin cambios.
-            $this->registrarEvento(
-                $caso->codrad,
-                $request,
-                'creacion',
-                'Radicación creada',
-                null,
-                'Estado inicial: '.$this->valorLegible('estRad', $caso->estRad),
-            );
+                return $caso;
+            });
+        } catch (\Throwable $e) {
+            // Radicación fallida: el PDF subido no debe quedar en el disco.
+            $this->limpiarPaquete($data['paquete'], null);
 
-            return $caso;
-        });
+            throw $e;
+        }
 
         return to_route('tools.radicar-solicitud')
             ->with('success', "Caso radicado correctamente. Caso N° {$caso->codrad}.")
@@ -782,7 +789,7 @@ class RadicarCasoController extends Controller
             'estRad' => 'estado actual',
             'valor_copago' => 'valor del copago',
             'fentregapro' => 'entrega a programación',
-            'fecreci' => 'fecha recibido / devolución',
+            'fecreci' => 'fecha recibido',
             'fecAutorizacion' => 'fecha autorización',
             'fechavenautorizacion' => 'fecha vencimiento autorización',
         ]);
@@ -794,42 +801,53 @@ class RadicarCasoController extends Controller
             $data['valor_copago'] = null;
         }
 
-        // Sin archivo nuevo se mantiene el que ya estaba; con uno nuevo, el
-        // anterior se borra del disco.
-        $data['paquete'] = $this->guardarPaquete($request, $caso->paquete);
+        // Sin archivo nuevo se mantiene el que ya estaba.
+        $paqueteAnterior = $caso->paquete;
+        $data['paquete'] = $this->guardarPaquete($request, $paqueteAnterior);
 
         // El cambio y su registro en la bitácora van juntos: si algo falla, no
         // puede quedar un dato modificado sin rastro de quién lo modificó.
-        DB::transaction(function () use ($caso, $data, $request) {
-            // Foto previa para poder registrar qué cambió exactamente.
-            $antes = $caso->getRawOriginal();
-            $procsAntes = $this->firmaProcedimientos($caso->codrad);
+        try {
+            DB::transaction(function () use ($caso, $data, $request) {
+                // Foto previa para poder registrar qué cambió exactamente.
+                $antes = $caso->getRawOriginal();
+                $procsAntes = $this->firmaProcedimientos($caso->codrad);
 
-            $caso->update(Arr::except($data, ['procedimientos']));
-            $this->registrarCambios($caso, $antes, $request, 'modificacion');
+                $caso->update(Arr::except($data, ['procedimientos']));
+                $this->registrarCambios($caso, $antes, $request, 'modificacion');
 
-            // Reemplazar los procedimientos (CUPS) del caso por los enviados.
-            CupsAnezado::where('codRadicado', (string) $caso->codrad)->delete();
-            foreach ($data['procedimientos'] as $proc) {
-                CupsAnezado::create([
-                    'codRadicado' => (string) $caso->codrad,
-                    'cusv_id' => (int) $proc['cusv_id'],
-                    'N_Autorizacion' => $proc['N_Autorizacion'] ?? '',
-                ]);
-            }
+                // Reemplazar los procedimientos (CUPS) del caso por los enviados.
+                CupsAnezado::where('codRadicado', (string) $caso->codrad)->delete();
+                foreach ($data['procedimientos'] as $proc) {
+                    CupsAnezado::create([
+                        'codRadicado' => (string) $caso->codrad,
+                        'cusv_id' => (int) $proc['cusv_id'],
+                        'N_Autorizacion' => $proc['N_Autorizacion'] ?? '',
+                    ]);
+                }
 
-            $procsDespues = $this->firmaProcedimientos($caso->codrad);
-            if ($procsAntes !== $procsDespues) {
-                $this->registrarEvento(
-                    $caso->codrad,
-                    $request,
-                    'modificacion',
-                    'Procedimientos (CUPS)',
-                    $procsAntes,
-                    $procsDespues,
-                );
-            }
-        });
+                $procsDespues = $this->firmaProcedimientos($caso->codrad);
+                if ($procsAntes !== $procsDespues) {
+                    $this->registrarEvento(
+                        $caso->codrad,
+                        $request,
+                        'modificacion',
+                        'Procedimientos (CUPS)',
+                        $procsAntes,
+                        $procsDespues,
+                    );
+                }
+            });
+        } catch (\Throwable $e) {
+            // El guardado falló: se descarta el PDF recién subido para no
+            // dejarlo huérfano, y se conserva intacto el anterior.
+            $this->limpiarPaquete($data['paquete'], $paqueteAnterior);
+
+            throw $e;
+        }
+
+        // Confirmado el guardado, ya se puede borrar el PDF reemplazado.
+        $this->limpiarPaquete($paqueteAnterior, $caso->paquete);
 
         return response()->json([
             'ok' => true,
@@ -1411,8 +1429,11 @@ class RadicarCasoController extends Controller
 
     /**
      * Guarda el PDF del paquete si viene en la petición y devuelve su ruta.
-     * Al reemplazarlo elimina el anterior para no dejar archivos huérfanos
-     * ocupando disco.
+     *
+     * No borra el archivo anterior: el disco no participa de la transacción
+     * de base de datos, así que si el guardado falla después, el PDF viejo ya
+     * no existiría y la fila seguiría apuntando a él. El reemplazo se
+     * confirma con limpiarPaquete() una vez que el update terminó bien.
      */
     private function guardarPaquete(Request $request, ?string $anterior): ?string
     {
@@ -1422,11 +1443,19 @@ class RadicarCasoController extends Controller
             return $anterior;
         }
 
-        if ($anterior) {
-            Storage::disk('public')->delete($anterior);
-        }
-
         return $archivo->store('paquetes', 'public');
+    }
+
+    /**
+     * Borra del disco un PDF que dejó de estar referenciado, sin tocar el que
+     * quedó vigente. Se usa tanto para confirmar un reemplazo como para
+     * deshacer una subida cuyo guardado falló.
+     */
+    private function limpiarPaquete(?string $sobrante, ?string $vigente): void
+    {
+        if ($sobrante && $sobrante !== $vigente) {
+            Storage::disk('public')->delete($sobrante);
+        }
     }
 
     /**

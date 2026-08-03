@@ -776,6 +776,65 @@ test('modificar el radicado funciona por POST con _method=PUT y multipart', func
         ->and($caso->paquete)->not->toBeNull();
 });
 
+test('si el guardado falla, el PDF anterior sobrevive y el nuevo no queda huerfano', function () {
+    // Escenario real: el update reventó en el servidor (columna faltante) con
+    // un PDF ya subido. El disco no participa de la transacción, así que hay
+    // que limpiarlo a mano; si se borrara el anterior antes de guardar, un
+    // fallo dejaría la fila apuntando a un archivo inexistente.
+    Storage::fake('public');
+    $admin = User::factory()->create();
+    $cups = Cups::create(['Nombre' => 'Proc', 'Estado' => true]);
+
+    $anterior = UploadedFile::fake()
+        ->create('anterior.pdf', 100, 'application/pdf')
+        ->store('paquetes', 'public');
+    $caso = RadicarCaso::create([
+        'Ndocumento' => '9950',
+        'estRad' => '1',
+        'paquete' => $anterior,
+    ]);
+
+    // Un CUPS inexistente hace fallar la validación de procedimientos.
+    $this->actingAs($admin)
+        ->putJson("/tools/radicar-solicitud/{$caso->codrad}", [
+            'codMed' => (string) $admin->id,
+            'estRad' => '1',
+            'copago' => false,
+            'fentregapro' => '2026-08-04',
+            'fecreci' => '2026-08-05',
+            'fecAutorizacion' => '2026-08-04',
+            'fechavenautorizacion' => '2026-08-05',
+            'paquete' => UploadedFile::fake()->create('nuevo.pdf', 100, 'application/pdf'),
+            'procedimientos' => [['cusv_id' => 999999999, 'N_Autorizacion' => 'X']],
+        ])
+        ->assertStatus(422);
+
+    // El caso conserva su PDF y el archivo sigue existiendo.
+    expect($caso->refresh()->paquete)->toBe($anterior);
+    Storage::disk('public')->assertExists($anterior);
+
+    // Y no quedó un segundo archivo suelto en el disco.
+    expect(Storage::disk('public')->files('paquetes'))->toHaveCount(1);
+
+    // Con datos correctos el reemplazo sí ocurre y limpia el anterior.
+    $this->actingAs($admin)
+        ->put("/tools/radicar-solicitud/{$caso->codrad}", [
+            'codMed' => (string) $admin->id,
+            'estRad' => '1',
+            'copago' => false,
+            'fentregapro' => '2026-08-04',
+            'fecreci' => '2026-08-05',
+            'fecAutorizacion' => '2026-08-04',
+            'fechavenautorizacion' => '2026-08-05',
+            'paquete' => UploadedFile::fake()->create('nuevo.pdf', 100, 'application/pdf'),
+            'procedimientos' => [['cusv_id' => $cups->id, 'N_Autorizacion' => 'A1']],
+        ])
+        ->assertOk();
+
+    Storage::disk('public')->assertMissing($anterior);
+    expect(Storage::disk('public')->files('paquetes'))->toHaveCount(1);
+});
+
 test('el paquete se visualiza en linea por una ruta protegida', function () {
     Storage::fake('public');
     $user = User::factory()->create();
