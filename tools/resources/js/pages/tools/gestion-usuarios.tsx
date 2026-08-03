@@ -19,6 +19,7 @@ import {
 } from '@/components/ui/select';
 import { usePermisosVista } from '@/hooks/use-permisos-vista';
 import AppLayout from '@/layouts/app-layout';
+import { camposParaRol } from '@/lib/roles';
 import { dashboard } from '@/routes';
 import { type BreadcrumbItem, type SharedData } from '@/types';
 import { Head, router, useForm, usePage } from '@inertiajs/react';
@@ -273,6 +274,8 @@ export default function GestionUsuarios({
     };
 
     const isEditing = editingId !== null;
+    // Campos que se piden según el rol elegido en el formulario.
+    const campos = camposParaRol(form.data.rol);
 
     return (
         <AppLayout breadcrumbs={breadcrumbs}>
@@ -588,18 +591,19 @@ export default function GestionUsuarios({
                                     form.setData('rol', v);
                                     // La especialidad no se pide en ningún rol.
                                     form.setData('codesp', '');
-                                    // Del médico solo se registran su nombre y
-                                    // su documento: el resto de campos quedan
-                                    // ocultos y se descarta lo ya escrito.
-                                    if (v === 'Medico') {
-                                        form.setData('email', '');
+                                    // Lo escrito en un campo que el rol nuevo
+                                    // no pide se descarta: no debe guardarse
+                                    // un dato que el usuario dejó de ver.
+                                    const c = camposParaRol(v);
+                                    if (!c.correo) form.setData('email', '');
+                                    if (!c.telefono1)
                                         form.setData('Telefono1', '');
+                                    if (!c.telefono2)
                                         form.setData('telefono2', '');
+                                    if (!c.direccion)
                                         form.setData('Direccion', '');
-                                        form.setData('Eps', '');
-                                    }
-                                    // Médico y paciente no usan contraseña.
-                                    if (v === 'Medico' || v === 'paciente') {
+                                    if (!c.eps) form.setData('Eps', '');
+                                    if (!c.contrasena) {
                                         form.setData('password', '');
                                         form.setData(
                                             'password_confirmation',
@@ -695,8 +699,7 @@ export default function GestionUsuarios({
                             <InputError message={form.errors.Numero_D} />
                         </div>
 
-                        {/* El médico no inicia sesión: no se le pide correo. */}
-                        {form.data.rol !== 'Medico' && (
+                        {campos.correo && (
                             <div className="grid gap-2">
                                 <Label htmlFor="email">
                                     Correo electrónico *
@@ -713,139 +716,127 @@ export default function GestionUsuarios({
                             </div>
                         )}
 
-                        {/* El médico solo lleva identificación y nombre. */}
-                        {form.data.rol !== 'Medico' && (
+                        {campos.telefono1 && (
+                            <div className="grid gap-2">
+                                <Label htmlFor="Telefono1">Teléfono 1</Label>
+                                <Input
+                                    id="Telefono1"
+                                    value={form.data.Telefono1}
+                                    onChange={(e) =>
+                                        form.setData(
+                                            'Telefono1',
+                                            e.target.value,
+                                        )
+                                    }
+                                />
+                                <InputError message={form.errors.Telefono1} />
+                            </div>
+                        )}
+
+                        {campos.telefono2 && (
+                            <div className="grid gap-2">
+                                <Label htmlFor="telefono2">Teléfono 2</Label>
+                                <Input
+                                    id="telefono2"
+                                    value={form.data.telefono2}
+                                    onChange={(e) =>
+                                        form.setData(
+                                            'telefono2',
+                                            e.target.value,
+                                        )
+                                    }
+                                />
+                                <InputError message={form.errors.telefono2} />
+                            </div>
+                        )}
+
+                        {campos.direccion && (
+                            <div className="grid gap-2 sm:col-span-2">
+                                <Label htmlFor="Direccion">Dirección</Label>
+                                <Input
+                                    id="Direccion"
+                                    value={form.data.Direccion}
+                                    onChange={(e) =>
+                                        form.setData(
+                                            'Direccion',
+                                            e.target.value,
+                                        )
+                                    }
+                                />
+                                <InputError message={form.errors.Direccion} />
+                            </div>
+                        )}
+
+                        {campos.eps && (
+                            <div className="grid gap-2 sm:col-span-2">
+                                <Label htmlFor="Eps">EPS</Label>
+                                <Select
+                                    value={form.data.Eps}
+                                    onValueChange={(v) =>
+                                        form.setData('Eps', v)
+                                    }
+                                >
+                                    <SelectTrigger id="Eps">
+                                        <SelectValue placeholder="Seleccione la EPS" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {epsList.map((e) => (
+                                            <SelectItem
+                                                key={e.id}
+                                                value={e.Nombre}
+                                            >
+                                                {e.Nombre}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                                <InputError message={form.errors.Eps} />
+                            </div>
+                        )}
+                        {campos.contrasena && (
                             <>
                                 <div className="grid gap-2">
-                                    <Label htmlFor="Telefono1">
-                                        Teléfono 1
+                                    <Label htmlFor="password">
+                                        {isEditing
+                                            ? 'Nueva contraseña'
+                                            : 'Contraseña *'}
                                     </Label>
                                     <Input
-                                        id="Telefono1"
-                                        value={form.data.Telefono1}
+                                        id="password"
+                                        type="password"
+                                        autoComplete="new-password"
+                                        value={form.data.password}
                                         onChange={(e) =>
                                             form.setData(
-                                                'Telefono1',
+                                                'password',
                                                 e.target.value,
                                             )
                                         }
                                     />
                                     <InputError
-                                        message={form.errors.Telefono1}
+                                        message={form.errors.password}
                                     />
                                 </div>
 
                                 <div className="grid gap-2">
-                                    <Label htmlFor="telefono2">
-                                        Teléfono 2
+                                    <Label htmlFor="password_confirmation">
+                                        Confirmar contraseña
                                     </Label>
                                     <Input
-                                        id="telefono2"
-                                        value={form.data.telefono2}
+                                        id="password_confirmation"
+                                        type="password"
+                                        autoComplete="new-password"
+                                        value={form.data.password_confirmation}
                                         onChange={(e) =>
                                             form.setData(
-                                                'telefono2',
+                                                'password_confirmation',
                                                 e.target.value,
                                             )
                                         }
                                     />
-                                    <InputError
-                                        message={form.errors.telefono2}
-                                    />
-                                </div>
-
-                                <div className="grid gap-2 sm:col-span-2">
-                                    <Label htmlFor="Direccion">Dirección</Label>
-                                    <Input
-                                        id="Direccion"
-                                        value={form.data.Direccion}
-                                        onChange={(e) =>
-                                            form.setData(
-                                                'Direccion',
-                                                e.target.value,
-                                            )
-                                        }
-                                    />
-                                    <InputError
-                                        message={form.errors.Direccion}
-                                    />
-                                </div>
-
-                                <div className="grid gap-2 sm:col-span-2">
-                                    <Label htmlFor="Eps">EPS</Label>
-                                    <Select
-                                        value={form.data.Eps}
-                                        onValueChange={(v) =>
-                                            form.setData('Eps', v)
-                                        }
-                                    >
-                                        <SelectTrigger id="Eps">
-                                            <SelectValue placeholder="Seleccione la EPS" />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            {epsList.map((e) => (
-                                                <SelectItem
-                                                    key={e.id}
-                                                    value={e.Nombre}
-                                                >
-                                                    {e.Nombre}
-                                                </SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                    <InputError message={form.errors.Eps} />
                                 </div>
                             </>
                         )}
-
-                        {/* Médico y paciente no inician sesión: sin contraseña. */}
-                        {form.data.rol !== 'Medico' &&
-                            form.data.rol !== 'paciente' && (
-                                <>
-                                    <div className="grid gap-2">
-                                        <Label htmlFor="password">
-                                            {isEditing
-                                                ? 'Nueva contraseña'
-                                                : 'Contraseña *'}
-                                        </Label>
-                                        <Input
-                                            id="password"
-                                            type="password"
-                                            autoComplete="new-password"
-                                            value={form.data.password}
-                                            onChange={(e) =>
-                                                form.setData(
-                                                    'password',
-                                                    e.target.value,
-                                                )
-                                            }
-                                        />
-                                        <InputError
-                                            message={form.errors.password}
-                                        />
-                                    </div>
-
-                                    <div className="grid gap-2">
-                                        <Label htmlFor="password_confirmation">
-                                            Confirmar contraseña
-                                        </Label>
-                                        <Input
-                                            id="password_confirmation"
-                                            type="password"
-                                            autoComplete="new-password"
-                                            value={
-                                                form.data.password_confirmation
-                                            }
-                                            onChange={(e) =>
-                                                form.setData(
-                                                    'password_confirmation',
-                                                    e.target.value,
-                                                )
-                                            }
-                                        />
-                                    </div>
-                                </>
-                            )}
 
                         <DialogFooter className="sm:col-span-2">
                             <Button
@@ -905,33 +896,42 @@ export default function GestionUsuarios({
                                     label="Número de documento"
                                     value={viewUser.Numero_D}
                                 />
-                                <Detail
-                                    label="Teléfono 1"
-                                    value={viewUser.Telefono1}
-                                />
-                                <Detail
-                                    label="Teléfono 2"
-                                    value={viewUser.telefono2}
-                                />
-                                <Detail
-                                    label="Dirección"
-                                    value={viewUser.Direccion}
-                                />
-                                <Detail label="EPS" value={viewUser.Eps} />
-                                {viewUser.rol === 'Medico' && (
+                                {/* Solo los campos que aplican a ese rol: los
+                                    demás saldrían siempre vacíos. */}
+                                {camposParaRol(viewUser.rol).telefono1 && (
                                     <Detail
-                                        label="Especialidad"
-                                        value={
-                                            especialidadesList.find(
-                                                (e) =>
-                                                    String(e.espcodser) ===
-                                                    viewUser.codesp,
-                                            )?.Nombre ??
-                                            viewUser.codesp ??
-                                            null
-                                        }
+                                        label="Teléfono 1"
+                                        value={viewUser.Telefono1}
                                     />
                                 )}
+                                {camposParaRol(viewUser.rol).telefono2 && (
+                                    <Detail
+                                        label="Teléfono 2"
+                                        value={viewUser.telefono2}
+                                    />
+                                )}
+                                {camposParaRol(viewUser.rol).direccion && (
+                                    <Detail
+                                        label="Dirección"
+                                        value={viewUser.Direccion}
+                                    />
+                                )}
+                                {camposParaRol(viewUser.rol).eps && (
+                                    <Detail label="EPS" value={viewUser.Eps} />
+                                )}
+                                {viewUser.rol === 'Medico' &&
+                                    viewUser.codesp && (
+                                        <Detail
+                                            label="Especialidad"
+                                            value={
+                                                especialidadesList.find(
+                                                    (e) =>
+                                                        String(e.espcodser) ===
+                                                        viewUser.codesp,
+                                                )?.Nombre ?? viewUser.codesp
+                                            }
+                                        />
+                                    )}
                                 <Detail
                                     label="Estado"
                                     value={

@@ -20,6 +20,7 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { usePermisosVista } from '@/hooks/use-permisos-vista';
 import AppLayout from '@/layouts/app-layout';
+import { camposParaRol } from '@/lib/roles';
 import { dashboard } from '@/routes';
 import { type BreadcrumbItem, type SharedData } from '@/types';
 import { Head, useForm, usePage } from '@inertiajs/react';
@@ -29,6 +30,7 @@ import {
     ChevronDown,
     Eye,
     FilePlus2,
+    FileSpreadsheet,
     FileText,
     LoaderCircle,
     Pencil,
@@ -542,6 +544,8 @@ export default function RadicarSolicitud({
     const [espErrors, setEspErrors] = useState<Record<string, string>>({});
     const [nuevaEsp, setNuevaEsp] = useState({ ...EMPTY_ESPECIALIDAD });
     const [nuevoUsuario, setNuevoUsuario] = useState({ ...EMPTY_USUARIO });
+    // Campos que se piden según el rol elegido en el modal de usuario.
+    const camposUsuario = camposParaRol(nuevoUsuario.rol);
     const [userErrors, setUserErrors] = useState<Record<string, string>>({});
     const [creando, setCreando] = useState(false);
     // Id del usuario en edición (null = modo creación de un nuevo usuario).
@@ -1400,6 +1404,63 @@ export default function RadicarSolicitud({
             })
             .catch(() => setInfRows([]))
             .finally(() => setInfLoading(false));
+    };
+
+    /**
+     * Descarga en Excel exactamente lo que muestra la grilla: mismas columnas,
+     * mismo orden y mismas filas ya filtradas. La librería se carga solo al
+     * pulsar el botón para no engordar la vista.
+     */
+    const exportarInformeExcel = async () => {
+        if (!infRows || infRows.length === 0) return;
+
+        const XLSX = await import('xlsx');
+
+        const filas = infRows.map((r) => ({
+            'N° Caso': r.codrad,
+            'Fecha Recibido': r.fechaRecibido ?? '',
+            Documento: r.documento,
+            Tipo: r.tipo,
+            Campo: r.campo,
+            Anterior: r.anterior,
+            Nuevo: r.nuevo,
+            Estado: r.estado,
+            Copago: r.copago ? 'Sí' : 'No',
+            // Se exporta el número para poder sumarlo o filtrarlo en Excel.
+            'Valor Copago':
+                r.copago && r.valorCopago ? Number(r.valorCopago) : '',
+            Paquete: r.paqueteUrl ? 'Sí' : 'No',
+            Médico: r.medico,
+            Motivo: r.motivo,
+            'Estado Secundario': r.estadoSecundario,
+            Subespecialidad: r.subespecialidad,
+            'Fec. Recibido': r.fechaRecibidoDev ?? '',
+            'Venc. Anestesia': r.vencAnestesia ?? '',
+            Observación: r.observacion ?? '',
+            'Estado QX': r.estadoQx,
+            Usuario: r.usuario,
+            Modificado: r.modificadoEn ?? '',
+        }));
+
+        const hoja = XLSX.utils.json_to_sheet(filas);
+        // Ancho de columna aproximado al contenido más largo de cada una.
+        hoja['!cols'] = Object.keys(filas[0]).map((clave) => ({
+            wch: Math.min(
+                45,
+                Math.max(
+                    clave.length + 2,
+                    ...filas.map(
+                        (f) => String(f[clave as keyof typeof f] ?? '').length,
+                    ),
+                ),
+            ),
+        }));
+
+        const libro = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(libro, hoja, 'Informe');
+
+        const hoy = new Date().toISOString().slice(0, 10);
+        XLSX.writeFile(libro, `informe-radicaciones-${hoy}.xlsx`);
     };
 
     const toggleObs = (id: string) =>
@@ -3326,6 +3387,21 @@ export default function RadicarSolicitud({
                                     )}
                                     Generar Informe
                                 </Button>
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={exportarInformeExcel}
+                                    disabled={!infRows || infRows.length === 0}
+                                    title={
+                                        infRows && infRows.length > 0
+                                            ? 'Descargar en Excel lo que muestra la grilla'
+                                            : 'Genera primero el informe'
+                                    }
+                                    className="mt-4 ml-2 gap-2 text-[#2d3e83] disabled:opacity-40 dark:text-white"
+                                >
+                                    <FileSpreadsheet className="size-4" />
+                                    Exportar a Excel
+                                </Button>
                             </form>
 
                             {infTruncado && (
@@ -3725,18 +3801,16 @@ export default function RadicarSolicitud({
                                     setU('rol', v);
                                     // La especialidad no se pide en ningún rol.
                                     setU('codesp', '');
-                                    // Del médico solo se registran su nombre y
-                                    // su documento: el resto de campos quedan
-                                    // ocultos y se descarta lo ya escrito.
-                                    if (v === 'Medico') {
-                                        setU('email', '');
-                                        setU('Telefono1', '');
-                                        setU('telefono2', '');
-                                        setU('Direccion', '');
-                                        setU('Eps', '');
-                                    }
-                                    // Médico y paciente no usan contraseña.
-                                    if (v === 'Medico' || v === 'paciente') {
+                                    // Lo escrito en un campo que el rol nuevo
+                                    // no pide se descarta: no debe guardarse
+                                    // un dato que el usuario dejó de ver.
+                                    const c = camposParaRol(v);
+                                    if (!c.correo) setU('email', '');
+                                    if (!c.telefono1) setU('Telefono1', '');
+                                    if (!c.telefono2) setU('telefono2', '');
+                                    if (!c.direccion) setU('Direccion', '');
+                                    if (!c.eps) setU('Eps', '');
+                                    if (!c.contrasena) {
                                         setU('password', '');
                                         setU('password_confirmation', '');
                                     }
@@ -3830,8 +3904,7 @@ export default function RadicarSolicitud({
                                     </span>
                                 )}
                             </div>
-                            {/* El médico no inicia sesión: no se le pide correo. */}
-                            {nuevoUsuario.rol !== 'Medico' && (
+                            {camposUsuario.correo && (
                                 <div className="grid gap-2">
                                     <Label>Correo electrónico *</Label>
                                     <Input
@@ -3848,48 +3921,43 @@ export default function RadicarSolicitud({
                                     )}
                                 </div>
                             )}
-                            {/* El médico solo lleva identificación y nombre. */}
-                            {nuevoUsuario.rol !== 'Medico' && (
-                                <>
-                                    <div className="grid gap-2">
-                                        <Label>Teléfono 1</Label>
-                                        <Input
-                                            value={nuevoUsuario.Telefono1}
-                                            onChange={(e) =>
-                                                setU(
-                                                    'Telefono1',
-                                                    e.target.value,
-                                                )
-                                            }
-                                        />
-                                    </div>
-                                    <div className="grid gap-2">
-                                        <Label>Teléfono 2</Label>
-                                        <Input
-                                            value={nuevoUsuario.telefono2}
-                                            onChange={(e) =>
-                                                setU(
-                                                    'telefono2',
-                                                    e.target.value,
-                                                )
-                                            }
-                                        />
-                                    </div>
-                                </>
-                            )}
-                        </div>
-
-                        {nuevoUsuario.rol !== 'Medico' && (
-                            <>
+                            {camposUsuario.telefono1 && (
                                 <div className="grid gap-2">
-                                    <Label>Dirección</Label>
+                                    <Label>Teléfono 1</Label>
                                     <Input
-                                        value={nuevoUsuario.Direccion}
+                                        value={nuevoUsuario.Telefono1}
                                         onChange={(e) =>
-                                            setU('Direccion', e.target.value)
+                                            setU('Telefono1', e.target.value)
                                         }
                                     />
                                 </div>
+                            )}
+                            {camposUsuario.telefono2 && (
+                                <div className="grid gap-2">
+                                    <Label>Teléfono 2</Label>
+                                    <Input
+                                        value={nuevoUsuario.telefono2}
+                                        onChange={(e) =>
+                                            setU('telefono2', e.target.value)
+                                        }
+                                    />
+                                </div>
+                            )}
+                        </div>
+
+                        {camposUsuario.direccion && (
+                            <div className="grid gap-2">
+                                <Label>Dirección</Label>
+                                <Input
+                                    value={nuevoUsuario.Direccion}
+                                    onChange={(e) =>
+                                        setU('Direccion', e.target.value)
+                                    }
+                                />
+                            </div>
+                        )}
+                        {camposUsuario.eps && (
+                            <>
                                 <div className="grid gap-2">
                                     <Label>EPS</Label>
                                     <Select
@@ -3919,46 +3987,44 @@ export default function RadicarSolicitud({
                             </>
                         )}
 
-                        {/* Médico y paciente no inician sesión: sin contraseña. */}
-                        {nuevoUsuario.rol !== 'Medico' &&
-                            nuevoUsuario.rol !== 'paciente' && (
-                                <div className="grid gap-4 sm:grid-cols-2">
-                                    <div className="grid gap-2">
-                                        <Label>
-                                            {editandoId
-                                                ? 'Contraseña (dejar en blanco para no cambiarla)'
-                                                : 'Contraseña *'}
-                                        </Label>
-                                        <Input
-                                            type="password"
-                                            value={nuevoUsuario.password}
-                                            onChange={(e) =>
-                                                setU('password', e.target.value)
-                                            }
-                                        />
-                                        {userErrors.password && (
-                                            <span className="text-xs text-red-600">
-                                                {userErrors.password}
-                                            </span>
-                                        )}
-                                    </div>
-                                    <div className="grid gap-2">
-                                        <Label>Confirmar contraseña</Label>
-                                        <Input
-                                            type="password"
-                                            value={
-                                                nuevoUsuario.password_confirmation
-                                            }
-                                            onChange={(e) =>
-                                                setU(
-                                                    'password_confirmation',
-                                                    e.target.value,
-                                                )
-                                            }
-                                        />
-                                    </div>
+                        {camposUsuario.contrasena && (
+                            <div className="grid gap-4 sm:grid-cols-2">
+                                <div className="grid gap-2">
+                                    <Label>
+                                        {editandoId
+                                            ? 'Contraseña (dejar en blanco para no cambiarla)'
+                                            : 'Contraseña *'}
+                                    </Label>
+                                    <Input
+                                        type="password"
+                                        value={nuevoUsuario.password}
+                                        onChange={(e) =>
+                                            setU('password', e.target.value)
+                                        }
+                                    />
+                                    {userErrors.password && (
+                                        <span className="text-xs text-red-600">
+                                            {userErrors.password}
+                                        </span>
+                                    )}
                                 </div>
-                            )}
+                                <div className="grid gap-2">
+                                    <Label>Confirmar contraseña</Label>
+                                    <Input
+                                        type="password"
+                                        value={
+                                            nuevoUsuario.password_confirmation
+                                        }
+                                        onChange={(e) =>
+                                            setU(
+                                                'password_confirmation',
+                                                e.target.value,
+                                            )
+                                        }
+                                    />
+                                </div>
+                            </div>
+                        )}
 
                         <DialogFooter>
                             <Button
