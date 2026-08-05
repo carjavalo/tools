@@ -50,6 +50,7 @@ interface PageProps {
     estadosGrilla: number[];
     estadosSecList: { id: number; Nombre: string }[];
     estadosSecGrilla: number[];
+    radicaciones: { total: number; sinEstadoSecundario: number };
 }
 
 const breadcrumbs: BreadcrumbItem[] = [
@@ -79,6 +80,7 @@ export default function GestorPermisos({
     estadosGrilla,
     estadosSecList,
     estadosSecGrilla,
+    radicaciones,
 }: PageProps) {
     const { flash } = usePage<SharedData>().props;
     const [matriz, setMatriz] = useState<Record<string, Flags>>(permisos);
@@ -113,6 +115,20 @@ export default function GestorPermisos({
     }, [notice]);
 
     const rolActivo = roles.find((r) => r.id === roleId);
+
+    // La grilla del Historial es una sub-vista aparte: configurar los estados
+    // no sirve de nada si esa sub-vista está apagada, y el efecto solo se nota
+    // cuando el usuario entra y no ve nada. Se avisa aquí mismo.
+    const grillaVisible = matriz['radicar-solicitud-grilla']?.ver !== false;
+    const hayEstadosConfigurados =
+        grillaEstados.length > 0 || grillaEstadosSec.length > 0;
+    // Un estado secundario marcado esconde toda radicación que no lo tenga, y
+    // hoy el estado secundario no se diligencia al radicar: se asigna después
+    // desde el seguimiento.
+    const secundarioDejaVacio =
+        grillaEstadosSec.length > 0 &&
+        radicaciones.total > 0 &&
+        radicaciones.sinEstadoSecundario === radicaciones.total;
     const grupos = [...new Set(vistas.map((v) => v.grupo))];
 
     const cambiarRol = (id: number) => {
@@ -147,23 +163,17 @@ export default function GestorPermisos({
 
     const toggleAsignable = (id: number) =>
         setAsignables((prev) =>
-            prev.includes(id)
-                ? prev.filter((x) => x !== id)
-                : [...prev, id],
+            prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
         );
 
     const toggleGrillaEstado = (id: number) =>
         setGrillaEstados((prev) =>
-            prev.includes(id)
-                ? prev.filter((x) => x !== id)
-                : [...prev, id],
+            prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
         );
 
     const toggleGrillaEstadoSec = (id: number) =>
         setGrillaEstadosSec((prev) =>
-            prev.includes(id)
-                ? prev.filter((x) => x !== id)
-                : [...prev, id],
+            prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
         );
 
     // Blanquear toda la configuración del rol (matriz y roles asignables)
@@ -405,8 +415,8 @@ export default function GestorPermisos({
                         Aplica a la grilla de radicaciones de Radicar Solicitud
                         — Historial: el rol solo verá las radicaciones cuyo
                         estado actual esté marcado. Es independiente de la
-                        Asignación de Estados. Sin ninguno marcado, ve todas
-                        las radicaciones.
+                        Asignación de Estados. Sin ninguno marcado, ve todas las
+                        radicaciones.
                     </p>
                     <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-4">
                         {estadosList.map((e) => (
@@ -436,6 +446,20 @@ export default function GestorPermisos({
                             ? 'Sin restricción: ve las radicaciones de todos los estados.'
                             : `Verá solo las radicaciones en ${grillaEstados.length} estado(s).`}
                     </p>
+
+                    {hayEstadosConfigurados && !grillaVisible && (
+                        <p className="mt-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
+                            <strong>
+                                Esta configuración no tendrá efecto.
+                            </strong>{' '}
+                            La grilla del Historial está desactivada para este
+                            rol, así que no verá ninguna radicación por más
+                            estados que marques aquí. Actívala en la matriz de
+                            permisos de abajo, en{' '}
+                            <em>Grilla de Radicaciones (Historial)</em>, y
+                            guarda.
+                        </p>
+                    )}
                 </div>
 
                 {/* Radicaciones visibles en la grilla del Historial (por estado secundario) */}
@@ -449,9 +473,9 @@ export default function GestorPermisos({
                         Aplica a la grilla de radicaciones de Radicar Solicitud
                         — Historial: el rol solo verá las radicaciones cuyo
                         estado secundario esté marcado. Es independiente de la
-                        Asignación de Estados y del filtro por estado actual
-                        (si ambos tienen marcas, se aplican juntos). Sin
-                        ninguno marcado, ve todas las radicaciones.
+                        Asignación de Estados y del filtro por estado actual (si
+                        ambos tienen marcas, se aplican juntos). Sin ninguno
+                        marcado, ve todas las radicaciones.
                     </p>
                     <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-4">
                         {estadosSecList.map((e) => (
@@ -481,6 +505,21 @@ export default function GestorPermisos({
                             ? 'Sin restricción: ve las radicaciones de todos los estados secundarios.'
                             : `Verá solo las radicaciones en ${grillaEstadosSec.length} estado(s) secundario(s).`}
                     </p>
+
+                    {secundarioDejaVacio && (
+                        <p className="mt-2 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-900 dark:border-red-900 dark:bg-red-950 dark:text-red-200">
+                            <strong>
+                                Con esto el rol no verá ninguna radicación.
+                            </strong>{' '}
+                            Las {radicaciones.total} radicaciones registradas
+                            aún no tienen estado secundario: ese dato no se
+                            diligencia al radicar, se asigna después desde el
+                            seguimiento del caso. Mientras sea así, marcar
+                            estados secundarios aquí deja la grilla vacía.
+                            Déjalos todos sin marcar para no filtrar por este
+                            criterio.
+                        </p>
+                    )}
                 </div>
 
                 {/* Matriz de permisos */}
