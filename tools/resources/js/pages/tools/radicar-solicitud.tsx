@@ -199,12 +199,14 @@ interface InformeRow {
     anterior: string;
     nuevo: string;
     documento: string;
+    paciente: string;
     fechaRecibido: string | null;
     estado: string;
     copago: boolean;
     valorCopago: string | number | null;
     paqueteUrl: string | null;
     medico: string;
+    especialidad: string;
     motivo: string;
     estadoSecundario: string;
     subespecialidad: string;
@@ -1420,6 +1422,7 @@ export default function RadicarSolicitud({
             'N° Caso': r.codrad,
             'Fecha Recibido': r.fechaRecibido ?? '',
             Documento: r.documento,
+            Paciente: r.paciente,
             Tipo: r.tipo,
             Campo: r.campo,
             Anterior: r.anterior,
@@ -1431,6 +1434,7 @@ export default function RadicarSolicitud({
                 r.copago && r.valorCopago ? Number(r.valorCopago) : '',
             Paquete: r.paqueteUrl ? 'Sí' : 'No',
             Médico: r.medico,
+            Especialidad: r.especialidad,
             Motivo: r.motivo,
             'Estado Secundario': r.estadoSecundario,
             Subespecialidad: r.subespecialidad,
@@ -3440,6 +3444,9 @@ export default function RadicarSolicitud({
                                                     Documento
                                                 </th>
                                                 <th className="px-3 py-2 font-medium">
+                                                    Paciente
+                                                </th>
+                                                <th className="px-3 py-2 font-medium">
                                                     Tipo
                                                 </th>
                                                 <th className="px-3 py-2 font-medium">
@@ -3459,6 +3466,9 @@ export default function RadicarSolicitud({
                                                 </th>
                                                 <th className="px-3 py-2 font-medium">
                                                     Médico
+                                                </th>
+                                                <th className="px-3 py-2 font-medium">
+                                                    Especialidad
                                                 </th>
                                                 <th className="px-3 py-2 font-medium">
                                                     Motivo
@@ -3503,6 +3513,9 @@ export default function RadicarSolicitud({
                                                     </td>
                                                     <td className="px-3 py-2 text-muted-foreground">
                                                         {r.documento}
+                                                    </td>
+                                                    <td className="px-3 py-2 font-medium text-foreground">
+                                                        {r.paciente}
                                                     </td>
                                                     <td className="px-3 py-2">
                                                         <span
@@ -3579,6 +3592,9 @@ export default function RadicarSolicitud({
                                                     </td>
                                                     <td className="px-3 py-2">
                                                         {r.medico}
+                                                    </td>
+                                                    <td className="px-3 py-2">
+                                                        {r.especialidad}
                                                     </td>
                                                     <td className="px-3 py-2">
                                                         {r.motivo}

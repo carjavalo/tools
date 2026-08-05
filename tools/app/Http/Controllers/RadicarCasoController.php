@@ -1011,6 +1011,10 @@ class RadicarCasoController extends Controller
         $estadosSec = EstRadisecundario::pluck('Nombre', 'id');
         $motivos = Motivo::pluck('Nombre', 'id');
         $subesp = SubEspecialidad::pluck('Nombre', 'cod_SubEspecialidad');
+        $especialidades = Especialidad::pluck('Nombre', 'espcodser');
+        $pacientes = User::whereIn('Numero_D', $casos->pluck('Ndocumento')->filter()->unique())
+            ->get(['Numero_D', 'name', 'Apellido1', 'apellido2'])
+            ->keyBy('Numero_D');
         $usuarios = User::whereIn('id', $casos->pluck('codMed')->filter()->unique())
             ->get(['id', 'name', 'Apellido1', 'apellido2'])
             ->keyBy('id');
@@ -1079,14 +1083,19 @@ class RadicarCasoController extends Controller
             ->unique()
             ->flip();
 
-        $datosCaso = function (RadicarCaso $caso) use ($estados, $usuarios, $subesp) {
+        $datosCaso = function (RadicarCaso $caso) use ($estados, $usuarios, $subesp, $especialidades, $pacientes) {
             $med = $caso->codMed ? $usuarios->get($caso->codMed) : null;
+            $pac = $caso->Ndocumento ? $pacientes->get($caso->Ndocumento) : null;
 
             return [
                 'codrad' => $caso->codrad,
                 'fechaRecibido' => optional($caso->created_at)->format('Y-m-d'),
                 'documento' => $caso->Ndocumento ?? '—',
+                'paciente' => $pac
+                    ? trim(implode(' ', array_filter([$pac->name, $pac->Apellido1, $pac->apellido2])))
+                    : '—',
                 'estado' => $estados[(int) $caso->estRad] ?? '—',
+                'especialidad' => $especialidades[$caso->Codesp] ?? '—',
                 'medico' => $this->nombreUsuario($med) ?? '—',
                 'subespecialidad' => $subesp[$caso->codsubesp] ?? '—',
                 'copago' => (bool) $caso->copago,
