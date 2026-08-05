@@ -17,6 +17,7 @@ export const ROL_PACIENTE = 'paciente';
 export const ROLES_ADMINISTRATIVOS = [
     'Gestor Ciau',
     'Gestor Contratación',
+    'Gestor Hemodinamia',
     'Gestor Programación',
     'Gestor Radicación',
     'Operador Ciau',
