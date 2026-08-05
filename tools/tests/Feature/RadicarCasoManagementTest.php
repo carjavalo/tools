@@ -423,24 +423,31 @@ test('el informe respeta los estados autorizados al rol', function () {
         ->and($codradsRoot)->toContain($oculto->codrad);
 });
 
-test('el informe respeta tambien los estados secundarios autorizados', function () {
+test('el estado secundario asignado al rol no filtra la grilla', function () {
     $rol = Role::create(['Nombre' => 'Gestor Sec', 'Estado' => true]);
     $operador = User::factory()->create(['rol' => 'Gestor Sec']);
 
     $secPermitido = EstRadisecundario::create(['Nombre' => 'En trámite', 'Estado' => true]);
     $secVetado = EstRadisecundario::create(['Nombre' => 'Devuelto', 'Estado' => true]);
 
+    // El rol tiene un estado secundario asignado, pero eso no debe recortar
+    // lo que ve: el campo tiene otras funciones todavía por definir y las
+    // radicaciones nacen sin él, así que filtrar por ahí vaciaba la grilla.
     $rol->estadosSecGrilla()->sync([$secPermitido->id]);
 
-    $visible = RadicarCaso::create([
+    $conEseSecundario = RadicarCaso::create([
         'Ndocumento' => '8800',
         'estRad' => '1',
         'codestsecundario' => (string) $secPermitido->id,
     ]);
-    $oculto = RadicarCaso::create([
+    $conOtroSecundario = RadicarCaso::create([
         'Ndocumento' => '8801',
         'estRad' => '1',
         'codestsecundario' => (string) $secVetado->id,
+    ]);
+    $sinSecundario = RadicarCaso::create([
+        'Ndocumento' => '8802',
+        'estRad' => '1',
     ]);
 
     Permiso::create([
@@ -459,8 +466,9 @@ test('el informe respeta tambien los estados secundarios autorizados', function 
             ->json('rows')
     )->pluck('codrad');
 
-    expect($codrads)->toContain($visible->codrad)
-        ->and($codrads)->not->toContain($oculto->codrad);
+    expect($codrads)->toContain($conEseSecundario->codrad)
+        ->and($codrads)->toContain($conOtroSecundario->codrad)
+        ->and($codrads)->toContain($sinSecundario->codrad);
 });
 
 test('cambiar fecha, estado u observacion de una cotizacion deja registro', function () {

@@ -193,9 +193,14 @@ class RadicarCasoController extends Controller
 
     /**
      * Restringe una consulta de radicaciones a los estados que el rol tiene
-     * autorizados en el Gestor de Permisos (estado actual y estado
-     * secundario, independientes entre sí). Sin configuración, o siendo Super
+     * autorizados en el Gestor de Permisos. Sin configuración, o siendo Super
      * Admin, no limita nada.
+     *
+     * Solo se filtra por el ESTADO ACTUAL. El estado secundario no interviene:
+     * ese campo tiene otras funciones todavía por definir y no se diligencia
+     * al radicar, así que filtrar por él dejaba la grilla vacía. Su
+     * configuración se conserva en role_estados_sec_grilla para cuando se
+     * establezca su uso.
      *
      * Lo usan por igual la grilla del Historial y la pestaña de Informes: un
      * rol ve las mismas radicaciones en los dos lados.
@@ -222,17 +227,6 @@ class RadicarCasoController extends Controller
                 $estadoIds->map(fn ($id) => (string) $id)->all(),
             );
         }
-
-        $estadoSecIds = $role
-            ? $role->estadosSecGrilla()->pluck('EstRadisecundario.id')
-            : collect();
-
-        if ($estadoSecIds->isNotEmpty()) {
-            $query->whereIn(
-                'codestsecundario',
-                $estadoSecIds->map(fn ($id) => (string) $id)->all(),
-            );
-        }
     }
 
     /**
@@ -240,8 +234,7 @@ class RadicarCasoController extends Controller
      * radicaciones se filtran por los estados de grilla configurados para el
      * rol en el Gestor de Permisos: con estados configurados solo ve los
      * casos en esos estados; sin configuración (o Super Admin), los ve todos.
-     * El filtro por estado actual y el de estado secundario son independientes
-     * y se aplican juntos cuando ambos están configurados.
+     * Solo interviene el estado actual; el estado secundario no filtra.
      *
      * @return array<int, array<string, mixed>>
      */

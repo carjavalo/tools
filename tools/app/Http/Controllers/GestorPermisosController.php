@@ -5,7 +5,6 @@ namespace App\Http\Controllers;
 use App\Models\EstRadicado;
 use App\Models\EstRadisecundario;
 use App\Models\Permiso;
-use App\Models\RadicarCaso;
 use App\Models\Role;
 use App\Models\User;
 use Illuminate\Http\RedirectResponse;
@@ -71,15 +70,6 @@ class GestorPermisosController extends Controller
             'estadosSecGrilla' => $roleId
                 ? Role::find($roleId)?->estadosSecGrilla()->pluck('EstRadisecundario.id')->all() ?? []
                 : [],
-            // Con estos números la vista advierte cuándo una configuración
-            // dejaría la grilla vacía, en lugar de que se descubra después
-            // porque los usuarios no ven nada.
-            'radicaciones' => [
-                'total' => RadicarCaso::count(),
-                'sinEstadoSecundario' => RadicarCaso::whereNull('codestsecundario')
-                    ->orWhere('codestsecundario', '')
-                    ->count(),
-            ],
         ]);
     }
 
