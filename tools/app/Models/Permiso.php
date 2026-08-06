@@ -42,7 +42,7 @@ class Permiso extends Model
         ['key' => 'gestion-cups-eps', 'titulo' => 'Gestión CUPS / EPS', 'grupo' => 'Herramientas', 'acciones' => ['ver', 'crear', 'editar', 'borrar']],
         ['key' => 'gestion-motivo', 'titulo' => 'Gestión de Motivo', 'grupo' => 'Herramientas', 'acciones' => ['ver', 'crear', 'editar', 'borrar']],
         ['key' => 'gestion-estado', 'titulo' => 'Gestión Estado', 'grupo' => 'Herramientas', 'acciones' => ['ver', 'crear', 'editar', 'borrar']],
-        ['key' => 'gestion-estado-secundario', 'titulo' => 'Gestión Estado Secundario', 'grupo' => 'Herramientas', 'acciones' => ['ver', 'crear', 'editar', 'borrar']],
+        ['key' => 'gestion-estado-secundario', 'titulo' => 'Gestión Estado QX', 'grupo' => 'Herramientas', 'acciones' => ['ver', 'crear', 'editar', 'borrar']],
         ['key' => 'asignacion-estados', 'titulo' => 'Asignación Estados', 'grupo' => 'Herramientas', 'acciones' => ['ver', 'crear', 'editar', 'borrar']],
     ];
 

@@ -26,7 +26,6 @@ class SeguimientoCaso extends Model
         'fecreci',
         'estcod',
         'venc_anestesia',
-        'estado_qx',
         'ObservacionCCX',
         'user_id',
     ];

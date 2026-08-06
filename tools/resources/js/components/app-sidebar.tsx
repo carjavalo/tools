@@ -17,7 +17,6 @@ import {
     CalendarClock,
     ClipboardCheck,
     ClipboardList,
-    FileEdit,
     FilePlus2,
     Flag,
     FlagTriangleRight,
@@ -114,7 +113,7 @@ const mainNavItems: NavItem[] = [
                 icon: Flag,
             },
             {
-                title: 'Gestión Estado Secundario',
+                title: 'Gestión Estado QX',
                 href: '/tools/gestion-estado-secundario',
                 icon: FlagTriangleRight,
             },

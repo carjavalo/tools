@@ -366,7 +366,8 @@ export default function GestionRoles({
                                 Gestión de Roles
                             </h1>
                             <p className="text-sm text-muted-foreground">
-                                Administra los roles de los usuarios del sistema.
+                                Administra los roles de los usuarios del
+                                sistema.
                             </p>
                         </div>
                     </div>
@@ -429,7 +430,7 @@ export default function GestionRoles({
                                 value={search}
                                 onChange={(e) => setSearch(e.target.value)}
                                 placeholder="Buscar por nombre u observación…"
-                                className="pl-9 pr-9"
+                                className="pr-9 pl-9"
                             />
                             {search && (
                                 <button
@@ -549,9 +550,7 @@ export default function GestionRoles({
                                                         className="size-8 text-muted-foreground hover:text-red-600"
                                                         title="Eliminar"
                                                         onClick={() =>
-                                                            setDeleteTarget(
-                                                                row,
-                                                            )
+                                                            setDeleteTarget(row)
                                                         }
                                                     >
                                                         <Trash2 className="size-4" />
@@ -675,7 +674,7 @@ export default function GestionRoles({
                                 }
                             />
                             <EstadoChecklist
-                                label="Estado Secundario"
+                                label="Estado QX"
                                 items={estadosSecundarios}
                                 selected={form.data.est_radisecundario_ids}
                                 onToggle={(id) =>
@@ -774,7 +773,7 @@ export default function GestionRoles({
                                 </div>
                                 <div>
                                     <div className="text-xs text-muted-foreground">
-                                        Estado Secundario
+                                        Estado QX
                                     </div>
                                     <EstadoBadges
                                         items={estadosSecundarios}
@@ -817,8 +816,8 @@ export default function GestionRoles({
                     <DialogHeader>
                         <DialogTitle>Eliminar Rol</DialogTitle>
                         <DialogDescription>
-                            Esta acción no se puede deshacer. ¿Deseas eliminar el
-                            rol{' '}
+                            Esta acción no se puede deshacer. ¿Deseas eliminar
+                            el rol{' '}
                             <span className="font-semibold text-foreground">
                                 {deleteTarget?.Nombre}
                             </span>

@@ -45,7 +45,6 @@ class RadicarCaso extends Model
         'ObservacionTFX',
         'ObservacionCCX',
         'venc_anestesia',
-        'estado_qx',
     ];
 
     /**

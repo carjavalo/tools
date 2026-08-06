@@ -209,7 +209,6 @@ interface InformeRow {
     medico: string;
     especialidad: string;
     motivo: string;
-    estadoSecundario: string;
     subespecialidad: string;
     fechaRecibidoDev: string | null;
     vencAnestesia: string | null;
@@ -275,10 +274,11 @@ const EMPTY_SEG = {
     // Estado actual del caso: el mismo campo de Nueva Radicación.
     estRad: '',
     maos: false,
+    // Estado QX: se guarda en codestsecundario (catálogo EstRadisecundario).
+    codestsecundario: '',
     codsubesp: '',
     fecreci: '',
     venc_anestesia: '',
-    estado_qx: '',
     ObservacionCCX: '',
 };
 
@@ -1440,7 +1440,6 @@ export default function RadicarSolicitud({
             Médico: r.medico,
             Especialidad: r.especialidad,
             Motivo: r.motivo,
-            'Estado Secundario': r.estadoSecundario,
             Subespecialidad: r.subespecialidad,
             'Fec. Recibido': r.fechaRecibidoDev ?? '',
             'Venc. Anestesia': r.vencAnestesia ?? '',
@@ -1942,7 +1941,7 @@ export default function RadicarSolicitud({
                                         )}
                                     </Field>
                                     {/*
-                                        Estado Secundario no se diligencia en
+                                        Estado QX no se diligencia en
                                         esta vista: lo registra otro rol desde
                                         el seguimiento del caso.
                                     */}
@@ -3174,16 +3173,47 @@ export default function RadicarSolicitud({
                                                     />
                                                 </Field>
                                                 <Field label="Estado QX">
-                                                    <Input
-                                                        value={seg.estado_qx}
-                                                        onChange={(e) =>
+                                                    <Select
+                                                        value={
+                                                            seg.codestsecundario
+                                                        }
+                                                        onValueChange={(v) =>
                                                             setSegField(
-                                                                'estado_qx',
-                                                                e.target.value,
+                                                                'codestsecundario',
+                                                                v,
                                                             )
                                                         }
-                                                        maxLength={120}
-                                                    />
+                                                    >
+                                                        <SelectTrigger>
+                                                            <SelectValue placeholder="Seleccione…" />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            {estadosSecundarios.length ===
+                                                                0 && (
+                                                                <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                                                                    No hay
+                                                                    estados QX
+                                                                    creados.
+                                                                </div>
+                                                            )}
+                                                            {estadosSecundarios.map(
+                                                                (s) => (
+                                                                    <SelectItem
+                                                                        key={
+                                                                            s.id
+                                                                        }
+                                                                        value={String(
+                                                                            s.id,
+                                                                        )}
+                                                                    >
+                                                                        {
+                                                                            s.Nombre
+                                                                        }
+                                                                    </SelectItem>
+                                                                ),
+                                                            )}
+                                                        </SelectContent>
+                                                    </Select>
                                                 </Field>
                                                 <Field
                                                     label="Observaciones CCX"
@@ -3502,9 +3532,6 @@ export default function RadicarSolicitud({
                                                     Motivo
                                                 </th>
                                                 <th className="px-3 py-2 font-medium">
-                                                    Estado Sec.
-                                                </th>
-                                                <th className="px-3 py-2 font-medium">
                                                     Subespecialidad
                                                 </th>
                                                 <th className="px-3 py-2 font-medium">
@@ -3637,9 +3664,6 @@ export default function RadicarSolicitud({
                                                     </td>
                                                     <td className="px-3 py-2">
                                                         {r.motivo}
-                                                    </td>
-                                                    <td className="px-3 py-2">
-                                                        {r.estadoSecundario}
                                                     </td>
                                                     <td className="px-3 py-2">
                                                         {r.subespecialidad}

@@ -453,17 +453,18 @@ export default function GestorPermisos({
                     )}
                 </div>
 
-                {/* Radicaciones visibles en la grilla del Historial (por estado secundario) */}
+                {/* Radicaciones visibles en la grilla del Historial (por estado QX) */}
                 <div className="rounded-xl border bg-card p-4 shadow-sm">
                     <div className="mb-1 flex items-center gap-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
                         <Flag className="size-4" />
-                        Estados secundarios asignados a{' '}
-                        {rolActivo?.Nombre ?? 'el rol'} (aún sin efecto)
+                        Estados QX asignados a {rolActivo?.Nombre ??
+                            'el rol'}{' '}
+                        (aún sin efecto)
                     </div>
                     <p className="mb-3 text-xs text-muted-foreground">
-                        Aquí se deja preparada la asignación de estados
-                        secundarios por rol. Es independiente de la Asignación
-                        de Estados y del filtro por estado actual.
+                        Aquí se deja preparada la asignación de estados QX por
+                        rol. Es independiente de la Asignación de Estados y del
+                        filtro por estado actual.
                     </p>
                     <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-4">
                         {estadosSecList.map((e) => (
@@ -484,22 +485,22 @@ export default function GestorPermisos({
                         ))}
                         {estadosSecList.length === 0 && (
                             <p className="text-sm text-muted-foreground">
-                                No hay estados secundarios creados.
+                                No hay estados QX creados.
                             </p>
                         )}
                     </div>
                     <p className="mt-2 text-xs text-muted-foreground">
                         {grillaEstadosSec.length === 0
-                            ? 'Ningún estado secundario asignado.'
-                            : `${grillaEstadosSec.length} estado(s) secundario(s) asignado(s).`}
+                            ? 'Ningún estado QX asignado.'
+                            : `${grillaEstadosSec.length} estado(s) QX asignado(s).`}
                     </p>
 
                     <p className="mt-2 rounded-lg border border-sky-300 bg-sky-50 px-3 py-2 text-xs text-sky-900 dark:border-sky-900 dark:bg-sky-950 dark:text-sky-200">
                         <strong>Todavía no filtra la grilla.</strong> El estado
-                        secundario tiene otras funciones pendientes de definir,
-                        así que lo que marques aquí se guarda pero no limita lo
-                        que el rol ve en el Historial. Solo el estado actual
-                        filtra la grilla.
+                        QX tiene otras funciones pendientes de definir, así que
+                        lo que marques aquí se guarda pero no limita lo que el
+                        rol ve en el Historial. Solo el estado actual filtra la
+                        grilla.
                     </p>
                 </div>
 

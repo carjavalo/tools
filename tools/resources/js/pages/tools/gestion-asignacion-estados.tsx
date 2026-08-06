@@ -391,7 +391,7 @@ export default function GestionAsignacionEstados({
                                         Estados
                                     </th>
                                     <th className="px-4 py-3 font-medium">
-                                        Estados Secundarios
+                                        Estados QX
                                     </th>
                                     <th className="px-4 py-3 font-medium">
                                         Estado del Rol
@@ -524,9 +524,7 @@ export default function GestionAsignacionEstados({
                                 variant="outline"
                                 size="sm"
                                 className="gap-1"
-                                disabled={
-                                    roles.current_page >= roles.last_page
-                                }
+                                disabled={roles.current_page >= roles.last_page}
                                 onClick={() => goToPage(roles.current_page + 1)}
                             >
                                 Siguiente
@@ -640,12 +638,12 @@ export default function GestionAsignacionEstados({
                             <div className="grid gap-2">
                                 <Label className="flex items-center gap-1">
                                     <FlagTriangleRight className="size-3.5" />
-                                    Estados Secundarios
+                                    Estados QX
                                 </Label>
                                 <div className="max-h-52 overflow-y-auto rounded-lg border p-2">
                                     {estadosSecundarios.length === 0 && (
                                         <p className="px-1 py-2 text-xs text-muted-foreground">
-                                            No hay estados secundarios creados.
+                                            No hay estados QX creados.
                                         </p>
                                     )}
                                     {estadosSecundarios.map((e) => (
@@ -676,7 +674,7 @@ export default function GestionAsignacionEstados({
                         <p className="text-xs text-muted-foreground">
                             {form.data.est_radicado_ids.length} estado(s) y{' '}
                             {form.data.est_radisecundario_ids.length} estado(s)
-                            secundario(s) seleccionados.
+                            QX seleccionados.
                         </p>
 
                         <DialogFooter>
@@ -726,9 +724,7 @@ export default function GestionAsignacionEstados({
                                                 : 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300'
                                         }`}
                                     >
-                                        {viewRow.Estado
-                                            ? 'Activo'
-                                            : 'Inactivo'}
+                                        {viewRow.Estado ? 'Activo' : 'Inactivo'}
                                     </span>
                                 </div>
                             </div>
@@ -744,7 +740,7 @@ export default function GestionAsignacionEstados({
                             <div>
                                 <div className="mb-1 flex items-center gap-1 text-xs text-muted-foreground">
                                     <FlagTriangleRight className="size-3.5" />
-                                    Estados Secundarios (
+                                    Estados QX (
                                     {viewRow.estados_secundarios.length})
                                 </div>
                                 <EstadoBadgesCompleto

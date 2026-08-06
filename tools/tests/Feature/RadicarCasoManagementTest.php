@@ -227,9 +227,11 @@ test('aplicar modificacion logs a trazabilidad record and updates the case', fun
     $user = User::factory()->create();
     $caso = RadicarCaso::create(['Ndocumento' => '999']);
 
+    $estadoQx = EstRadisecundario::create(['Nombre' => 'En Revisión', 'Estado' => true]);
+
     $this->actingAs($user)
         ->postJson("/tools/radicar-solicitud/{$caso->codrad}/seguimiento", [
-            'estado_qx' => 'Programado',
+            'codestsecundario' => (string) $estadoQx->id,
             'ObservacionCCX' => 'Revisión',
         ])
         ->assertOk()
@@ -237,12 +239,12 @@ test('aplicar modificacion logs a trazabilidad record and updates the case', fun
 
     $this->assertDatabaseHas('seguimiento_caso', [
         'codrad' => $caso->codrad,
-        'estado_qx' => 'Programado',
+        'codestsecundario' => (string) $estadoQx->id,
         'user_id' => $user->id,
     ]);
 
     $caso->refresh();
-    expect($caso->estado_qx)->toBe('Programado');
+    expect($caso->codestsecundario)->toBe((string) $estadoQx->id);
     expect($caso->ObservacionCCX)->toBe('Revisión');
 });
 
@@ -300,7 +302,6 @@ test('aplicar modificacion ya no acepta el motivo', function () {
     $this->actingAs($user)
         ->postJson("/tools/radicar-solicitud/{$caso->codrad}/seguimiento", [
             'estcod' => (string) $motivo->id,
-            'estado_qx' => 'Programado',
         ])
         ->assertOk();
 
@@ -322,7 +323,6 @@ test('informe returns the trazabilidad rows with subespecialidad and observacion
     SeguimientoCaso::create([
         'codrad' => $caso->codrad,
         'codsubesp' => 'SX1',
-        'estado_qx' => 'X',
         'ObservacionCCX' => 'Obs prueba',
         'user_id' => $user->id,
     ]);
@@ -474,7 +474,10 @@ test('aplicar modificacion registra el cambio campo a campo', function () {
     $this->actingAs($user)
         ->postJson("/tools/radicar-solicitud/{$caso->codrad}/seguimiento", [
             'codsubesp' => $sub->cod_SubEspecialidad,
-            'estado_qx' => 'Programado',
+            'codestsecundario' => (string) EstRadisecundario::create([
+                'Nombre' => 'Programado',
+                'Estado' => true,
+            ])->id,
             'venc_anestesia' => '2026-09-01',
         ])
         ->assertOk();
@@ -486,9 +489,11 @@ test('aplicar modificacion registra el cambio campo a campo', function () {
         'etiqueta' => 'Subespecialidad',
         'nuevo' => 'Cirugía de Mano',
     ]);
+    // El estado secundario ahora se llama Estado QX en toda la interfaz.
     $this->assertDatabaseHas('trazabilidad_caso', [
         'codrad' => $caso->codrad,
-        'campo' => 'estado_qx',
+        'campo' => 'codestsecundario',
+        'etiqueta' => 'Estado QX',
         'nuevo' => 'Programado',
     ]);
     $this->assertDatabaseHas('trazabilidad_caso', [
@@ -1155,7 +1160,6 @@ test('super admin can delete a case with its procedures and trazabilidad', funct
     ]);
     SeguimientoCaso::create([
         'codrad' => $caso->codrad,
-        'estado_qx' => 'X',
         'user_id' => $admin->id,
     ]);
 

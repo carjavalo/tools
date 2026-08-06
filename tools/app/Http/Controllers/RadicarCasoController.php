@@ -56,7 +56,7 @@ class RadicarCasoController extends Controller
         'maos' => 'MAOS',
         'estRad' => 'Estado Actual',
         'fentregapro' => 'Entrega a Programación',
-        'codestsecundario' => 'Estado Secundario',
+        'codestsecundario' => 'Estado QX',
         'fecreci' => 'Fecha Recibido',
         'estcod' => 'Motivo',
         'fecAutorizacion' => 'Fecha Autorización',
@@ -64,7 +64,6 @@ class RadicarCasoController extends Controller
         'ObservacionTFX' => 'OB TFX',
         'ObservacionCCX' => 'Observación CCX',
         'venc_anestesia' => 'Vencimiento Anestesia',
-        'estado_qx' => 'Estado QX',
     ];
 
     /**
@@ -682,7 +681,7 @@ class RadicarCasoController extends Controller
             'valor_copago' => 'valor del copago',
             'estRad' => 'estado actual',
             'fentregapro' => 'entrega a programación',
-            'codestsecundario' => 'estado secundario',
+            'codestsecundario' => 'estado QX',
             'fecreci' => 'fecha recibido',
             'fecAutorizacion' => 'fecha autorización',
             'fechavenautorizacion' => 'fecha vencimiento autorización',
@@ -899,7 +898,8 @@ class RadicarCasoController extends Controller
             // Motivo se retiró del formulario: ya no se diligencia aquí.
             'maos' => ['boolean'],
             'venc_anestesia' => ['nullable', 'date'],
-            'estado_qx' => ['nullable', 'string', 'max:120'],
+            // Estado QX: se escoge del catálogo (tabla EstRadisecundario).
+            'codestsecundario' => ['nullable', 'string', 'max:5'],
             'ObservacionCCX' => ['nullable', 'string', 'max:65535'],
         ], [
             'estRad.in' => 'El estado seleccionado no está asignado a tu rol.',
@@ -1145,7 +1145,6 @@ class RadicarCasoController extends Controller
                 'anterior' => $t->anterior ?? '—',
                 'nuevo' => $t->nuevo ?? '—',
                 'motivo' => '—',
-                'estadoSecundario' => '—',
                 'fechaRecibidoDev' => null,
                 'vencAnestesia' => null,
                 'observacion' => null,
@@ -1177,13 +1176,13 @@ class RadicarCasoController extends Controller
                 'anterior' => '—',
                 'nuevo' => '—',
                 'motivo' => $motivos[(int) $s->estcod] ?? '—',
-                'estadoSecundario' => $estadosSec[(int) $s->codestsecundario] ?? '—',
                 // La subespecialidad del seguimiento manda sobre la del caso.
                 'subespecialidad' => $subesp[$s->codsubesp] ?? $base['subespecialidad'],
                 'fechaRecibidoDev' => optional($s->fecreci)->format('Y-m-d'),
                 'vencAnestesia' => optional($s->venc_anestesia)->format('Y-m-d'),
                 'observacion' => $s->ObservacionCCX,
-                'estadoQx' => $s->estado_qx ?? '—',
+                // Estado QX es el estado secundario del catálogo.
+                'estadoQx' => $estadosSec[(int) $s->codestsecundario] ?? '—',
                 'usuario' => $this->nombreUsuario($s->user) ?? '—',
                 'modificadoEn' => optional($s->created_at)->format('Y-m-d H:i'),
             ]);
@@ -1218,11 +1217,10 @@ class RadicarCasoController extends Controller
                 'anterior' => '—',
                 'nuevo' => '—',
                 'motivo' => $motivos[(int) $caso->estcod] ?? '—',
-                'estadoSecundario' => $estadosSec[(int) $caso->codestsecundario] ?? '—',
                 'fechaRecibidoDev' => optional($caso->fecreci)->format('Y-m-d'),
                 'vencAnestesia' => optional($caso->venc_anestesia)->format('Y-m-d'),
                 'observacion' => $caso->ObservacionCCX,
-                'estadoQx' => $caso->estado_qx ?? '—',
+                'estadoQx' => $estadosSec[(int) $caso->codestsecundario] ?? '—',
                 'usuario' => '—',
                 'modificadoEn' => optional($caso->created_at)->format('Y-m-d H:i'),
             ]);

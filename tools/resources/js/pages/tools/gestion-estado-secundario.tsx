@@ -63,7 +63,7 @@ interface PageProps {
 const breadcrumbs: BreadcrumbItem[] = [
     { title: 'Inicio', href: dashboard().url },
     {
-        title: 'Gestión Estado Secundario',
+        title: 'Gestión Estado QX',
         href: '/tools/gestion-estado-secundario',
     },
 ];
@@ -219,7 +219,7 @@ export default function GestionEstadoSecundario({
 
     return (
         <AppLayout breadcrumbs={breadcrumbs}>
-            <Head title="Gestión Estado Secundario" />
+            <Head title="Gestión Estado QX" />
 
             <div className="flex h-full flex-1 flex-col gap-6 p-4 md:p-6">
                 {/* Encabezado */}
@@ -230,18 +230,18 @@ export default function GestionEstadoSecundario({
                         </div>
                         <div>
                             <h1 className="text-2xl font-bold tracking-tight text-foreground">
-                                Gestión Estado Secundario
+                                Gestión Estado QX
                             </h1>
                             <p className="text-sm text-muted-foreground">
-                                Administra los estados secundarios de radicado
-                                del sistema.
+                                Administra los estados QX de radicado del
+                                sistema.
                             </p>
                         </div>
                     </div>
                     {acciones.crear && (
                         <Button onClick={openCreate} className="gap-2">
                             <Plus className="size-4" />
-                            Nuevo Estado Secundario
+                            Nuevo Estado QX
                         </Button>
                     )}
                 </div>
@@ -297,7 +297,7 @@ export default function GestionEstadoSecundario({
                                 value={search}
                                 onChange={(e) => setSearch(e.target.value)}
                                 placeholder="Buscar por nombre u observación…"
-                                className="pl-9 pr-9"
+                                className="pr-9 pl-9"
                             />
                             {search && (
                                 <button
@@ -445,7 +445,9 @@ export default function GestionEstadoSecundario({
                                 size="sm"
                                 className="gap-1"
                                 disabled={estados.current_page <= 1}
-                                onClick={() => goToPage(estados.current_page - 1)}
+                                onClick={() =>
+                                    goToPage(estados.current_page - 1)
+                                }
                             >
                                 <ChevronLeft className="size-4" />
                                 Anterior
@@ -461,7 +463,9 @@ export default function GestionEstadoSecundario({
                                 disabled={
                                     estados.current_page >= estados.last_page
                                 }
-                                onClick={() => goToPage(estados.current_page + 1)}
+                                onClick={() =>
+                                    goToPage(estados.current_page + 1)
+                                }
                             >
                                 Siguiente
                                 <ChevronRight className="size-4" />
@@ -482,14 +486,12 @@ export default function GestionEstadoSecundario({
                 <DialogContent className="sm:max-w-lg">
                     <DialogHeader>
                         <DialogTitle>
-                            {isEditing
-                                ? 'Editar Estado Secundario'
-                                : 'Nuevo Estado Secundario'}
+                            {isEditing ? 'Editar Estado QX' : 'Nuevo Estado QX'}
                         </DialogTitle>
                         <DialogDescription>
                             {isEditing
-                                ? 'Actualiza la información del estado secundario.'
-                                : 'Registra un nuevo estado secundario de radicado.'}
+                                ? 'Actualiza la información del estado QX.'
+                                : 'Registra un nuevo estado QX de radicado.'}
                         </DialogDescription>
                     </DialogHeader>
 
@@ -528,8 +530,8 @@ export default function GestionEstadoSecundario({
                                 <Label htmlFor="Estado">Estado</Label>
                                 <p className="text-xs text-muted-foreground">
                                     {form.data.Estado
-                                        ? 'El estado secundario está activo.'
-                                        : 'El estado secundario está inactivo.'}
+                                        ? 'El estado QX está activo.'
+                                        : 'El estado QX está inactivo.'}
                                 </p>
                             </div>
                             <Switch
@@ -555,7 +557,7 @@ export default function GestionEstadoSecundario({
                                 )}
                                 {isEditing
                                     ? 'Guardar cambios'
-                                    : 'Crear Estado Secundario'}
+                                    : 'Crear Estado QX'}
                             </Button>
                         </DialogFooter>
                     </form>
@@ -569,7 +571,7 @@ export default function GestionEstadoSecundario({
             >
                 <DialogContent className="sm:max-w-md">
                     <DialogHeader>
-                        <DialogTitle>Detalle del Estado Secundario</DialogTitle>
+                        <DialogTitle>Detalle del Estado QX</DialogTitle>
                     </DialogHeader>
                     {viewRow && (
                         <div className="grid gap-4">
@@ -633,10 +635,10 @@ export default function GestionEstadoSecundario({
             >
                 <DialogContent className="sm:max-w-md">
                     <DialogHeader>
-                        <DialogTitle>Eliminar Estado Secundario</DialogTitle>
+                        <DialogTitle>Eliminar Estado QX</DialogTitle>
                         <DialogDescription>
-                            Esta acción no se puede deshacer. ¿Deseas eliminar el
-                            estado secundario{' '}
+                            Esta acción no se puede deshacer. ¿Deseas eliminar
+                            el estado QX{' '}
                             <span className="font-semibold text-foreground">
                                 {deleteTarget?.Nombre}
                             </span>
