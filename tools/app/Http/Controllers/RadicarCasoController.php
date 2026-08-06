@@ -53,6 +53,7 @@ class RadicarCasoController extends Controller
         'copago' => 'Copago',
         'valor_copago' => 'Valor del copago',
         'paquete' => 'Paquete (PDF)',
+        'maos' => 'MAOS',
         'estRad' => 'Estado Actual',
         'fentregapro' => 'Entrega a Programación',
         'codestsecundario' => 'Estado Secundario',
@@ -896,6 +897,7 @@ class RadicarCasoController extends Controller
             'codsubesp' => ['nullable', 'string', 'max:10'],
             'fecreci' => ['nullable', 'date'],
             // Motivo se retiró del formulario: ya no se diligencia aquí.
+            'maos' => ['boolean'],
             'venc_anestesia' => ['nullable', 'date'],
             'estado_qx' => ['nullable', 'string', 'max:120'],
             'ObservacionCCX' => ['nullable', 'string', 'max:65535'],
@@ -906,10 +908,10 @@ class RadicarCasoController extends Controller
         ]);
 
         DB::transaction(function () use ($caso, $data, $request) {
-            // Foto del seguimiento. El estado no se guarda aquí porque
-            // seguimiento_caso no tiene esa columna: su cambio queda en la
-            // bitácora, que además registra el valor anterior y el nuevo.
-            SeguimientoCaso::create(array_merge(Arr::except($data, ['estRad']), [
+            // Foto del seguimiento. Estado y MAOS no se guardan aquí porque
+            // seguimiento_caso no tiene esas columnas: sus cambios quedan en
+            // la bitácora, que además registra el valor anterior y el nuevo.
+            SeguimientoCaso::create(array_merge(Arr::except($data, ['estRad', 'maos']), [
                 'codrad' => $caso->codrad,
                 'user_id' => $request->user()?->id,
             ]));
@@ -1107,6 +1109,7 @@ class RadicarCasoController extends Controller
                 'subespecialidad' => $subesp[$caso->codsubesp] ?? '—',
                 'copago' => (bool) $caso->copago,
                 'valorCopago' => $caso->valor_copago,
+                'maos' => (bool) $caso->maos,
                 'paqueteUrl' => $caso->paquete
                     ? Storage::disk('public')->url($caso->paquete)
                     : null,
@@ -1275,9 +1278,9 @@ class RadicarCasoController extends Controller
     {
         $plano = $this->valorPlano($valor);
 
-        // El copago es booleano: "No" es un valor con significado, no un vacío,
-        // así que se resuelve antes de tratar la cadena vacía como "sin dato".
-        if ($campo === 'copago') {
+        // En un booleano, "No" es un valor con significado y no un vacío: se
+        // resuelve antes de tratar la cadena vacía como "sin dato".
+        if (in_array($campo, ['copago', 'maos'], true)) {
             return in_array($plano, ['1', 'true'], true) ? 'Sí' : 'No';
         }
 
@@ -1557,6 +1560,7 @@ class RadicarCasoController extends Controller
             'estadoActual' => $estado?->Nombre ?? '—',
             'copago' => (bool) $caso->copago,
             'valorCopago' => $caso->valor_copago,
+            'maos' => (bool) $caso->maos,
             'paquete' => $caso->paquete ? basename($caso->paquete) : null,
             // Se sirve por la ruta protegida, no por la URL pública del disco.
             'paqueteUrl' => $caso->paquete

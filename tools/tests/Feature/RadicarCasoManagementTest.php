@@ -246,6 +246,51 @@ test('aplicar modificacion logs a trazabilidad record and updates the case', fun
     expect($caso->ObservacionCCX)->toBe('Revisión');
 });
 
+test('MAOS se guarda, queda en la bitacora y llega a la grilla de informes', function () {
+    $user = User::factory()->create();
+    $caso = RadicarCaso::create(['Ndocumento' => '9980', 'estRad' => '1']);
+
+    $this->actingAs($user)
+        ->postJson("/tools/radicar-solicitud/{$caso->codrad}/seguimiento", [
+            'maos' => true,
+        ])
+        ->assertOk();
+
+    expect($caso->refresh()->maos)->toBeTrue();
+
+    $this->assertDatabaseHas('trazabilidad_caso', [
+        'codrad' => $caso->codrad,
+        'evento' => 'seguimiento',
+        'campo' => 'maos',
+        'etiqueta' => 'MAOS',
+        'anterior' => 'No',
+        'nuevo' => 'Sí',
+    ]);
+
+    $fila = collect(
+        $this->actingAs($user)
+            ->getJson('/tools/radicar-solicitud/informe?consecutivo='.$caso->codrad)
+            ->assertOk()
+            ->json('rows')
+    )->first();
+    expect($fila['maos'])->toBeTrue();
+
+    // Desmarcarlo también se aplica: "No" es un valor, no un campo vacío.
+    $this->actingAs($user)
+        ->postJson("/tools/radicar-solicitud/{$caso->codrad}/seguimiento", [
+            'maos' => false,
+        ])
+        ->assertOk();
+
+    expect($caso->refresh()->maos)->toBeFalse();
+    $this->assertDatabaseHas('trazabilidad_caso', [
+        'codrad' => $caso->codrad,
+        'campo' => 'maos',
+        'anterior' => 'Sí',
+        'nuevo' => 'No',
+    ]);
+});
+
 test('aplicar modificacion ya no acepta el motivo', function () {
     $user = User::factory()->create();
     $caso = RadicarCaso::create(['Ndocumento' => '9970']);

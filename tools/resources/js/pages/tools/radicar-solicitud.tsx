@@ -174,6 +174,7 @@ interface CasoDetalle {
     estadoActual: string;
     copago: boolean;
     valorCopago: string | number | null;
+    maos: boolean;
     paquete: string | null;
     paqueteUrl: string | null;
     codMed: string | null;
@@ -203,6 +204,7 @@ interface InformeRow {
     estado: string;
     copago: boolean;
     valorCopago: string | number | null;
+    maos: boolean;
     paqueteUrl: string | null;
     medico: string;
     especialidad: string;
@@ -272,6 +274,7 @@ const EMPTY_ESPECIALIDAD = {
 const EMPTY_SEG = {
     // Estado actual del caso: el mismo campo de Nueva Radicación.
     estRad: '',
+    maos: false,
     codsubesp: '',
     fecreci: '',
     venc_anestesia: '',
@@ -1012,7 +1015,9 @@ export default function RadicarSolicitud({
             .then((d) => {
                 if (d.found) {
                     setCaso(d.caso);
-                    setSeg({ ...EMPTY_SEG });
+                    // MAOS refleja lo que ya tiene el caso; el resto del
+                    // formulario arranca en blanco para diligenciar el cambio.
+                    setSeg({ ...EMPTY_SEG, maos: d.caso.maos ?? false });
                     setSubQuery('');
                 } else {
                     setCaso(null);
@@ -1339,7 +1344,9 @@ export default function RadicarSolicitud({
             .then((d) => {
                 if (d && d.ok) {
                     setCaso(d.caso);
-                    setSeg({ ...EMPTY_SEG });
+                    // MAOS refleja lo que ya tiene el caso; el resto del
+                    // formulario arranca en blanco para diligenciar el cambio.
+                    setSeg({ ...EMPTY_SEG, maos: d.caso.maos ?? false });
                     setSubQuery('');
                     setSegOk(true);
                 }
@@ -1428,6 +1435,7 @@ export default function RadicarSolicitud({
             // Se exporta el número para poder sumarlo o filtrarlo en Excel.
             'Valor Copago':
                 r.copago && r.valorCopago ? Number(r.valorCopago) : '',
+            MAOS: r.maos ? 'Sí' : 'No',
             Paquete: r.paqueteUrl ? 'Sí' : 'No',
             Médico: r.medico,
             Especialidad: r.especialidad,
@@ -2612,6 +2620,18 @@ export default function RadicarSolicitud({
                                                 }
                                             />
                                             <Dato
+                                                label="MAOS"
+                                                value={
+                                                    caso.maos ? (
+                                                        <span className="font-semibold text-foreground">
+                                                            Sí
+                                                        </span>
+                                                    ) : (
+                                                        'No'
+                                                    )
+                                                }
+                                            />
+                                            <Dato
                                                 label="Paquete"
                                                 value={
                                                     caso.paqueteUrl ? (
@@ -3117,6 +3137,28 @@ export default function RadicarSolicitud({
                                                 </Field>
                                                 {/* Motivo no se diligencia en
                                                     este formulario. */}
+                                                <Field label="MAOS">
+                                                    <label className="flex h-9 cursor-pointer items-center gap-2 text-sm">
+                                                        <Checkbox
+                                                            checked={seg.maos}
+                                                            onCheckedChange={(
+                                                                v,
+                                                            ) =>
+                                                                setSeg(
+                                                                    (prev) => ({
+                                                                        ...prev,
+                                                                        maos:
+                                                                            v ===
+                                                                            true,
+                                                                    }),
+                                                                )
+                                                            }
+                                                        />
+                                                        <span className="text-foreground">
+                                                            Aplica
+                                                        </span>
+                                                    </label>
+                                                </Field>
                                                 <Field label="Vencimiento Anestesia">
                                                     <Input
                                                         type="date"
@@ -3445,6 +3487,9 @@ export default function RadicarSolicitud({
                                                     Copago
                                                 </th>
                                                 <th className="px-3 py-2 font-medium">
+                                                    MAOS
+                                                </th>
+                                                <th className="px-3 py-2 font-medium">
                                                     Paquete
                                                 </th>
                                                 <th className="px-3 py-2 font-medium">
@@ -3548,6 +3593,17 @@ export default function RadicarSolicitud({
                                                                 {formatoMoneda(
                                                                     r.valorCopago,
                                                                 )}
+                                                            </span>
+                                                        ) : (
+                                                            <span className="text-muted-foreground">
+                                                                No
+                                                            </span>
+                                                        )}
+                                                    </td>
+                                                    <td className="px-3 py-2">
+                                                        {r.maos ? (
+                                                            <span className="font-medium text-foreground">
+                                                                Sí
                                                             </span>
                                                         ) : (
                                                             <span className="text-muted-foreground">

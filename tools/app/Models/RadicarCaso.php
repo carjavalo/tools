@@ -34,6 +34,7 @@ class RadicarCaso extends Model
         'copago',
         'valor_copago',
         'paquete',
+        'maos',
         'estRad',
         'fentregapro',
         'codestsecundario',
@@ -56,6 +57,7 @@ class RadicarCaso extends Model
     {
         return [
             'copago' => 'boolean',
+            'maos' => 'boolean',
             'valor_copago' => 'decimal:2',
             'fentregapro' => 'date:Y-m-d',
             'fecreci' => 'date:Y-m-d',
