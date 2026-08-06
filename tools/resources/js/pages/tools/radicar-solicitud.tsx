@@ -120,7 +120,6 @@ interface PageProps {
     medicos: MedicoOpt[];
     estados: Option[];
     estadosSecundarios: Option[];
-    motivos: Option[];
     tiposDocumento: Option[];
     epsList: Option[];
     rolesList: Option[];
@@ -271,10 +270,10 @@ const EMPTY_ESPECIALIDAD = {
 };
 
 const EMPTY_SEG = {
-    codestsecundario: '',
+    // Estado actual del caso: el mismo campo de Nueva Radicación.
+    estRad: '',
     codsubesp: '',
     fecreci: '',
-    estcod: '',
     venc_anestesia: '',
     estado_qx: '',
     ObservacionCCX: '',
@@ -508,7 +507,6 @@ export default function RadicarSolicitud({
     medicos,
     estados,
     estadosSecundarios,
-    motivos,
     tiposDocumento,
     epsList,
     rolesList,
@@ -3058,14 +3056,17 @@ export default function RadicarSolicitud({
                                                         )}
                                                     </div>
                                                 </Field>
-                                                <Field label="Estado Secundario">
+                                                {/* Estado Actual: los mismos
+                                                    estados de Nueva
+                                                    Radicación, ya filtrados
+                                                    por los que tiene
+                                                    asignados el rol. */}
+                                                <Field label="Estado Actual">
                                                     <Select
-                                                        value={
-                                                            seg.codestsecundario
-                                                        }
+                                                        value={seg.estRad}
                                                         onValueChange={(v) =>
                                                             setSegField(
-                                                                'codestsecundario',
+                                                                'estRad',
                                                                 v,
                                                             )
                                                         }
@@ -3074,7 +3075,16 @@ export default function RadicarSolicitud({
                                                             <SelectValue placeholder="Seleccione…" />
                                                         </SelectTrigger>
                                                         <SelectContent>
-                                                            {estadosSecundarios.map(
+                                                            {estados.length ===
+                                                                0 && (
+                                                                <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                                                                    Tu rol no
+                                                                    tiene
+                                                                    estados
+                                                                    asignados.
+                                                                </div>
+                                                            )}
+                                                            {estados.map(
                                                                 (s) => (
                                                                     <SelectItem
                                                                         key={
@@ -3105,39 +3115,8 @@ export default function RadicarSolicitud({
                                                         }
                                                     />
                                                 </Field>
-                                                <Field label="Motivo">
-                                                    <Select
-                                                        value={seg.estcod}
-                                                        onValueChange={(v) =>
-                                                            setSegField(
-                                                                'estcod',
-                                                                v,
-                                                            )
-                                                        }
-                                                    >
-                                                        <SelectTrigger>
-                                                            <SelectValue placeholder="Seleccione…" />
-                                                        </SelectTrigger>
-                                                        <SelectContent>
-                                                            {motivos.map(
-                                                                (m) => (
-                                                                    <SelectItem
-                                                                        key={
-                                                                            m.id
-                                                                        }
-                                                                        value={String(
-                                                                            m.id,
-                                                                        )}
-                                                                    >
-                                                                        {
-                                                                            m.Nombre
-                                                                        }
-                                                                    </SelectItem>
-                                                                ),
-                                                            )}
-                                                        </SelectContent>
-                                                    </Select>
-                                                </Field>
+                                                {/* Motivo no se diligencia en
+                                                    este formulario. */}
                                                 <Field label="Vencimiento Anestesia">
                                                     <Input
                                                         type="date"

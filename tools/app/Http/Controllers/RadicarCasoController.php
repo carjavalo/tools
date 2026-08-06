@@ -88,7 +88,6 @@ class RadicarCasoController extends Controller
                 ->get(['id', 'name', 'Apellido1', 'apellido2']),
             'estados' => $estados,
             'estadosSecundarios' => $estadosSecundarios,
-            'motivos' => Motivo::orderBy('Nombre')->get(['id', 'Nombre']),
             'tiposDocumento' => TipoDocumento::where('Estado', true)
                 ->orderBy('Nombre')->get(['id', 'Nombre']),
             'epsList' => Eps::orderBy('Nombre')->get(['id', 'Nombre']),
@@ -883,19 +882,34 @@ class RadicarCasoController extends Controller
      */
     public function aplicarModificacion(Request $request, RadicarCaso $caso): JsonResponse
     {
+        // El estado solo puede cambiarse a uno de los asignados al rol: la
+        // vista ya los limita, pero la petición podría traer cualquier otro.
+        [$estadosPermitidos] = $this->estadosParaUsuario($request);
+
         $data = $request->validate([
-            'codestsecundario' => ['nullable', 'string', 'max:5'],
+            'estRad' => [
+                'nullable',
+                'string',
+                'max:5',
+                Rule::in($estadosPermitidos->pluck('id')->map(fn ($id) => (string) $id)->all()),
+            ],
             'codsubesp' => ['nullable', 'string', 'max:10'],
             'fecreci' => ['nullable', 'date'],
-            'estcod' => ['nullable', 'string', 'max:5'],
+            // Motivo se retiró del formulario: ya no se diligencia aquí.
             'venc_anestesia' => ['nullable', 'date'],
             'estado_qx' => ['nullable', 'string', 'max:120'],
             'ObservacionCCX' => ['nullable', 'string', 'max:65535'],
+        ], [
+            'estRad.in' => 'El estado seleccionado no está asignado a tu rol.',
+        ], [
+            'estRad' => 'estado actual',
         ]);
 
         DB::transaction(function () use ($caso, $data, $request) {
-            // Trazabilidad: un registro por cada modificación, con usuario y hora.
-            SeguimientoCaso::create(array_merge($data, [
+            // Foto del seguimiento. El estado no se guarda aquí porque
+            // seguimiento_caso no tiene esa columna: su cambio queda en la
+            // bitácora, que además registra el valor anterior y el nuevo.
+            SeguimientoCaso::create(array_merge(Arr::except($data, ['estRad']), [
                 'codrad' => $caso->codrad,
                 'user_id' => $request->user()?->id,
             ]));

@@ -35,7 +35,9 @@ test('index renders the radicar page with catalogs and default estado', function
             ->component('tools/radicar-solicitud')
             ->has('especialidades')
             ->has('estados')
-            ->has('motivos')
+            // 'motivos' ya no se envía: el campo Motivo salió del formulario
+            // Aplicar Modificaciones y era su único consumidor.
+            ->missing('motivos')
             ->where('defaultEstadoId', $recibido->id)
         );
 });
@@ -224,11 +226,9 @@ test('buscar caso finds a case by patient document', function () {
 test('aplicar modificacion logs a trazabilidad record and updates the case', function () {
     $user = User::factory()->create();
     $caso = RadicarCaso::create(['Ndocumento' => '999']);
-    $motivo = Motivo::create(['Nombre' => 'Paquete Incompleto', 'Estado' => true]);
 
     $this->actingAs($user)
         ->postJson("/tools/radicar-solicitud/{$caso->codrad}/seguimiento", [
-            'estcod' => (string) $motivo->id,
             'estado_qx' => 'Programado',
             'ObservacionCCX' => 'Revisión',
         ])
@@ -237,14 +237,33 @@ test('aplicar modificacion logs a trazabilidad record and updates the case', fun
 
     $this->assertDatabaseHas('seguimiento_caso', [
         'codrad' => $caso->codrad,
-        'estcod' => (string) $motivo->id,
         'estado_qx' => 'Programado',
         'user_id' => $user->id,
     ]);
 
     $caso->refresh();
-    expect($caso->estcod)->toBe((string) $motivo->id);
     expect($caso->estado_qx)->toBe('Programado');
+    expect($caso->ObservacionCCX)->toBe('Revisión');
+});
+
+test('aplicar modificacion ya no acepta el motivo', function () {
+    $user = User::factory()->create();
+    $caso = RadicarCaso::create(['Ndocumento' => '9970']);
+    $motivo = Motivo::create(['Nombre' => 'Paquete Incompleto', 'Estado' => true]);
+
+    // El campo salió del formulario: aunque llegue en la petición, se ignora.
+    $this->actingAs($user)
+        ->postJson("/tools/radicar-solicitud/{$caso->codrad}/seguimiento", [
+            'estcod' => (string) $motivo->id,
+            'estado_qx' => 'Programado',
+        ])
+        ->assertOk();
+
+    expect($caso->refresh()->estcod)->toBeNull();
+    $this->assertDatabaseMissing('seguimiento_caso', [
+        'codrad' => $caso->codrad,
+        'estcod' => (string) $motivo->id,
+    ]);
 });
 
 test('informe returns the trazabilidad rows with subespecialidad and observacion', function () {
@@ -346,29 +365,92 @@ test('radicar un caso deja el evento de creacion en la bitacora', function () {
         ->and($fila['campo'])->toBe('Sin cambios registrados');
 });
 
+test('aplicar modificacion cambia el estado y solo acepta los del rol', function () {
+    $rol = Role::create(['Nombre' => 'Gestor Seg', 'Estado' => true]);
+    $operador = User::factory()->create(['rol' => 'Gestor Seg']);
+    Permiso::create([
+        'role_id' => $rol->id,
+        'vista' => 'radicar-solicitud',
+        'ver' => true,
+        'crear' => true,
+        'editar' => true,
+        'borrar' => true,
+    ]);
+
+    $recibido = EstRadicado::create(['Nombre' => 'Recibido', 'Estado' => true]);
+    $autorizado = EstRadicado::create(['Nombre' => 'Autorizado', 'Estado' => true]);
+    $ajeno = EstRadicado::create(['Nombre' => 'Anulado', 'Estado' => true]);
+
+    // Al rol solo se le asignan dos de los tres estados.
+    $rol->estadosRadicado()->sync([$recibido->id, $autorizado->id]);
+
+    $caso = RadicarCaso::create([
+        'Ndocumento' => '9960',
+        'estRad' => (string) $recibido->id,
+    ]);
+
+    $this->actingAs($operador)
+        ->postJson("/tools/radicar-solicitud/{$caso->codrad}/seguimiento", [
+            'estRad' => (string) $autorizado->id,
+        ])
+        ->assertOk();
+
+    expect($caso->refresh()->estRad)->toBe((string) $autorizado->id);
+
+    $this->assertDatabaseHas('trazabilidad_caso', [
+        'codrad' => $caso->codrad,
+        'evento' => 'seguimiento',
+        'campo' => 'estRad',
+        'etiqueta' => 'Estado Actual',
+        'anterior' => 'Recibido',
+        'nuevo' => 'Autorizado',
+    ]);
+
+    // Un estado que el rol no tiene asignado se rechaza y el caso no cambia.
+    $this->actingAs($operador)
+        ->postJson("/tools/radicar-solicitud/{$caso->codrad}/seguimiento", [
+            'estRad' => (string) $ajeno->id,
+        ])
+        ->assertStatus(422)
+        ->assertJsonValidationErrors(['estRad']);
+
+    expect($caso->refresh()->estRad)->toBe((string) $autorizado->id);
+});
+
 test('aplicar modificacion registra el cambio campo a campo', function () {
     $user = User::factory()->create();
-    $motivo = Motivo::create(['Nombre' => 'Paquete Incompleto', 'Estado' => true]);
+    $sub = SubEspecialidad::create([
+        'Nombre' => 'Cirugía de Mano',
+        'cod_SubEspecialidad' => 'CM1',
+        'Estado' => true,
+    ]);
     $caso = RadicarCaso::create(['Ndocumento' => '8300', 'estRad' => '1']);
 
     $this->actingAs($user)
         ->postJson("/tools/radicar-solicitud/{$caso->codrad}/seguimiento", [
-            'estcod' => (string) $motivo->id,
+            'codsubesp' => $sub->cod_SubEspecialidad,
             'estado_qx' => 'Programado',
+            'venc_anestesia' => '2026-09-01',
         ])
         ->assertOk();
 
     $this->assertDatabaseHas('trazabilidad_caso', [
         'codrad' => $caso->codrad,
         'evento' => 'seguimiento',
-        'campo' => 'estcod',
-        'etiqueta' => 'Motivo',
-        'nuevo' => 'Paquete Incompleto',
+        'campo' => 'codsubesp',
+        'etiqueta' => 'Subespecialidad',
+        'nuevo' => 'Cirugía de Mano',
     ]);
     $this->assertDatabaseHas('trazabilidad_caso', [
         'codrad' => $caso->codrad,
         'campo' => 'estado_qx',
         'nuevo' => 'Programado',
+    ]);
+    $this->assertDatabaseHas('trazabilidad_caso', [
+        'codrad' => $caso->codrad,
+        'campo' => 'venc_anestesia',
+        'etiqueta' => 'Vencimiento Anestesia',
+        'nuevo' => '2026-09-01',
     ]);
 });
 
