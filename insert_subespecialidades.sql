@@ -28,8 +28,30 @@
 --
 -- CÓMO APLICARLO:
 --   1. Copia de seguridad de la base.
---   2. phpMyAdmin > selecciona la base > pestaña SQL > pega y ejecuta.
+--   2. phpMyAdmin > selecciona la base > pestaña SQL.
+--   3. Ejecuta el PASO 1 y después el PASO 2 (por separado).
 -- ============================================================================
+
+
+-- ----------------------------------------------------------------------------
+-- PASO 1 — Quitar la relación obligatoria con especialidad
+--
+-- Los códigos serv1, serv2, ... no existen en la tabla `especialidad`, y
+-- mientras esta llave foránea siga activa MySQL rechaza la carga con:
+--     #1452 - No puedo añadir o actualizar una fila hija
+--
+-- La aplicación ya no usa esa relación: las subespecialidades se crean libres.
+-- Solo se elimina la restricción; la columna codespcodser y sus datos quedan.
+--
+-- SI RESPONDE que la clave no existe, ya estaba quitada: pasa al PASO 2.
+-- ----------------------------------------------------------------------------
+
+ALTER TABLE `subespecialidad` DROP FOREIGN KEY `subespecialidad_codespcodser_foreign`;
+
+
+-- ----------------------------------------------------------------------------
+-- PASO 2 — Cargar las subespecialidades
+-- ----------------------------------------------------------------------------
 
 INSERT INTO `subespecialidad`
     (`cod_SubEspecialidad`, `codespcodser`, `codminsal`, `Nombre`, `Estado`,
