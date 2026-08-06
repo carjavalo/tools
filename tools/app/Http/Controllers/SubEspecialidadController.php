@@ -51,7 +51,7 @@ class SubEspecialidadController extends Controller
      */
     public function store(Request $request): RedirectResponse
     {
-        SubEspecialidad::create($request->validate($this->rules()));
+        SubEspecialidad::create($this->normalizar($request->validate($this->rules())));
 
         return to_route('tools.gestion-subespecialidades')
             ->with('success', 'Subespecialidad creada correctamente.');
@@ -62,10 +62,27 @@ class SubEspecialidadController extends Controller
      */
     public function update(Request $request, SubEspecialidad $subespecialidad): RedirectResponse
     {
-        $subespecialidad->update($request->validate($this->rules()));
+        $subespecialidad->update($this->normalizar($request->validate($this->rules())));
 
         return to_route('tools.gestion-subespecialidades')
             ->with('success', 'Subespecialidad actualizada correctamente.');
+    }
+
+    /**
+     * "Sin especialidad" se guarda como NULL y nunca como cadena vacía: dos
+     * representaciones distintas de lo mismo harían que los filtros y los
+     * conteos dieran resultados diferentes según cómo se hubiera guardado.
+     *
+     * @param  array<string, mixed>  $datos
+     * @return array<string, mixed>
+     */
+    private function normalizar(array $datos): array
+    {
+        if (($datos['codespcodser'] ?? null) === '') {
+            $datos['codespcodser'] = null;
+        }
+
+        return $datos;
     }
 
     /**
@@ -89,8 +106,10 @@ class SubEspecialidadController extends Controller
         return [
             // Código servinte de la subespecialidad, digitado por el usuario.
             'cod_SubEspecialidad' => ['nullable', 'string', 'max:10'],
-            // Especialidad a la que pertenece: llave foránea a especialidad.espcodser.
-            'codespcodser' => ['required', 'string', 'max:10', 'exists:especialidad,espcodser'],
+            // Especialidad de agrupación: opcional. La subespecialidad ya no
+            // depende de una especialidad, así que se acepta cualquier código
+            // (o ninguno) sin comprobar que exista.
+            'codespcodser' => ['nullable', 'string', 'max:10'],
             'codminsal' => ['nullable', 'string', 'max:10'],
             'Nombre' => ['required', 'string', 'max:120'],
             'Estado' => ['required', 'boolean'],

@@ -86,6 +86,13 @@ const breadcrumbs: BreadcrumbItem[] = [
     },
 ];
 
+/**
+ * Valor del selector para "sin especialidad". El componente Select no admite
+ * la cadena vacía como valor de una opción, así que se usa un centinela que
+ * se traduce a '' antes de enviarlo.
+ */
+const SIN_ESPECIALIDAD = '__sin__';
+
 type SubEspForm = {
     cod_SubEspecialidad: string;
     codespcodser: string;
@@ -263,15 +270,12 @@ export default function GestionSubEspecialidades({
 
     const confirmDelete = () => {
         if (!deleteTarget) return;
-        router.delete(
-            `/tools/gestion-subespecialidades/${deleteTarget.id}`,
-            {
-                preserveScroll: true,
-                onStart: () => setDeleting(true),
-                onFinish: () => setDeleting(false),
-                onSuccess: () => setDeleteTarget(null),
-            },
-        );
+        router.delete(`/tools/gestion-subespecialidades/${deleteTarget.id}`, {
+            preserveScroll: true,
+            onStart: () => setDeleting(true),
+            onFinish: () => setDeleting(false),
+            onSuccess: () => setDeleteTarget(null),
+        });
     };
 
     const isEditing = editingId !== null;
@@ -332,7 +336,9 @@ export default function GestionSubEspecialidades({
                 {especialidades.length === 0 && (
                     <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
                         Primero debes crear al menos una{' '}
-                        <span className="font-semibold">Especialidad activa</span>{' '}
+                        <span className="font-semibold">
+                            Especialidad activa
+                        </span>{' '}
                         para poder registrar subespecialidades.
                     </div>
                 )}
@@ -388,7 +394,7 @@ export default function GestionSubEspecialidades({
                                 value={search}
                                 onChange={(e) => setSearch(e.target.value)}
                                 placeholder="Buscar por código servinte o nombre…"
-                                className="pl-9 pr-9"
+                                className="pr-9 pl-9"
                             />
                             {search && (
                                 <button
@@ -534,9 +540,7 @@ export default function GestionSubEspecialidades({
                                                         className="size-8 text-muted-foreground hover:text-red-600"
                                                         title="Eliminar"
                                                         onClick={() =>
-                                                            setDeleteTarget(
-                                                                row,
-                                                            )
+                                                            setDeleteTarget(row)
                                                         }
                                                     >
                                                         <Trash2 className="size-4" />
@@ -624,35 +628,48 @@ export default function GestionSubEspecialidades({
                             <div className="flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800 dark:border-green-900 dark:bg-green-950 dark:text-green-200">
                                 <CheckCircle2 className="size-4 shrink-0" />
                                 <span>
-                                    «{lastCreated}» creada. Puedes registrar otra
-                                    para la misma especialidad o pulsar «Salir».
+                                    «{lastCreated}» creada. Puedes registrar
+                                    otra para la misma especialidad o pulsar
+                                    «Salir».
                                 </span>
                             </div>
                         )}
                         <div className="grid gap-2">
-                            <Label htmlFor="codespcodser">Especialidad *</Label>
+                            <Label htmlFor="codespcodser">Especialidad</Label>
                             <Select
-                                value={form.data.codespcodser}
+                                value={
+                                    form.data.codespcodser || SIN_ESPECIALIDAD
+                                }
                                 onValueChange={(v) =>
-                                    form.setData('codespcodser', v)
+                                    form.setData(
+                                        'codespcodser',
+                                        v === SIN_ESPECIALIDAD ? '' : v,
+                                    )
                                 }
                             >
                                 <SelectTrigger id="codespcodser">
-                                    <SelectValue placeholder="Seleccione una especialidad" />
+                                    <SelectValue placeholder="Sin especialidad" />
                                 </SelectTrigger>
                                 <SelectContent>
+                                    <SelectItem value={SIN_ESPECIALIDAD}>
+                                        Sin especialidad
+                                    </SelectItem>
                                     {especialidades
                                         .filter((esp) => esp.espcodser)
                                         .map((esp) => (
-                                        <SelectItem
-                                            key={esp.id}
-                                            value={String(esp.espcodser)}
-                                        >
-                                            {esp.Nombre}
-                                        </SelectItem>
-                                    ))}
+                                            <SelectItem
+                                                key={esp.id}
+                                                value={String(esp.espcodser)}
+                                            >
+                                                {esp.Nombre}
+                                            </SelectItem>
+                                        ))}
                                 </SelectContent>
                             </Select>
+                            <span className="text-xs text-muted-foreground">
+                                Opcional. Sirve para agrupar en los informes; la
+                                subespecialidad funciona igual sin ella.
+                            </span>
                             <InputError message={form.errors.codespcodser} />
                         </div>
 
@@ -861,8 +878,8 @@ export default function GestionSubEspecialidades({
                     <DialogHeader>
                         <DialogTitle>Eliminar subespecialidad</DialogTitle>
                         <DialogDescription>
-                            Esta acción no se puede deshacer. ¿Deseas eliminar la
-                            subespecialidad{' '}
+                            Esta acción no se puede deshacer. ¿Deseas eliminar
+                            la subespecialidad{' '}
                             <span className="font-semibold text-foreground">
                                 {deleteTarget?.Nombre}
                             </span>

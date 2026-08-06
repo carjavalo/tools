@@ -58,26 +58,63 @@ test('a subespecialidad can be created and belongs to an especialidad', function
     ]);
 });
 
-test('creating a subespecialidad requires a name and an especialidad', function () {
+test('creating a subespecialidad only requires a name', function () {
     $user = User::factory()->create();
 
+    // La especialidad dejó de ser obligatoria: solo falta el nombre.
     $this->actingAs($user)
         ->from('/tools/gestion-subespecialidades')
         ->post('/tools/gestion-subespecialidades', ['Estado' => true])
-        ->assertSessionHasErrors(['Nombre', 'codespcodser']);
+        ->assertSessionHasErrors(['Nombre'])
+        ->assertSessionDoesntHaveErrors(['codespcodser']);
 });
 
-test('the especialidad must exist', function () {
+test('una subespecialidad se crea sin especialidad', function () {
     $user = User::factory()->create();
 
     $this->actingAs($user)
-        ->from('/tools/gestion-subespecialidades')
         ->post('/tools/gestion-subespecialidades', [
-            'Nombre' => 'X',
+            'Nombre' => 'Sub Libre',
+            'Estado' => true,
+            'cod_SubEspecialidad' => 'SL1',
+        ])
+        ->assertRedirect();
+
+    $sub = SubEspecialidad::where('Nombre', 'Sub Libre')->firstOrFail();
+    expect($sub->codespcodser)->toBeNull();
+});
+
+test('la especialidad indicada ya no tiene que existir', function () {
+    $user = User::factory()->create();
+
+    // Ya no hay relación entre las tablas: se acepta cualquier código.
+    $this->actingAs($user)
+        ->post('/tools/gestion-subespecialidades', [
+            'Nombre' => 'Sub Suelta',
             'Estado' => true,
             'codespcodser' => '999999',
         ])
-        ->assertSessionHasErrors(['codespcodser']);
+        ->assertRedirect();
+
+    $sub = SubEspecialidad::where('Nombre', 'Sub Suelta')->firstOrFail();
+    expect($sub->codespcodser)->toBe('999999');
+});
+
+test('la especialidad vacia se guarda como NULL y no como cadena vacia', function () {
+    $user = User::factory()->create();
+
+    $this->actingAs($user)
+        ->post('/tools/gestion-subespecialidades', [
+            'Nombre' => 'Sub Vacia',
+            'Estado' => true,
+            'codespcodser' => '',
+        ])
+        ->assertRedirect();
+
+    // Dos representaciones de "sin especialidad" harían que los filtros y los
+    // conteos dieran resultados distintos según cómo se hubiera guardado.
+    $sub = SubEspecialidad::where('Nombre', 'Sub Vacia')->firstOrFail();
+    expect($sub->codespcodser)->toBeNull();
 });
 
 test('the cod_SubEspecialidad is limited to 10 characters', function () {
