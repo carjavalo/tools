@@ -44,6 +44,10 @@ class Permiso extends Model
         ['key' => 'gestion-estado', 'titulo' => 'Gestión Estado', 'grupo' => 'Herramientas', 'acciones' => ['ver', 'crear', 'editar', 'borrar']],
         ['key' => 'gestion-estado-secundario', 'titulo' => 'Gestión Estado QX', 'grupo' => 'Herramientas', 'acciones' => ['ver', 'crear', 'editar', 'borrar']],
         ['key' => 'asignacion-estados', 'titulo' => 'Asignación Estados', 'grupo' => 'Herramientas', 'acciones' => ['ver', 'crear', 'editar', 'borrar']],
+        // Bitácora de actividad. Solo se consulta: nadie la edita ni la borra
+        // desde la interfaz, porque un registro de auditoría alterable no
+        // sirve como evidencia.
+        ['key' => 'herramientas-seguimiento', 'titulo' => 'Herramientas - Seguimiento', 'grupo' => 'Herramientas', 'acciones' => ['ver']],
     ];
 
     /**

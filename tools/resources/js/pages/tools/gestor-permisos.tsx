@@ -6,6 +6,7 @@ import { dashboard } from '@/routes';
 import { type BreadcrumbItem, type SharedData } from '@/types';
 import { Head, router, usePage } from '@inertiajs/react';
 import {
+    Activity,
     Ban,
     CheckCheck,
     CheckCircle2,
@@ -50,6 +51,9 @@ interface PageProps {
     estadosGrilla: number[];
     estadosSecList: { id: number; Nombre: string }[];
     estadosSecGrilla: number[];
+    modulosAuditoria: string[];
+    auditoriaRoles: number[];
+    auditoriaModulos: string[];
 }
 
 const breadcrumbs: BreadcrumbItem[] = [
@@ -79,6 +83,9 @@ export default function GestorPermisos({
     estadosGrilla,
     estadosSecList,
     estadosSecGrilla,
+    modulosAuditoria,
+    auditoriaRoles,
+    auditoriaModulos,
 }: PageProps) {
     const { flash } = usePage<SharedData>().props;
     const [matriz, setMatriz] = useState<Record<string, Flags>>(permisos);
@@ -86,6 +93,9 @@ export default function GestorPermisos({
     const [grillaEstados, setGrillaEstados] = useState<number[]>(estadosGrilla);
     const [grillaEstadosSec, setGrillaEstadosSec] =
         useState<number[]>(estadosSecGrilla);
+    // Herramientas - Seguimiento: de qué roles y módulos ve actividad.
+    const [audRoles, setAudRoles] = useState<number[]>(auditoriaRoles);
+    const [audModulos, setAudModulos] = useState<string[]>(auditoriaModulos);
     const [saving, setSaving] = useState(false);
     const [notice, setNotice] = useState<{
         type: 'success' | 'error';
@@ -98,6 +108,8 @@ export default function GestorPermisos({
         setAsignables(rolesAsignables);
         setGrillaEstados(estadosGrilla);
         setGrillaEstadosSec(estadosSecGrilla);
+        setAudRoles(auditoriaRoles);
+        setAudModulos(auditoriaModulos);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [roleId]);
 
@@ -183,6 +195,8 @@ export default function GestorPermisos({
         setAsignables([]);
         setGrillaEstados([]);
         setGrillaEstadosSec([]);
+        setAudRoles([]);
+        setAudModulos([]);
     };
 
     const marcarTodo = () => {
@@ -207,6 +221,8 @@ export default function GestorPermisos({
                 roles_asignables: asignables,
                 estados_grilla: grillaEstados,
                 estados_sec_grilla: grillaEstadosSec,
+                auditoria_roles: audRoles,
+                auditoria_modulos: audModulos,
             },
             {
                 preserveScroll: true,
@@ -502,6 +518,109 @@ export default function GestorPermisos({
                         rol ve en el Historial. Solo el estado actual filtra la
                         grilla.
                     </p>
+                </div>
+
+                {/* Herramientas - Seguimiento: alcance de la bitácora */}
+                <div className="rounded-xl border bg-card p-4 shadow-sm">
+                    <div className="mb-1 flex items-center gap-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+                        <Activity className="size-4" />
+                        Actividad que {rolActivo?.Nombre ?? 'el rol'} puede ver
+                        en Herramientas - Seguimiento
+                    </div>
+                    <p className="mb-3 text-xs text-muted-foreground">
+                        Limita la bitácora a la actividad de ciertos roles y a
+                        ciertos módulos. Sin nada marcado ve toda la actividad
+                        registrada. La del Super Admin nunca se registra, así
+                        que no aparece en ningún caso.
+                    </p>
+
+                    <div className="grid gap-4 lg:grid-cols-2">
+                        <div>
+                            <span className="mb-2 block text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
+                                Actividad de estos roles
+                            </span>
+                            <div className="grid gap-2 sm:grid-cols-2">
+                                {todosLosRoles
+                                    .filter((r) => r.Nombre !== 'Super Admin')
+                                    .map((r) => (
+                                        <label
+                                            key={r.id}
+                                            className="flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm hover:bg-muted/60"
+                                        >
+                                            <Checkbox
+                                                checked={audRoles.includes(
+                                                    r.id,
+                                                )}
+                                                onCheckedChange={() =>
+                                                    setAudRoles((prev) =>
+                                                        prev.includes(r.id)
+                                                            ? prev.filter(
+                                                                  (x) =>
+                                                                      x !==
+                                                                      r.id,
+                                                              )
+                                                            : [...prev, r.id],
+                                                    )
+                                                }
+                                            />
+                                            <span className="truncate text-foreground">
+                                                {r.Nombre}
+                                            </span>
+                                        </label>
+                                    ))}
+                            </div>
+                            <p className="mt-2 text-xs text-muted-foreground">
+                                {audRoles.length === 0
+                                    ? 'Sin restricción: ve la actividad de todos los roles.'
+                                    : `Verá solo la actividad de ${audRoles.length} rol(es).`}
+                            </p>
+                        </div>
+
+                        <div>
+                            <span className="mb-2 block text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
+                                De estos módulos
+                            </span>
+                            <div className="grid gap-2 sm:grid-cols-2">
+                                {modulosAuditoria.map((m) => (
+                                    <label
+                                        key={m}
+                                        className="flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm hover:bg-muted/60"
+                                    >
+                                        <Checkbox
+                                            checked={audModulos.includes(m)}
+                                            onCheckedChange={() =>
+                                                setAudModulos((prev) =>
+                                                    prev.includes(m)
+                                                        ? prev.filter(
+                                                              (x) => x !== m,
+                                                          )
+                                                        : [...prev, m],
+                                                )
+                                            }
+                                        />
+                                        <span className="truncate text-foreground">
+                                            {m}
+                                        </span>
+                                    </label>
+                                ))}
+                            </div>
+                            <p className="mt-2 text-xs text-muted-foreground">
+                                {audModulos.length === 0
+                                    ? 'Sin restricción: ve todos los módulos.'
+                                    : `Verá solo ${audModulos.length} módulo(s).`}
+                            </p>
+                        </div>
+                    </div>
+
+                    {!(matriz['herramientas-seguimiento']?.ver !== false) && (
+                        <p className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
+                            <strong>
+                                Esta configuración no tendrá efecto.
+                            </strong>{' '}
+                            La vista Herramientas - Seguimiento está desactivada
+                            para este rol en la matriz de permisos de abajo.
+                        </p>
+                    )}
                 </div>
 
                 {/* Matriz de permisos */}

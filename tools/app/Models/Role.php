@@ -93,6 +93,20 @@ class Role extends Model
     }
 
     /**
+     * Roles cuya actividad puede ver este rol en Herramientas - Seguimiento.
+     * Sin filas, ve la de todos.
+     */
+    public function auditoriaRoles(): BelongsToMany
+    {
+        return $this->belongsToMany(
+            Role::class,
+            'role_auditoria_roles',
+            'role_id',
+            'rol_visible_id',
+        );
+    }
+
+    /**
      * Roles que este rol puede asignar al crear o editar usuarios
      * (configurado en el Gestor de Permisos).
      */

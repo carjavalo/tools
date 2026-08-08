@@ -9,6 +9,8 @@ use App\Models\Role;
 use App\Models\User;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -70,6 +72,15 @@ class GestorPermisosController extends Controller
             'estadosSecGrilla' => $roleId
                 ? Role::find($roleId)?->estadosSecGrilla()->pluck('EstRadisecundario.id')->all() ?? []
                 : [],
+            // Herramientas - Seguimiento: de qué roles y de qué módulos puede
+            // ver actividad. Sin nada marcado, ve todo.
+            'modulosAuditoria' => AuditoriaController::MODULOS,
+            'auditoriaRoles' => $roleId
+                ? Role::find($roleId)?->auditoriaRoles()->pluck('roles.id')->all() ?? []
+                : [],
+            'auditoriaModulos' => $roleId
+                ? DB::table('role_auditoria_modulos')->where('role_id', $roleId)->pluck('modulo')->all()
+                : [],
         ]);
     }
 
@@ -93,11 +104,27 @@ class GestorPermisosController extends Controller
             'estados_grilla.*' => ['integer', 'exists:EstRadicado,id'],
             'estados_sec_grilla' => ['nullable', 'array'],
             'estados_sec_grilla.*' => ['integer', 'exists:EstRadisecundario,id'],
+            'auditoria_roles' => ['nullable', 'array'],
+            'auditoria_roles.*' => ['integer', 'exists:roles,id'],
+            'auditoria_modulos' => ['nullable', 'array'],
+            'auditoria_modulos.*' => ['string', Rule::in(AuditoriaController::MODULOS)],
         ]);
 
         $role->rolesAsignables()->sync($data['roles_asignables'] ?? []);
         $role->estadosGrilla()->sync($data['estados_grilla'] ?? []);
         $role->estadosSecGrilla()->sync($data['estados_sec_grilla'] ?? []);
+        $role->auditoriaRoles()->sync($data['auditoria_roles'] ?? []);
+
+        // Los módulos no tienen catálogo propio: se reemplaza el conjunto.
+        DB::table('role_auditoria_modulos')->where('role_id', $role->id)->delete();
+        foreach ($data['auditoria_modulos'] ?? [] as $modulo) {
+            DB::table('role_auditoria_modulos')->insert([
+                'role_id' => $role->id,
+                'modulo' => $modulo,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        }
 
         foreach ($data['permisos'] as $vista => $flags) {
             if (! in_array($vista, Permiso::vistasKeys(), true)) {

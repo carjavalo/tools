@@ -110,6 +110,9 @@ Route::prefix('tools')->name('tools.')->group(function () {
         Route::get('gestor-permisos', [App\Http\Controllers\GestorPermisosController::class, 'index'])->name('gestor-permisos');
         Route::post('gestor-permisos/{role}', [App\Http\Controllers\GestorPermisosController::class, 'guardar'])->name('gestor-permisos.guardar');
 
+        // Herramientas - Seguimiento: bitácora de actividad (solo consulta)
+        Route::get('herramientas-seguimiento', [App\Http\Controllers\AuditoriaController::class, 'index'])->name('herramientas-seguimiento');
+
         // Gestión de EPS (CRUD)
         Route::get('gestion-eps', [App\Http\Controllers\EpsController::class, 'index'])->name('gestion-eps');
         Route::post('gestion-eps', [App\Http\Controllers\EpsController::class, 'store'])->name('gestion-eps.store');
