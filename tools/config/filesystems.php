@@ -63,6 +63,16 @@ return [
             'secret' => env('AWS_SECRET_ACCESS_KEY'),
             'region' => env('AWS_DEFAULT_REGION'),
             'bucket' => env('AWS_BUCKET'),
+            // Prefijo del proyecto dentro del bucket. El bucket es compartido con
+            // otros proyectos, así que todo lo de esta aplicación cuelga de aquí y
+            // no de la raíz. Flysystem lo agrega y lo quita solo: las rutas que se
+            // guardan en base de datos siguen siendo relativas ('paquetes/x.pdf'),
+            // de modo que cambiar este valor no obliga a tocar ninguna fila.
+            'root' => env('AWS_ROOT', ''),
+            // S3 separa con '/' siempre. Sin esto, Laravel arma el prefijo con
+            // DIRECTORY_SEPARATOR y en Windows sale 'tools.huv\paquetes/...', que
+            // produce URL firmadas apuntando a una clave que no existe.
+            'directory_separator' => '/',
             'url' => env('AWS_URL'),
             'endpoint' => env('AWS_ENDPOINT'),
             'use_path_style_endpoint' => env('AWS_USE_PATH_STYLE_ENDPOINT', false),

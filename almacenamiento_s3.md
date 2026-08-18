@@ -15,6 +15,10 @@ AWS_DEFAULT_REGION=us-east-1
 AWS_BUCKET=nombre-del-bucket
 AWS_USE_PATH_STYLE_ENDPOINT=false
 
+# Carpeta del proyecto dentro del bucket. El bucket es compartido con otros
+# proyectos, así que todo lo de esta aplicación cuelga de aquí.
+AWS_ROOT=tools.huv
+
 # Solo para almacenamientos compatibles con S3 que no son AWS (MinIO, Wasabi,
 # DigitalOcean Spaces). Con AWS se dejan vacíos.
 AWS_ENDPOINT=
@@ -29,6 +33,18 @@ php artisan config:clear
 
 ## 2. Qué se guarda en el bucket
 
+Todo cuelga de la carpeta del proyecto (`AWS_ROOT`), no de la raíz del bucket:
+
+```
+almacenamientohuv/
+├── tools.huv/          ← esta aplicación
+│   ├── paquetes/
+│   ├── cotizaciones/
+│   ├── transfers/
+│   └── downloads/
+└── proyecto1/          ← otros proyectos, intactos
+```
+
 | Carpeta         | Contenido                                            | Referenciado desde     |
 | --------------- | ---------------------------------------------------- | ---------------------- |
 | `paquetes/`     | PDF del paquete de cada radicación                   | `radicar_caso.paquete` |
@@ -36,8 +52,10 @@ php artisan config:clear
 | `transfers/`    | Archivos en tránsito de Evarisdrop (caducan a la hora) | caché                |
 | `downloads/`    | Paquetes ZIP/TAR de CUPS ya procesados               | respuesta del proceso  |
 
-En base de datos se guarda la **ruta relativa** (`paquetes/abc.pdf`), nunca el
-bucket ni el dominio: si el bucket cambia, las filas siguen siendo válidas.
+En base de datos se guarda la **ruta relativa** (`paquetes/abc.pdf`), sin el
+prefijo, el bucket ni el dominio. Flysystem agrega y quita `tools.huv/` solo, así
+que cambiar `AWS_ROOT` —o el bucket entero— no obliga a tocar ninguna fila:
+basta mover los objetos.
 
 ## 3. Qué NO se sube, y por qué
 
