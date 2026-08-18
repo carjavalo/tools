@@ -26,6 +26,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Password;
 use Inertia\Inertia;
@@ -696,7 +697,7 @@ class RadicarCasoController extends Controller
         }
 
         // El PDF se guarda en disco y en la columna queda solo su ruta.
-        $data['paquete'] = $this->guardarPaquete($request, null);
+        $data['paquete'] = $this->guardarPaquete($request, null, null, $data['Ndocumento'] ?? null);
 
         // El caso, sus procedimientos y su bitácora se guardan o fallan juntos:
         // una radicación sin su registro de creación quedaría fuera del informe.
@@ -735,6 +736,9 @@ class RadicarCasoController extends Controller
 
             throw $e;
         }
+
+        // Ya existe el consecutivo: el PDF puede tomar su nombre definitivo.
+        $this->completarNombrePaquete($caso);
 
         return to_route('tools.radicar-solicitud')
             ->with('success', "Caso radicado correctamente. Caso N° {$caso->codrad}.")
@@ -795,7 +799,7 @@ class RadicarCasoController extends Controller
 
         // Sin archivo nuevo se mantiene el que ya estaba.
         $paqueteAnterior = $caso->paquete;
-        $data['paquete'] = $this->guardarPaquete($request, $paqueteAnterior);
+        $data['paquete'] = $this->guardarPaquete($request, $paqueteAnterior, $caso->codrad, $caso->Ndocumento);
 
         // El cambio y su registro en la bitácora van juntos: si algo falla, no
         // puede quedar un dato modificado sin rastro de quién lo modificó.
@@ -1474,7 +1478,7 @@ class RadicarCasoController extends Controller
      * no existiría y la fila seguiría apuntando a él. El reemplazo se
      * confirma con limpiarPaquete() una vez que el update terminó bien.
      */
-    private function guardarPaquete(Request $request, ?string $anterior): ?string
+    private function guardarPaquete(Request $request, ?string $anterior, ?int $codrad, ?string $documento): ?string
     {
         $archivo = $request->file('paquete');
 
@@ -1482,7 +1486,54 @@ class RadicarCasoController extends Controller
             return $anterior;
         }
 
-        return Almacenamiento::guardar($archivo, 'paquetes');
+        return Almacenamiento::guardarComo($archivo, 'paquetes', Almacenamiento::nombreDocumento($codrad, $documento));
+    }
+
+
+    /**
+     * Renombra el PDF de una radicación recién creada para incluir su
+     * consecutivo.
+     *
+     * Al crear el caso el PDF ya está subido pero el consecutivo todavía no
+     * existe, así que el archivo nace como 'rad-nuevo_...'. Aquí se corrige.
+     *
+     * Es un arreglo cosmético y no puede tumbar una radicación ya guardada: si
+     * falla, se conserva el nombre original —que es válido y está bien
+     * referenciado— y queda la advertencia en el log.
+     */
+    private function completarNombrePaquete(RadicarCaso $caso): void
+    {
+        if (! $caso->paquete || ! str_contains(basename($caso->paquete), 'rad-nuevo')) {
+            return;
+        }
+
+        $anterior = $caso->paquete;
+        $extension = pathinfo($anterior, PATHINFO_EXTENSION);
+        $destino = 'paquetes/'.Almacenamiento::nombreDocumento($caso->codrad, $caso->Ndocumento)
+            .($extension !== '' ? '.'.$extension : '');
+
+        try {
+            Almacenamiento::copiar($anterior, $destino);
+
+            // Se escribe por el constructor de consultas y no con $caso->update():
+            // así no se dispara el AuditoriaObserver ni se toca updated_at. Es el
+            // mismo archivo con otro nombre, no un cambio hecho por el usuario, y
+            // no tiene por qué aparecer en la bitácora.
+            DB::table($caso->getTable())
+                ->where('codrad', $caso->codrad)
+                ->update(['paquete' => $destino]);
+            $caso->paquete = $destino;
+            $caso->syncOriginal();
+
+            // El original se borra solo después de que la fila apunta a la copia.
+            Almacenamiento::eliminar($anterior);
+        } catch (\Throwable $e) {
+            Log::warning('No se pudo renombrar el paquete con su consecutivo', [
+                'codrad' => $caso->codrad,
+                'ruta' => $anterior,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     /**
@@ -1679,7 +1730,11 @@ class RadicarCasoController extends Controller
                 if ($cot->adjunto) {
                     Almacenamiento::eliminar($cot->adjunto);
                 }
-                $cot->adjunto = Almacenamiento::guardar($archivo, 'cotizaciones');
+                $cot->adjunto = Almacenamiento::guardarComo(
+                    $archivo,
+                    'cotizaciones',
+                    Almacenamiento::nombreDocumento($caso->codrad, $caso->Ndocumento),
+                );
             }
 
             $cot->save();

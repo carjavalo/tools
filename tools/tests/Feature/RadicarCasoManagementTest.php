@@ -806,6 +806,29 @@ test('el paquete se sube, se reemplaza y borra el archivo anterior', function ()
     expect($caso->refresh()->paquete)->toBe($segundo);
 });
 
+test('el paquete se guarda con el radicado y el documento del paciente en el nombre', function () {
+    Storage::fake('public');
+    $admin = User::factory()->create();
+    $cups = Cups::create(['Nombre' => 'Proc', 'Estado' => true]);
+    $caso = RadicarCaso::create(['Ndocumento' => '1088223344', 'estRad' => '1']);
+
+    $this->actingAs($admin)->put("/tools/radicar-solicitud/{$caso->codrad}", [
+        'codMed' => (string) $admin->id,
+        'estRad' => '1',
+        'copago' => false,
+        'fentregapro' => '2026-07-31',
+        'fecreci' => '2026-07-30',
+        'fecAutorizacion' => '2026-07-29',
+        'fechavenautorizacion' => '2026-08-29',
+        'procedimientos' => [['cusv_id' => $cups->id, 'N_Autorizacion' => 'A1']],
+        'paquete' => UploadedFile::fake()->create('escaneo.pdf', 64, 'application/pdf'),
+    ])->assertOk();
+
+    // El nombre debe poder leerse desde la consola de S3 sin cruzarlo contra
+    // la base: radicado, paciente, y un sufijo que lo hace único por subida.
+    expect(basename($caso->refresh()->paquete))
+        ->toMatch('/^rad-'.$caso->codrad.'_doc-1088223344_\d{8}-\d{6}-[a-z0-9]{4}\.pdf$/');
+});
 test('el paquete rechaza archivos que no sean PDF o pasen de 30 MB', function () {
     Storage::fake('public');
     $admin = User::factory()->create();

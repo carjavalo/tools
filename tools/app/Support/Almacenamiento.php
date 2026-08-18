@@ -2,6 +2,8 @@
 
 namespace App\Support;
 
+use Carbon\Carbon;
+use DateTimeInterface;
 use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Log;
@@ -191,14 +193,82 @@ class Almacenamiento
     }
 
     /**
-     * Nombre de objeto único para un archivo generado por la aplicación,
-     * conservando la extensión original.
+     * Guarda un archivo con un nombre legible en lugar del hash aleatorio que
+     * pone store() por omisión, para poder identificarlo desde la consola de
+     * S3 sin tener que cruzarlo contra la base de datos.
+     *
+     * Quien llama arma el nombre; aquí solo se sanea y se le pega la extensión
+     * original. El nombre debe seguir siendo único por subida: el flujo de
+     * reemplazo depende de que el archivo nuevo no pise al anterior antes de
+     * que la transacción confirme (ver guardarPaquete en RadicarCasoController).
      */
-    public static function nombreUnico(string $nombreBase, string $extension = ''): string
+    public static function guardarComo(UploadedFile $archivo, string $carpeta, string $nombreBase): string
     {
-        $extension = ltrim($extension, '.');
-        $slug = Str::slug(pathinfo($nombreBase, PATHINFO_FILENAME)) ?: 'archivo';
+        $extension = strtolower($archivo->getClientOriginalExtension() ?: (string) $archivo->guessExtension());
+        $extension = preg_replace('/[^a-z0-9]/', '', $extension) ?: 'bin';
 
-        return $slug.'_'.Str::random(12).($extension !== '' ? '.'.$extension : '');
+        return self::disco()->putFileAs(
+            trim($carpeta, '/'),
+            $archivo,
+            self::componenteSeguro($nombreBase).'.'.$extension,
+        );
+    }
+
+    /**
+     * Copia un objeto dentro del mismo disco. Se usa al renombrar: primero se
+     * copia, luego la fila pasa a apuntar a la copia y solo entonces se borra
+     * el original, de modo que en ningún momento la base referencie algo que
+     * no existe.
+     */
+    public static function copiar(string $origen, string $destino): void
+    {
+        self::disco()->copy($origen, ltrim($destino, '/'));
+    }
+
+    /**
+     * Nombre con el que se guardan los documentos de una radicación.
+     *
+     * Lleva el consecutivo del radicado y la identificación del paciente para
+     * poder reconocer cada archivo desde la consola de S3 sin cruzarlo contra
+     * la base de datos.
+     *
+     * La marca de tiempo y los cuatro caracteres al azar no son decoración: el
+     * reemplazo de un documento depende de que el archivo nuevo NO pise al
+     * anterior hasta que la transacción confirme. Con un nombre fijo por
+     * radicado, subir un reemplazo sobrescribiría el original de inmediato y,
+     * si el guardado fallara después, la fila quedaría apuntando a un archivo
+     * ya destruido.
+     */
+    public static function nombreDocumento(?int $codrad, ?string $documento, ?DateTimeInterface $momento = null): string
+    {
+        $doc = preg_replace('/[^A-Za-z0-9]/', '', (string) $documento);
+        $momento = $momento ? Carbon::instance($momento) : Carbon::now();
+
+        return implode('_', [
+            $codrad ? 'rad-'.$codrad : 'rad-nuevo',
+            'doc-'.($doc !== '' ? $doc : 'sin-documento'),
+            $momento->format('Ymd-His').'-'.strtolower(Str::random(4)),
+        ]);
+    }
+
+    /**
+     * Indica si un archivo ya está guardado con el nombre legible. Lo usa el
+     * comando de renombrado para no volver a mover lo que ya está bien.
+     */
+    public static function tieneNombreLegible(?string $ruta): bool
+    {
+        return (bool) preg_match('/^rad-[^_]+_doc-[^_]+_\d{8}-\d{6}-[a-z0-9]{4}\./', basename((string) $ruta));
+    }
+
+    /**
+     * Deja un texto en forma apta para una clave de S3: sin espacios, acentos
+     * ni caracteres que obliguen a escapar la URL.
+     */
+    public static function componenteSeguro(string $texto, string $porDefecto = 'archivo'): string
+    {
+        $limpio = preg_replace('/[^A-Za-z0-9._-]+/', '-', $texto);
+        $limpio = trim((string) $limpio, '-._');
+
+        return $limpio !== '' ? $limpio : $porDefecto;
     }
 }

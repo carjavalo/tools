@@ -57,6 +57,45 @@ prefijo, el bucket ni el dominio. Flysystem agrega y quita `tools.huv/` solo, as
 que cambiar `AWS_ROOT` —o el bucket entero— no obliga a tocar ninguna fila:
 basta mover los objetos.
 
+## 2.1 Cómo se nombran los archivos
+
+```
+tools.huv/paquetes/rad-24_doc-1144098877_20260818-190847-yegs.pdf
+                   └───┬──┘ └──────┬─────┘ └──────┬──────┘ └─┬─┘
+              consecutivo    documento del    fecha y hora   azar
+              del radicado      paciente        de subida
+```
+
+Así se identifica cada documento desde la consola de S3 sin cruzarlo contra la
+base de datos. Antes el nombre era un hash aleatorio de 40 caracteres.
+
+El sufijo de fecha y los cuatro caracteres al azar **no son decoración**: el
+reemplazo de un documento depende de que el archivo nuevo no pise al anterior
+hasta que la transacción de base de datos confirme. Con un nombre fijo por
+radicado, subir un reemplazo sobrescribiría el original de inmediato y, si el
+guardado fallara después, la fila quedaría apuntando a un archivo ya destruido.
+Como efecto secundario útil, al ordenar por nombre quedan juntas las versiones
+de un mismo radicado, de la más vieja a la más nueva.
+
+Al **crear** una radicación el consecutivo todavía no existe cuando se sube el
+PDF, así que el archivo nace como `rad-nuevo_...` y se renombra apenas el caso
+queda guardado. Ese renombrado es cosmético: si falla, la radicación queda bien
+igual y solo se registra una advertencia en el log.
+
+### Renombrar los archivos guardados antes de este cambio
+
+```bash
+php artisan archivos:renombrar-legibles --simular
+```
+
+Muestra qué renombraría sin tocar nada. Sin `--simular`, lo hace: copia el
+objeto con el nombre nuevo, apunta la fila a la copia y solo entonces borra el
+original — nunca queda una fila apuntando a un archivo inexistente. Es
+idempotente: los que ya tienen nombre legible se omiten, así que se puede
+correr las veces que haga falta.
+
+Se ejecuta **en cada entorno**, sobre la base de datos y el bucket de esa
+máquina.
 ## 3. Qué NO se sube, y por qué
 
 Los conversores (Word/Excel/PowerPoint a PDF, firmar PDF, proteger PDF, OCR,
