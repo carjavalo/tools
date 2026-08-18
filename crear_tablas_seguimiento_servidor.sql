@@ -99,13 +99,23 @@ WHERE NOT EXISTS (
 );
 
 
--- PASO 5 -- Verificación. Deben salir 3 tablas y 2 migraciones registradas.
+-- PASO 5 -- Verificación.
+--
+-- Es UNA sola consulta a propósito: phpMyAdmin vuelve a ejecutar la última
+-- sentencia del script para paginarla (le agrega "LIMIT 0, 25"), y si esa
+-- sentencia consulta information_schema, la repetición queda apuntando a
+-- information_schema y falla con "Tabla desconocida 'migrations'". Por eso
+-- aquí no se usa information_schema: la existencia de cada tabla se comprueba
+-- leyéndola directamente.
+--
+-- Resultado esperado: las 3 tablas con 0 registros y "2" en las migraciones.
+-- Si alguna tabla no existiera, la consulta falla nombrándola.
 
-SELECT TABLE_NAME AS 'Tabla creada'
-FROM information_schema.TABLES
-WHERE TABLE_SCHEMA = DATABASE()
-  AND TABLE_NAME IN ('auditoria', 'role_auditoria_roles', 'role_auditoria_modulos');
-
-SELECT `migration` AS 'Migración registrada', `batch` AS 'Lote'
-FROM `migrations`
+SELECT 'auditoria' AS 'Tabla', COUNT(*) AS 'Registros' FROM `auditoria`
+UNION ALL
+SELECT 'role_auditoria_roles', COUNT(*) FROM `role_auditoria_roles`
+UNION ALL
+SELECT 'role_auditoria_modulos', COUNT(*) FROM `role_auditoria_modulos`
+UNION ALL
+SELECT 'migraciones registradas (deben ser 2)', COUNT(*) FROM `migrations`
 WHERE `migration` LIKE '2026_08_07%';

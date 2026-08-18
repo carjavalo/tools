@@ -19,13 +19,13 @@ use App\Models\SubEspecialidad;
 use App\Models\TipoDocumento;
 use App\Models\TrazabilidadCaso;
 use App\Models\User;
+use App\Support\Almacenamiento;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Password;
 use Inertia\Inertia;
@@ -944,7 +944,7 @@ class RadicarCasoController extends Controller
         // El PDF del paquete se va con el caso: si no, queda ocupando disco
         // sin ninguna fila que lo referencie.
         if ($caso->paquete) {
-            Storage::disk('public')->delete($caso->paquete);
+            Almacenamiento::eliminar($caso->paquete);
         }
 
         CupsAnezado::where('codRadicado', (string) $caso->codrad)->delete();
@@ -954,7 +954,7 @@ class RadicarCasoController extends Controller
         TrazabilidadCaso::where('codrad', $caso->codrad)->delete();
         CotizacionCaso::where('codrad', $caso->codrad)->each(function ($cot) {
             if ($cot->adjunto) {
-                Storage::disk('public')->delete($cot->adjunto);
+                Almacenamiento::eliminar($cot->adjunto);
             }
             $cot->delete();
         });
@@ -1111,7 +1111,7 @@ class RadicarCasoController extends Controller
                 'valorCopago' => $caso->valor_copago,
                 'maos' => (bool) $caso->maos,
                 'paqueteUrl' => $caso->paquete
-                    ? Storage::disk('public')->url($caso->paquete)
+                    ? route('tools.radicar-solicitud.paquete', $caso->codrad)
                     : null,
             ];
         };
@@ -1423,14 +1423,36 @@ class RadicarCasoController extends Controller
     public function verPaquete(Request $request, RadicarCaso $caso)
     {
         abort_unless($caso->paquete, 404);
+        abort_unless(Almacenamiento::existe($caso->paquete), 404);
 
-        $disco = Storage::disk('public');
-        abort_unless($disco->exists($caso->paquete), 404);
+        return Almacenamiento::respuesta(
+            $caso->paquete,
+            basename($caso->paquete),
+            'application/pdf',
+            'inline',
+        );
+    }
 
-        return response()->file($disco->path($caso->paquete), [
-            'Content-Type' => 'application/pdf',
-            'Content-Disposition' => 'inline; filename="'.basename($caso->paquete).'"',
-        ]);
+    /**
+     * Muestra el PDF adjunto a una cotización dentro del navegador.
+     *
+     * Existe por la misma razón que verPaquete: el adjunto se entrega por una
+     * ruta con permisos y no por la URL directa del disco, para que solo lo
+     * abra quien tiene habilitada la pestaña de cotizaciones. Con el bucket en
+     * S3 esa URL directa además no funcionaría, porque el bucket es privado.
+     */
+    public function verAdjuntoCotizacion(Request $request, CotizacionCaso $cotizacion)
+    {
+        abort_unless($this->puedeGestionarCotizaciones($request), 403);
+        abort_unless($cotizacion->adjunto, 404);
+        abort_unless(Almacenamiento::existe($cotizacion->adjunto), 404);
+
+        return Almacenamiento::respuesta(
+            $cotizacion->adjunto,
+            basename($cotizacion->adjunto),
+            'application/pdf',
+            'inline',
+        );
     }
 
     /**
@@ -1460,7 +1482,7 @@ class RadicarCasoController extends Controller
             return $anterior;
         }
 
-        return $archivo->store('paquetes', 'public');
+        return Almacenamiento::guardar($archivo, 'paquetes');
     }
 
     /**
@@ -1471,7 +1493,7 @@ class RadicarCasoController extends Controller
     private function limpiarPaquete(?string $sobrante, ?string $vigente): void
     {
         if ($sobrante && $sobrante !== $vigente) {
-            Storage::disk('public')->delete($sobrante);
+            Almacenamiento::eliminar($sobrante);
         }
     }
 
@@ -1599,7 +1621,9 @@ class RadicarCasoController extends Controller
                 'fecha_cotizacion' => optional($cot->fecha_cotizacion)->format('Y-m-d'),
                 'valor' => (string) $cot->valor,
                 'observacion' => $cot->observacion ?? '',
-                'adjunto_url' => $cot->adjunto ? Storage::url($cot->adjunto) : null,
+                'adjunto_url' => $cot->adjunto
+                    ? route('tools.radicar-solicitud.cotizacion-adjunto', $cot->id)
+                    : null,
             ])
             ->values()
             ->all();
@@ -1653,9 +1677,9 @@ class RadicarCasoController extends Controller
             // Adjuntar / reemplazar el PDF de la cotización.
             if ($archivo = $request->file("cotizaciones.{$i}.adjunto")) {
                 if ($cot->adjunto) {
-                    Storage::disk('public')->delete($cot->adjunto);
+                    Almacenamiento::eliminar($cot->adjunto);
                 }
-                $cot->adjunto = $archivo->store('cotizaciones', 'public');
+                $cot->adjunto = Almacenamiento::guardar($archivo, 'cotizaciones');
             }
 
             $cot->save();
@@ -1666,7 +1690,7 @@ class RadicarCasoController extends Controller
         foreach ($existentes as $cot) {
             if (! in_array($cot->id, $conservados, true)) {
                 if ($cot->adjunto) {
-                    Storage::disk('public')->delete($cot->adjunto);
+                    Almacenamiento::eliminar($cot->adjunto);
                 }
                 $cot->delete();
             }

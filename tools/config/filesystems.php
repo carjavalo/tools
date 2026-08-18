@@ -47,6 +47,16 @@ return [
             'report' => false,
         ],
 
+        // Disco de producción de la aplicación. Todo lo que se conserva más
+        // allá de la petición (paquetes, cotizaciones, transferencias y
+        // paquetes de CUPS) vive aquí; se accede siempre a través de
+        // App\Support\Almacenamiento, nunca nombrando el disco a mano.
+        //
+        // No se declara 'visibility' a propósito: sin ese valor Flysystem no
+        // envía cabecera ACL al subir, que es lo único que funciona en buckets
+        // con "Object Ownership: Bucket owner enforced" (el valor por omisión
+        // de AWS). El acceso a los archivos se controla en las rutas del
+        // controlador, no con ACL de S3.
         's3' => [
             'driver' => 's3',
             'key' => env('AWS_ACCESS_KEY_ID'),
@@ -56,7 +66,11 @@ return [
             'url' => env('AWS_URL'),
             'endpoint' => env('AWS_ENDPOINT'),
             'use_path_style_endpoint' => env('AWS_USE_PATH_STYLE_ENDPOINT', false),
-            'throw' => false,
+            // A diferencia del disco local, un fallo aquí suele ser de
+            // credenciales, región o permisos del bucket. Con 'throw' en false
+            // esos errores se vuelven un put() que devuelve false sin decir por
+            // qué, y archivos que desaparecen en silencio.
+            'throw' => env('AWS_THROW', true),
             'report' => false,
         ],
 

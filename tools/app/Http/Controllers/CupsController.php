@@ -2,15 +2,22 @@
 
 namespace App\Http\Controllers;
 
+use App\Support\Almacenamiento;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\File;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Log;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 
 class CupsController extends Controller
 {
+    /**
+     * Carpeta del almacenamiento donde quedan los paquetes ya procesados,
+     * listos para descargar.
+     */
+    private const CARPETA_PAQUETES = 'downloads';
+
     /**
      * Verificar si ZipArchive está disponible
      */
@@ -86,8 +93,8 @@ class CupsController extends Controller
             $this->processJsonFilesExact($destBasePath, $results);
             
             // 5. Crear paquete de descarga
-            $downloadPath = $this->createDownloadPackage($destBasePath);
-            $results['download_url'] = '/api/download-processed/' . basename($downloadPath);
+            $nombrePaquete = $this->createDownloadPackage($destBasePath);
+            $results['download_url'] = route('tools.cups.download-processed', $nombrePaquete);
             $results['zip_available'] = $this->isZipAvailable();
             
             // Agregar advertencia si ZIP no está disponible
@@ -116,121 +123,42 @@ class CupsController extends Controller
         }
     }
     
+    /**
+     * Entrega el paquete procesado.
+     *
+     * El paquete vive en el disco configurado (S3 en producción), así que se
+     * transmite desde ahí: no hay una ruta del sistema de ficheros que
+     * response()->download() pueda abrir. El nombre llega por la URL, por eso
+     * se reduce a su basename antes de armar la clave del objeto.
+     */
     public function downloadProcessed($filename)
     {
         try {
             $filename = basename($filename);
-            $filePath = storage_path('app/downloads/' . $filename);
-            
+            $objeto = self::CARPETA_PAQUETES.'/'.$filename;
+
             Log::info('Download request', [
                 'filename' => $filename,
-                'path' => $filePath,
-                'exists' => File::exists($filePath),
-                'is_dir' => is_dir($filePath),
-                'zip_available' => $this->isZipAvailable()
+                'objeto' => $objeto,
+                'disco' => Almacenamiento::nombreDisco(),
             ]);
-            
-            if (!File::exists($filePath)) {
-                Log::error('File not found', ['path' => $filePath]);
+
+            if (!Almacenamiento::existe($objeto)) {
+                Log::error('File not found', ['objeto' => $objeto]);
                 abort(404, 'Archivo no encontrado');
             }
-            
-            // Si es archivo ZIP, descarga directa
-            if (str_ends_with($filename, '.zip') && is_file($filePath)) {
-                Log::info('Serving ZIP file for download', [
-                    'filename' => $filename,
-                    'size' => filesize($filePath)
-                ]);
-                
-                return response()->download($filePath, $filename, [
-                    'Content-Type' => 'application/zip',
-                    'Content-Disposition' => 'attachment; filename="' . $filename . '"'
-                ])->deleteFileAfterSend(false);
-            }
-            
-            // Si es directorio, crear ZIP o TAR según disponibilidad
-            if (is_dir($filePath)) {
-                if ($this->isZipAvailable()) {
-                    return $this->downloadDirectoryAsZip($filePath, $filename);
-                } else {
-                    return $this->downloadDirectoryAsTar($filePath, $filename);
-                }
-            }
-            
-            // Archivo individual
-            Log::info('Serving individual file for download', [
-                'filename' => $filename,
-                'size' => filesize($filePath)
-            ]);
-            
-            return response()->download($filePath, $filename);
-            
+
+            $mime = str_ends_with($filename, '.zip')
+                ? 'application/zip'
+                : 'application/x-tar';
+
+            return Almacenamiento::descarga($objeto, $filename, $mime);
+
+        } catch (HttpException $e) {
+            throw $e;
         } catch (\Exception $e) {
             Log::error('Download error', ['error' => $e->getMessage(), 'filename' => $filename]);
             abort(500, 'Error al descargar el archivo: ' . $e->getMessage());
-        }
-    }
-    
-    /**
-     * Descargar directorio como ZIP
-     */
-    private function downloadDirectoryAsZip($dirPath, $filename)
-    {
-        $zipPath = sys_get_temp_dir() . '/' . $filename . '.zip';
-        $zip = new \ZipArchive();
-        
-        if ($zip->open($zipPath, \ZipArchive::CREATE | \ZipArchive::OVERWRITE) === TRUE) {
-            $iterator = new \RecursiveIteratorIterator(
-                new \RecursiveDirectoryIterator($dirPath, \RecursiveDirectoryIterator::SKIP_DOTS)
-            );
-            
-            foreach ($iterator as $file) {
-                if ($file->isFile()) {
-                    $relativePath = substr($file->getPathname(), strlen($dirPath) + 1);
-                    $zip->addFile($file->getPathname(), $relativePath);
-                }
-            }
-            
-            $zip->close();
-            
-            Log::info('ZIP created for directory download', [
-                'dir_path' => $dirPath,
-                'zip_path' => $zipPath,
-                'size' => filesize($zipPath)
-            ]);
-            
-            return response()->download($zipPath, $filename . '.zip', [
-                'Content-Type' => 'application/zip'
-            ])->deleteFileAfterSend(true);
-        }
-        
-        throw new \Exception('No se pudo crear el archivo ZIP');
-    }
-    
-    /**
-     * Descargar directorio como TAR (fallback)
-     */
-    private function downloadDirectoryAsTar($dirPath, $filename)
-    {
-        $tarPath = sys_get_temp_dir() . '/' . $filename . '.tar';
-        
-        try {
-            $phar = new \PharData($tarPath);
-            $phar->buildFromDirectory($dirPath);
-            
-            Log::info('TAR created for directory download', [
-                'dir_path' => $dirPath,
-                'tar_path' => $tarPath,
-                'size' => filesize($tarPath)
-            ]);
-            
-            return response()->download($tarPath, $filename . '.tar', [
-                'Content-Type' => 'application/x-tar'
-            ])->deleteFileAfterSend(true);
-            
-        } catch (\Exception $e) {
-            Log::error('TAR creation failed', ['error' => $e->getMessage()]);
-            throw new \Exception('No se pudo crear el archivo TAR: ' . $e->getMessage());
         }
     }
     
@@ -411,33 +339,57 @@ class CupsController extends Controller
         ]);
         Log::info('✔️ Número total de CUV modificados correctamente: ' . $totalCuvCorrectos);
     }
-    
     /**
-     * Crear paquete de descarga desde directorio procesado
+     * Empaqueta el resultado del proceso y lo sube al almacenamiento.
+     *
+     * El archivo se arma primero en disco local porque ZipArchive y PharData
+     * solo saben escribir sobre rutas reales; una vez cerrado se transmite al
+     * disco configurado y la copia local se elimina. El resultado es siempre
+     * un archivo único (ZIP, o TAR si la extensión zip no está compilada):
+     * un directorio no se puede guardar como un objeto en S3 ni entregar de
+     * una sola descarga.
+     *
+     * Devuelve el nombre del objeto dentro de la carpeta de paquetes.
      */
     private function createDownloadPackage($sourcePath)
     {
-        $downloadsPath = storage_path('app/downloads');
-        if (!File::exists($downloadsPath)) {
-            File::makeDirectory($downloadsPath, 0755, true);
+        $tempPath = storage_path('app/temp');
+        if (!File::exists($tempPath)) {
+            File::makeDirectory($tempPath, 0755, true);
         }
-        
+
         $packageName = 'json_procesados_sos_' . date('Y-m-d_H-i-s');
-        
-        // Priorizar ZIP si está disponible
-        if ($this->isZipAvailable()) {
-            return $this->createZipPackage($sourcePath, $packageName, $downloadsPath);
-        } else {
-            return $this->createDirectoryPackage($sourcePath, $packageName, $downloadsPath);
+
+        $localPath = $this->isZipAvailable()
+            ? $this->createZipPackage($sourcePath, $packageName, $tempPath)
+            : $this->createTarPackage($sourcePath, $packageName, $tempPath);
+
+        $nombreObjeto = basename($localPath);
+
+        try {
+            Almacenamiento::subirDesdeRuta($localPath, self::CARPETA_PAQUETES.'/'.$nombreObjeto);
+
+            Log::info('Paquete subido al almacenamiento', [
+                'objeto' => self::CARPETA_PAQUETES.'/'.$nombreObjeto,
+                'disco' => Almacenamiento::nombreDisco(),
+                'size' => filesize($localPath),
+            ]);
+        } finally {
+            // La copia local ya cumplió su papel de área de trabajo. Se borra
+            // aunque la subida falle: sin ella la descarga no funcionaría de
+            // todos modos, y dejarla solo llena el disco del servidor.
+            @unlink($localPath);
         }
+
+        return $nombreObjeto;
     }
     
     /**
-     * Crear paquete ZIP
+     * Crear paquete ZIP en disco local
      */
-    private function createZipPackage($sourcePath, $packageName, $downloadsPath)
+    private function createZipPackage($sourcePath, $packageName, $workPath)
     {
-        $zipPath = $downloadsPath . '/' . $packageName . '.zip';
+        $zipPath = $workPath . '/' . $packageName . '.zip';
         $zip = new \ZipArchive();
         
         if ($zip->open($zipPath, \ZipArchive::CREATE | \ZipArchive::OVERWRITE) === TRUE) {
@@ -465,29 +417,34 @@ class CupsController extends Controller
         }
         
         // Fallback si ZIP falla
-        Log::warning('ZIP creation failed, falling back to directory');
-        return $this->createDirectoryPackage($sourcePath, $packageName, $downloadsPath);
+        Log::warning('ZIP creation failed, falling back to TAR');
+        return $this->createTarPackage($sourcePath, $packageName, $workPath);
     }
     
     /**
-     * Crear paquete de directorio (fallback)
+     * Crear paquete TAR en disco local (cuando ZipArchive no está disponible)
      */
-    private function createDirectoryPackage($sourcePath, $packageName, $downloadsPath)
+    private function createTarPackage($sourcePath, $packageName, $workPath)
     {
-        $packagePath = $downloadsPath . '/' . $packageName;
-        
-        if (File::exists($packagePath)) {
-            File::deleteDirectory($packagePath);
+        $tarPath = $workPath . '/' . $packageName . '.tar';
+
+        if (file_exists($tarPath)) {
+            @unlink($tarPath);
         }
-        
-        File::copyDirectory($sourcePath, $packagePath);
-        
-        Log::info('Directory package created (fallback)', [
+
+        $phar = new \PharData($tarPath);
+        $phar->buildFromDirectory($sourcePath);
+        // PharData mantiene el archivo abierto mientras exista el objeto; sin
+        // soltarlo, la subida posterior podría leer un TAR sin cerrar.
+        unset($phar);
+
+        Log::info('TAR package created successfully', [
             'source' => $sourcePath,
-            'package' => $packagePath,
-            'files_count' => count(File::allFiles($packagePath))
+            'tar_path' => $tarPath,
+            'size' => filesize($tarPath),
+            'files_count' => count(File::allFiles($sourcePath))
         ]);
-        
-        return $packagePath;
+
+        return $tarPath;
     }
 }

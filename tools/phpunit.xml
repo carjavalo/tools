@@ -23,6 +23,9 @@
         <env name="BCRYPT_ROUNDS" value="4"/>
         <env name="CACHE_STORE" value="array"/>
         <env name="DB_CONNECTION" value="sqlite"/>
+        <!-- Las pruebas no hablan con S3: el disco por omisión es local y
+             cada prueba de archivos lo reemplaza con Storage::fake('public'). -->
+        <env name="FILESYSTEM_DISK" value="public"/>
         <env name="DB_DATABASE" value=":memory:"/>
         <env name="MAIL_MAILER" value="array"/>
         <env name="PULSE_ENABLED" value="false"/>

@@ -3,11 +3,10 @@
 namespace App\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Support\Almacenamiento;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
-use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class EvarisdropFileTransferController extends Controller
 {
@@ -36,7 +35,7 @@ class EvarisdropFileTransferController extends Controller
         $fileName = $file->getClientOriginalName();
         $filePath = "transfers/{$fileId}_{$fileName}";
         
-        Storage::disk('local')->put($filePath, file_get_contents($file));
+        Almacenamiento::subirDesdeRuta($file->getRealPath(), $filePath);
 
         // Create transfer request
         $transferRequest = [
@@ -132,7 +131,7 @@ class EvarisdropFileTransferController extends Controller
 
         // If rejected, delete the file
         if ($action === 'reject') {
-            Storage::disk('local')->delete($transfer['filePath']);
+            Almacenamiento::eliminar($transfer['filePath']);
         }
 
         // Remove from pending transfers
@@ -164,8 +163,8 @@ class EvarisdropFileTransferController extends Controller
         }
 
         $filePath = $transfer['filePath'];
-        
-        if (!Storage::disk('local')->exists($filePath)) {
+
+        if (!Almacenamiento::existe($filePath)) {
             return response()->json(['error' => 'Archivo no encontrado'], 404);
         }
 
@@ -174,17 +173,18 @@ class EvarisdropFileTransferController extends Controller
         $transfer['completedAt'] = now()->toISOString();
         Cache::put("transfer_request_{$transferId}", $transfer, 1800);
 
-        // Return file download
-        $fileName = $transfer['fileName'];
-        $fileContents = Storage::disk('local')->get($filePath);
-        
-        // Clean up file after download
-        Storage::disk('local')->delete($filePath);
+        // El archivo se borra al terminar la petición y no antes de responder:
+        // la respuesta se transmite desde el disco, así que el objeto tiene que
+        // seguir existiendo mientras se envía. Leerlo completo en memoria para
+        // poder borrarlo antes agotaría el memory_limit en transferencias
+        // grandes (la validación admite hasta 50 MB).
+        app()->terminating(fn () => Almacenamiento::eliminar($filePath));
 
-        return response($fileContents)
-            ->header('Content-Type', 'application/octet-stream')
-            ->header('Content-Disposition', 'attachment; filename="' . $fileName . '"')
-            ->header('Content-Length', strlen($fileContents));
+        return Almacenamiento::descarga(
+            $filePath,
+            $transfer['fileName'],
+            'application/octet-stream',
+        );
     }
 
     /**
@@ -231,7 +231,7 @@ class EvarisdropFileTransferController extends Controller
                 if ($requestedAt->diffInHours(now()) > 1) {
                     // Delete file if exists
                     if (isset($transfer['filePath'])) {
-                        Storage::disk('local')->delete($transfer['filePath']);
+                        Almacenamiento::eliminar($transfer['filePath']);
                     }
                     
                     // Remove from cache
