@@ -65,7 +65,10 @@ return [
     |
     */
 
-    'timezone' => 'UTC',
+    // Colombia (UTC-5, sin horario de verano). Va como valor por omisión y no
+    // solo en el .env para que un servidor nuevo quede en hora de Bogotá
+    // aunque olviden ponerle la variable.
+    'timezone' => env('APP_TIMEZONE', 'America/Bogota'),
 
     /*
     |--------------------------------------------------------------------------
