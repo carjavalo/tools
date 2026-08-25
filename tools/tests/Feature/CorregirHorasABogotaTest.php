@@ -70,3 +70,36 @@ test('el diagnóstico encuentra las columnas de fecha y hora de la base', functi
         ->expectsOutputToContain('Columnas de fecha y hora con datos')
         ->assertSuccessful();
 });
+
+test('la aplicación trabaja en la hora de Colombia', function () {
+    expect(config('app.timezone'))->toBe('America/Bogota');
+
+    // Bogotá es UTC-5 permanente: no hay horario de verano que mover.
+    expect(now()->getOffset())->toBe(-5 * 3600);
+});
+
+test('un registro de madrugada retrocede al día anterior, que es cuando ocurrió', function () {
+    $id = auditoriaCon('2026-08-10 00:39:57');
+
+    $this->artisan('horas:corregir-bogota --aplicar')->assertSuccessful();
+
+    expect(substr((string) DB::table('auditoria')->where('id', $id)->value('created_at'), 0, 19))
+        ->toBe('2026-08-09 19:39:57');
+});
+
+test('ninguna columna se procesa dos veces', function () {
+    // En MySQL, getTables() lista las tablas de todas las bases visibles para
+    // el usuario y devuelve el nombre sin calificar, así que una misma tabla
+    // puede aparecer repetida. Si el comando no la descartara, le restaría
+    // cinco horas por cada repetición.
+    $comando = new App\Console\Commands\CorregirHorasABogota;
+    $metodo = new ReflectionMethod($comando, 'columnasDeFechaYHora');
+    $metodo->setAccessible(true);
+
+    $objetivos = $metodo->invoke($comando);
+
+    $claves = array_map(fn ($o) => $o['tabla'].'.'.$o['columna'], $objetivos);
+
+    expect($claves)->not->toBeEmpty();
+    expect(array_unique($claves))->toHaveCount(count($claves));
+});

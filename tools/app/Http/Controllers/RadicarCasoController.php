@@ -58,7 +58,7 @@ class RadicarCasoController extends Controller
         'estRad' => 'Estado Actual',
         'fentregapro' => 'Entrega a Programación',
         'codestsecundario' => 'Estado QX',
-        'fecreci' => 'Fecha Recibido',
+        'fecreci' => 'Fecha Recibido Serv',
         'estcod' => 'Motivo',
         'fecAutorizacion' => 'Fecha Autorización',
         'fechavenautorizacion' => 'Fecha Vencimiento Autorización',
@@ -683,7 +683,7 @@ class RadicarCasoController extends Controller
             'estRad' => 'estado actual',
             'fentregapro' => 'entrega a programación',
             'codestsecundario' => 'estado QX',
-            'fecreci' => 'fecha recibido',
+            'fecreci' => 'fecha recibido serv',
             'fecAutorizacion' => 'fecha autorización',
             'fechavenautorizacion' => 'fecha vencimiento autorización',
             'ObservacionTFX' => 'OB TFX',
@@ -785,7 +785,7 @@ class RadicarCasoController extends Controller
             'estRad' => 'estado actual',
             'valor_copago' => 'valor del copago',
             'fentregapro' => 'entrega a programación',
-            'fecreci' => 'fecha recibido',
+            'fecreci' => 'fecha recibido serv',
             'fecAutorizacion' => 'fecha autorización',
             'fechavenautorizacion' => 'fecha vencimiento autorización',
         ]);
@@ -898,6 +898,9 @@ class RadicarCasoController extends Controller
                 Rule::in($estadosPermitidos->pluck('id')->map(fn ($id) => (string) $id)->all()),
             ],
             'codsubesp' => ['nullable', 'string', 'max:10'],
+            // Fecha Recibido Serv: la registra el servicio al diligenciar el
+            // seguimiento. No es la fecha de radicación (created_at) que la
+            // pestaña Nueva Radicación auto diligencia.
             'fecreci' => ['nullable', 'date'],
             // Motivo se retiró del formulario: ya no se diligencia aquí.
             'maos' => ['boolean'],
@@ -909,6 +912,7 @@ class RadicarCasoController extends Controller
             'estRad.in' => 'El estado seleccionado no está asignado a tu rol.',
         ], [
             'estRad' => 'estado actual',
+            'fecreci' => 'fecha recibido serv',
         ]);
 
         DB::transaction(function () use ($caso, $data, $request) {
@@ -1108,6 +1112,10 @@ class RadicarCasoController extends Controller
                     ? trim(implode(' ', array_filter([$pac->name, $pac->Apellido1, $pac->apellido2])))
                     : '—',
                 'estado' => $estados[(int) $caso->estRad] ?? '—',
+                // Fecha Recibido Serv vigente del caso. Va en el bloque común
+                // para que acompañe a TODA fila del informe (cambios de la
+                // bitácora incluidos) y no solo a las de seguimiento.
+                'fechaRecibidoDev' => optional($caso->fecreci)->format('Y-m-d'),
                 'especialidad' => $especialidades[$caso->Codesp] ?? '—',
                 'medico' => $this->nombreUsuario($med) ?? '—',
                 'subespecialidad' => $subesp[$caso->codsubesp] ?? '—',
@@ -1149,7 +1157,6 @@ class RadicarCasoController extends Controller
                 'anterior' => $t->anterior ?? '—',
                 'nuevo' => $t->nuevo ?? '—',
                 'motivo' => '—',
-                'fechaRecibidoDev' => null,
                 'vencAnestesia' => null,
                 'observacion' => null,
                 'estadoQx' => '—',
@@ -1182,7 +1189,9 @@ class RadicarCasoController extends Controller
                 'motivo' => $motivos[(int) $s->estcod] ?? '—',
                 // La subespecialidad del seguimiento manda sobre la del caso.
                 'subespecialidad' => $subesp[$s->codsubesp] ?? $base['subespecialidad'],
-                'fechaRecibidoDev' => optional($s->fecreci)->format('Y-m-d'),
+                // Igual que la subespecialidad: la foto del seguimiento manda,
+                // y si ese campo se dejó en blanco queda la del caso.
+                'fechaRecibidoDev' => optional($s->fecreci)->format('Y-m-d') ?? $base['fechaRecibidoDev'],
                 'vencAnestesia' => optional($s->venc_anestesia)->format('Y-m-d'),
                 'observacion' => $s->ObservacionCCX,
                 // Estado QX es el estado secundario del catálogo.
@@ -1221,7 +1230,6 @@ class RadicarCasoController extends Controller
                 'anterior' => '—',
                 'nuevo' => '—',
                 'motivo' => $motivos[(int) $caso->estcod] ?? '—',
-                'fechaRecibidoDev' => optional($caso->fecreci)->format('Y-m-d'),
                 'vencAnestesia' => optional($caso->venc_anestesia)->format('Y-m-d'),
                 'observacion' => $caso->ObservacionCCX,
                 'estadoQx' => $estadosSec[(int) $caso->codestsecundario] ?? '—',
@@ -1595,6 +1603,16 @@ class RadicarCasoController extends Controller
         $med = $caso->codMed ? User::find($caso->codMed) : null;
         $estado = $caso->estRad ? EstRadicado::find($caso->estRad) : null;
 
+        // Fecha Recibido Serv. Manda la columna del caso; si está vacía se
+        // busca en el último seguimiento que sí la diligenció. Sin ese
+        // respaldo, una radicación que el servicio ya recibió pero cuyo dato
+        // solo quedó en la foto del seguimiento se consultaría como si nunca
+        // hubiera sido recibida.
+        $fechaRecibidoServ = $caso->fecreci ?? SeguimientoCaso::where('codrad', $caso->codrad)
+            ->whereNotNull('fecreci')
+            ->orderByDesc('id')
+            ->value('fecreci');
+
         $procs = CupsAnezado::where('codRadicado', (string) $caso->codrad)->get();
         $procedimientos = $procs->map(function ($p) {
             $cups = Cups::find($p->cusv_id);
@@ -1644,7 +1662,12 @@ class RadicarCasoController extends Controller
             // serializa el modelo entero. Al meter el Carbon suelto en este
             // arreglo saldría como 2026-07-30T00:00:00.000000Z, que además
             // deja vacío el <input type="date"> de Modificar Radicado.
-            'fecreci' => optional($caso->fecreci)->format('Y-m-d'),
+            //
+            // 'fecreci' es la Fecha Recibido Serv, la que diligencia el
+            // servicio desde Aplicar Modificaciones. No confundirla con
+            // 'fechaRecibido' (created_at), la fecha de radicación. Vacía
+            // significa que el servicio todavía no ha recibido la radicación.
+            'fecreci' => optional($fechaRecibidoServ)->format('Y-m-d'),
             'entregaProg' => optional($caso->fentregapro)->format('Y-m-d'),
             'fechaAutorizacion' => optional($caso->fecAutorizacion)->format('Y-m-d'),
             'vencimientoAut' => optional($caso->fechavenautorizacion)->format('Y-m-d'),

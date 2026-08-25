@@ -120,21 +120,48 @@ class CorregirHorasABogota extends Command
      */
     private function columnasDeFechaYHora(): array
     {
+        // En MySQL, getTables() lista las tablas de TODAS las bases a las que
+        // alcanza el usuario, no solo la nuestra, y devuelve el nombre sin
+        // calificar. En un hosting compartido con varias bases, eso hace que
+        // 'users' aparezca una vez por base — y como el UPDATE va contra la
+        // base por defecto de la conexión, la misma tabla se actualizaría
+        // tantas veces como repeticiones haya. Cinco horas por cada una.
+        //
+        // De ahí los dos filtros: quedarse con el esquema propio y, por si
+        // acaso, no repetir ningún par tabla/columna.
+        $esquemaPropio = DB::getDatabaseName();
+        $filtraEsquema = in_array(DB::getDriverName(), ['mysql', 'mariadb', 'pgsql'], true);
+
         $objetivos = [];
+        $vistos = [];
 
         foreach (Schema::getTables() as $tabla) {
             $nombre = $tabla['name'];
+            $esquema = $tabla['schema'] ?? null;
 
             if (in_array($nombre, self::EXCLUIDAS, true)) {
+                continue;
+            }
+
+            if ($filtraEsquema && $esquema !== null && $esquema !== $esquemaPropio) {
                 continue;
             }
 
             foreach (Schema::getColumns($nombre) as $columna) {
                 $tipo = strtolower((string) ($columna['type_name'] ?? ''));
 
-                if (in_array($tipo, ['datetime', 'timestamp'], true)) {
-                    $objetivos[] = ['tabla' => $nombre, 'columna' => $columna['name'], 'tipo' => $tipo];
+                if (! in_array($tipo, ['datetime', 'timestamp'], true)) {
+                    continue;
                 }
+
+                $clave = $nombre.'.'.$columna['name'];
+
+                if (isset($vistos[$clave])) {
+                    continue;
+                }
+
+                $vistos[$clave] = true;
+                $objetivos[] = ['tabla' => $nombre, 'columna' => $columna['name'], 'tipo' => $tipo];
             }
         }
 

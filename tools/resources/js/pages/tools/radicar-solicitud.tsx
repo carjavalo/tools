@@ -561,6 +561,9 @@ export default function RadicarSolicitud({
     const [seg, setSeg] = useState({ ...EMPTY_SEG });
     const [aplicando, setAplicando] = useState(false);
     const [segOk, setSegOk] = useState(false);
+    // Sin esto un rechazo del servidor (validación, permisos) no dejaba rastro
+    // en pantalla y el formulario parecía haber guardado.
+    const [segError, setSegError] = useState<string | null>(null);
     const [borrarOpen, setBorrarOpen] = useState(false);
     // Modificar radicado (botón del Historial)
     const [modifOpen, setModifOpen] = useState(false);
@@ -1331,6 +1334,7 @@ export default function RadicarSolicitud({
         if (!caso) return;
         setAplicando(true);
         setSegOk(false);
+        setSegError(null);
         fetch(`/tools/radicar-solicitud/${caso.codrad}/seguimiento`, {
             method: 'POST',
             headers: {
@@ -1340,7 +1344,23 @@ export default function RadicarSolicitud({
             },
             body: JSON.stringify(seg),
         })
-            .then((r) => (r.ok ? r.json() : null))
+            .then(async (r) => {
+                if (r.status === 422) {
+                    const d = await r.json();
+                    const primero = Object.values(
+                        (d.errors ?? {}) as Record<string, string[]>,
+                    )[0]?.[0];
+                    setSegError(
+                        primero ?? 'Revisa los datos de la modificación.',
+                    );
+                    return null;
+                }
+                if (!r.ok) {
+                    setSegError(await mensajeDeError(r));
+                    return null;
+                }
+                return r.json();
+            })
             .then((d) => {
                 if (d && d.ok) {
                     setCaso(d.caso);
@@ -1351,6 +1371,7 @@ export default function RadicarSolicitud({
                     setSegOk(true);
                 }
             })
+            .catch(() => setSegError('No fue posible aplicar la modificación.'))
             .finally(() => setAplicando(false));
     };
 
@@ -1441,7 +1462,7 @@ export default function RadicarSolicitud({
             Especialidad: r.especialidad,
             Motivo: r.motivo,
             Subespecialidad: r.subespecialidad,
-            'Fec. Recibido': r.fechaRecibidoDev ?? '',
+            'Fec. Recibido Serv': r.fechaRecibidoDev ?? '',
             'Venc. Anestesia': r.vencAnestesia ?? '',
             Observación: r.observacion ?? '',
             'Estado QX': r.estadoQx,
@@ -2571,6 +2592,28 @@ export default function RadicarSolicitud({
                                                 label="Fecha Recibido"
                                                 value={caso.fechaRecibido}
                                             />
+                                            {/* La fecha que diligencia el
+                                                servicio desde Aplicar
+                                                Modificaciones. Se dice con
+                                                todas sus letras si el servicio
+                                                ya recibió o no: un guion
+                                                suelto no distingue "sin
+                                                recibir" de "sin dato". */}
+                                            <Dato
+                                                label="Fecha Recibido Serv"
+                                                value={
+                                                    caso.fecreci ? (
+                                                        <span className="font-semibold text-green-600 dark:text-green-400">
+                                                            {caso.fecreci}
+                                                        </span>
+                                                    ) : (
+                                                        <span className="text-amber-600 dark:text-amber-400">
+                                                            Sin recibir por el
+                                                            servicio
+                                                        </span>
+                                                    )
+                                                }
+                                            />
                                             <Dato
                                                 label="Aseguradora (ERP)"
                                                 value={
@@ -2978,6 +3021,11 @@ export default function RadicarSolicitud({
                                                     la trazabilidad del caso.
                                                 </div>
                                             )}
+                                            {segError && (
+                                                <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
+                                                    {segError}
+                                                </div>
+                                            )}
                                             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
                                                 <Field label="Subespecialidad">
                                                     <div
@@ -3122,7 +3170,16 @@ export default function RadicarSolicitud({
                                                         </SelectContent>
                                                     </Select>
                                                 </Field>
-                                                <Field label="Fecha Recibido">
+                                                {/* Fecha Recibido Serv: la
+                                                    registra el servicio al
+                                                    diligenciar la radicación.
+                                                    Se rotula distinto para no
+                                                    confundirla con la Fecha
+                                                    Recibido de Nueva
+                                                    Radicación, que es la fecha
+                                                    de radicación y se auto
+                                                    diligencia. */}
+                                                <Field label="Fecha Recibido Serv">
                                                     <Input
                                                         type="date"
                                                         value={seg.fecreci}
@@ -3535,7 +3592,7 @@ export default function RadicarSolicitud({
                                                     Subespecialidad
                                                 </th>
                                                 <th className="px-3 py-2 font-medium">
-                                                    Fec. Recibido
+                                                    Fec. Recibido Serv
                                                 </th>
                                                 <th className="px-3 py-2 font-medium">
                                                     Venc. Anest.
@@ -4250,7 +4307,9 @@ export default function RadicarSolicitud({
                             />
                         </div>
                         <div className="grid gap-2">
-                            <Label>Fecha Recibido *</Label>
+                            {/* Misma columna que el campo del formulario
+                                Aplicar Modificaciones: se rotula igual. */}
+                            <Label>Fecha Recibido Serv *</Label>
                             <Input
                                 type="date"
                                 value={modif.fecreci}

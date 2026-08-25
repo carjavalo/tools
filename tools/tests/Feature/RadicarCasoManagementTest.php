@@ -248,6 +248,98 @@ test('aplicar modificacion logs a trazabilidad record and updates the case', fun
     expect($caso->ObservacionCCX)->toBe('Revisión');
 });
 
+test('la Fecha Recibido Serv se guarda sola y se ve en la consulta y en el informe', function () {
+    $user = User::factory()->create();
+    $caso = RadicarCaso::create(['Ndocumento' => '9975', 'estRad' => '1']);
+
+    // El formulario no obliga a diligenciar todos los campos: basta con la
+    // fecha para que quede guardada.
+    $this->actingAs($user)
+        ->postJson("/tools/radicar-solicitud/{$caso->codrad}/seguimiento", [
+            'fecreci' => '2026-08-24',
+        ])
+        ->assertOk()
+        ->assertJsonPath('caso.fecreci', '2026-08-24');
+
+    $this->assertDatabaseHas('seguimiento_caso', [
+        'codrad' => $caso->codrad,
+        'fecreci' => '2026-08-24',
+        'user_id' => $user->id,
+    ]);
+
+    expect($caso->refresh()->fecreci->format('Y-m-d'))->toBe('2026-08-24');
+
+    // Se rotula distinto de la fecha de radicación (created_at) para que en la
+    // bitácora se distinga de la Fecha Recibido de Nueva Radicación.
+    $this->assertDatabaseHas('trazabilidad_caso', [
+        'codrad' => $caso->codrad,
+        'campo' => 'fecreci',
+        'etiqueta' => 'Fecha Recibido Serv',
+        'nuevo' => '2026-08-24',
+    ]);
+
+    // Se ve en la consulta por consecutivo, no solo en el informe.
+    $this->actingAs($user)
+        ->getJson('/tools/radicar-solicitud/buscar-caso?q='.$caso->codrad)
+        ->assertOk()
+        ->assertJsonPath('caso.fecreci', '2026-08-24');
+
+    // Y acompaña a TODA fila del informe del caso, incluidas las de la
+    // bitácora, que antes la traían siempre vacía.
+    $filas = collect(
+        $this->actingAs($user)
+            ->getJson('/tools/radicar-solicitud/informe?consecutivo='.$caso->codrad)
+            ->assertOk()
+            ->json('rows')
+    );
+
+    expect($filas)->not->toBeEmpty()
+        ->and($filas->pluck('fechaRecibidoDev')->unique()->all())->toBe(['2026-08-24']);
+});
+
+test('la consulta muestra vacia la Fecha Recibido Serv mientras el servicio no reciba', function () {
+    // Es lo que la vista rotula "Sin recibir por el servicio": el caso existe
+    // pero nadie ha diligenciado la fecha desde Aplicar Modificaciones.
+    $user = User::factory()->create();
+    $caso = RadicarCaso::create(['Ndocumento' => '9976', 'estRad' => '1']);
+
+    $this->actingAs($user)
+        ->getJson('/tools/radicar-solicitud/buscar-caso?q='.$caso->codrad)
+        ->assertOk()
+        ->assertJsonPath('caso.fecreci', null);
+});
+
+test('la consulta recupera la Fecha Recibido Serv del seguimiento cuando el caso no la tiene', function () {
+    // Radicaciones antiguas guardaron la fecha solo en la foto del
+    // seguimiento. Sin este respaldo se consultarían como no recibidas.
+    $user = User::factory()->create();
+    $caso = RadicarCaso::create(['Ndocumento' => '9977', 'estRad' => '1']);
+
+    SeguimientoCaso::create([
+        'codrad' => $caso->codrad,
+        'user_id' => $user->id,
+        'fecreci' => '2026-08-10',
+    ]);
+    // El seguimiento más reciente que sí trae fecha es el que manda.
+    SeguimientoCaso::create([
+        'codrad' => $caso->codrad,
+        'user_id' => $user->id,
+        'fecreci' => '2026-08-18',
+    ]);
+    SeguimientoCaso::create([
+        'codrad' => $caso->codrad,
+        'user_id' => $user->id,
+        'ObservacionCCX' => 'Sin fecha: no debe borrar la anterior',
+    ]);
+
+    expect($caso->refresh()->fecreci)->toBeNull();
+
+    $this->actingAs($user)
+        ->getJson('/tools/radicar-solicitud/buscar-caso?q='.$caso->codrad)
+        ->assertOk()
+        ->assertJsonPath('caso.fecreci', '2026-08-18');
+});
+
 test('MAOS se guarda, queda en la bitacora y llega a la grilla de informes', function () {
     $user = User::factory()->create();
     $caso = RadicarCaso::create(['Ndocumento' => '9980', 'estRad' => '1']);
