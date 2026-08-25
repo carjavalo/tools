@@ -921,6 +921,37 @@ test('el paquete se guarda con el radicado y el documento del paciente en el nom
     expect(basename($caso->refresh()->paquete))
         ->toMatch('/^rad-'.$caso->codrad.'_doc-1088223344_\d{8}-\d{6}-[a-z0-9]{4}\.pdf$/');
 });
+test('modificar el radicado y subir el PDF no exige la Fecha Recibido Serv', function () {
+    // Esa fecha la diligencia el servicio desde Aplicar Modificaciones. Si el
+    // servicio todavía no ha recibido el caso, el modal Modificar Radicado
+    // abre con el campo vacío: exigirlo dejaba sin poder guardar el radicado
+    // ni adjuntar el PDF.
+    Storage::fake('public');
+    $admin = User::factory()->create();
+    $cups = Cups::create(['Nombre' => 'Proc', 'Estado' => true]);
+    $caso = RadicarCaso::create(['Ndocumento' => '9701', 'estRad' => '1']);
+
+    $this->actingAs($admin)
+        ->put("/tools/radicar-solicitud/{$caso->codrad}", [
+            'codMed' => (string) $admin->id,
+            'estRad' => '1',
+            'copago' => false,
+            'fentregapro' => '2026-08-25',
+            // Va vacía, tal como la manda el formulario cuando nadie la ha
+            // diligenciado todavía.
+            'fecreci' => '',
+            'fecAutorizacion' => '2026-08-19',
+            'fechavenautorizacion' => '2026-11-17',
+            'procedimientos' => [['cusv_id' => $cups->id, 'N_Autorizacion' => '456710715']],
+            'paquete' => UploadedFile::fake()->create('25082026_003.pdf', 64, 'application/pdf'),
+        ])
+        ->assertOk();
+
+    $caso->refresh();
+    expect($caso->fecreci)->toBeNull()
+        ->and($caso->paquete)->not->toBeNull();
+});
+
 test('el paquete rechaza archivos que no sean PDF o pasen de 30 MB', function () {
     Storage::fake('public');
     $admin = User::factory()->create();

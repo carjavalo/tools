@@ -769,7 +769,11 @@ class RadicarCasoController extends Controller
             // Paquete: si no se sube uno nuevo, se conserva el que ya tenía.
             'paquete' => $this->reglasPaquete(),
             'fentregapro' => ['required', 'date'],
-            'fecreci' => ['required', 'date'],
+            // Fecha Recibido Serv NO se exige aquí: la diligencia el servicio
+            // desde Aplicar Modificaciones, no quien edita la radicación.
+            // Exigirla dejaba sin poder guardar (ni subir el PDF) cualquier
+            // caso que el servicio todavía no hubiera recibido.
+            'fecreci' => ['nullable', 'date'],
             'fecAutorizacion' => ['required', 'date'],
             'fechavenautorizacion' => ['required', 'date'],
             'ObservacionTFX' => ['nullable', 'string', 'max:65535'],

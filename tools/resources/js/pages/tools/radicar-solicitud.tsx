@@ -4308,8 +4308,11 @@ export default function RadicarSolicitud({
                         </div>
                         <div className="grid gap-2">
                             {/* Misma columna que el campo del formulario
-                                Aplicar Modificaciones: se rotula igual. */}
-                            <Label>Fecha Recibido Serv *</Label>
+                                Aplicar Modificaciones: se rotula igual. Sin
+                                asterisco porque no es obligatoria: vacía
+                                significa que el servicio todavía no ha
+                                recibido la radicación. */}
+                            <Label>Fecha Recibido Serv</Label>
                             <Input
                                 type="date"
                                 value={modif.fecreci}
