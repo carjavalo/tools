@@ -1948,7 +1948,7 @@ export default function RadicarSolicitud({
                                             </span>
                                         )}
                                     </Field>
-                                    <Field label="Entrega a Programación *">
+                                    <Field label="Entrega al Servicio *">
                                         <Input
                                             type="date"
                                             value={form.data.fentregapro}
@@ -2635,7 +2635,7 @@ export default function RadicarSolicitud({
                                                 }
                                             />
                                             <Dato
-                                                label="Entrega Prog."
+                                                label="Entrega al Serv"
                                                 value={caso.entregaProg}
                                             />
                                             <Dato
@@ -4297,7 +4297,7 @@ export default function RadicarSolicitud({
                             </Select>
                         </div>
                         <div className="grid gap-2">
-                            <Label>Entrega a Programación *</Label>
+                            <Label>Entrega al Servicio *</Label>
                             <Input
                                 type="date"
                                 value={modif.fentregapro}
