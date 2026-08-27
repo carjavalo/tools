@@ -1432,3 +1432,89 @@ test('un medico se crea solo con nombre, apellidos y documento', function () {
         ->and($medico->Telefono1)->toBeNull()
         ->and($medico->Eps)->toBeNull();
 });
+
+test('la sub-vista del formulario básico existe y va justo debajo de Cotizaciones', function () {
+    $claves = collect(Permiso::VISTAS)->pluck('key')->values();
+    $vista = collect(Permiso::VISTAS)
+        ->firstWhere('key', 'radicar-solicitud-seguimiento-basico');
+
+    expect($vista)->not->toBeNull()
+        ->and($vista['titulo'])->toBe('Formulario básico Cotizaciones de Conceptos No Convenidos (Historial)')
+        // El Gestor de Permisos pinta las opciones en el orden del catálogo.
+        ->and($claves->search('radicar-solicitud-seguimiento-basico'))
+        ->toBe($claves->search('radicar-solicitud-cotizaciones') + 1);
+});
+
+test('un rol que solo tiene el formulario básico puede guardar el seguimiento', function () {
+    // Es el caso que importa: con el permiso del formulario completo apagado,
+    // el middleware rechazaba la petición y el básico no podía guardar nada.
+    $rol = Role::create(['Nombre' => 'Servicio Basico', 'Estado' => true]);
+    $usuario = User::factory()->create(['rol' => 'Servicio Basico']);
+
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud', 'ver' => true]);
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud-seguimiento', 'ver' => false]);
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud-seguimiento-basico', 'ver' => true]);
+
+    $estado = EstRadicado::create(['Nombre' => 'Recibido Serv', 'Estado' => true]);
+    $rol->estadosRadicado()->sync([$estado->id]);
+
+    $caso = RadicarCaso::create(['Ndocumento' => '9990', 'estRad' => (string) $estado->id]);
+
+    $this->actingAs($usuario)
+        ->postJson("/tools/radicar-solicitud/{$caso->codrad}/seguimiento", [
+            'estRad' => (string) $estado->id,
+            'fecreci' => '2026-08-26',
+            'ObservacionCCX' => 'Recibido por el servicio',
+        ])
+        ->assertOk();
+
+    $caso->refresh();
+    expect($caso->fecreci->format('Y-m-d'))->toBe('2026-08-26')
+        ->and($caso->ObservacionCCX)->toBe('Recibido por el servicio');
+});
+
+test('sin ninguno de los dos formularios asignados no se puede guardar el seguimiento', function () {
+    $rol = Role::create(['Nombre' => 'Solo Lectura Seg', 'Estado' => true]);
+    $usuario = User::factory()->create(['rol' => 'Solo Lectura Seg']);
+
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud', 'ver' => true]);
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud-seguimiento', 'ver' => false]);
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud-seguimiento-basico', 'ver' => false]);
+
+    $caso = RadicarCaso::create(['Ndocumento' => '9991', 'estRad' => '1']);
+
+    $this->actingAs($usuario)
+        ->postJson("/tools/radicar-solicitud/{$caso->codrad}/seguimiento", [
+            'ObservacionCCX' => 'No debería entrar',
+        ])
+        ->assertForbidden();
+
+    expect($caso->refresh()->ObservacionCCX)->toBeNull();
+});
+
+test('el formulario básico no borra los campos que solo trae el completo', function () {
+    // El básico manda tres campos. Los que no viajan no deben tocarse: si los
+    // mandara vacíos, borraría MAOS, subespecialidad o Estado QX.
+    $usuario = User::factory()->create();
+    $caso = RadicarCaso::create([
+        'Ndocumento' => '9992',
+        'estRad' => '1',
+        'maos' => true,
+        'codsubesp' => 'SB1',
+        'venc_anestesia' => '2026-09-01',
+    ]);
+
+    $this->actingAs($usuario)
+        ->postJson("/tools/radicar-solicitud/{$caso->codrad}/seguimiento", [
+            'estRad' => '',
+            'fecreci' => '2026-08-26',
+            'ObservacionCCX' => 'Solo recepción',
+        ])
+        ->assertOk();
+
+    $caso->refresh();
+    expect($caso->maos)->toBeTrue()
+        ->and($caso->codsubesp)->toBe('SB1')
+        ->and(optional($caso->venc_anestesia)->format('Y-m-d'))->toBe('2026-09-01')
+        ->and($caso->fecreci->format('Y-m-d'))->toBe('2026-08-26');
+});

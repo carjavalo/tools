@@ -282,6 +282,17 @@ const EMPTY_SEG = {
     ObservacionCCX: '',
 };
 
+/**
+ * Formulario básico del Historial: solo lo que registra el servicio al recibir
+ * la radicación. Deliberadamente NO lleva MAOS: al no viajar en la petición,
+ * el caso conserva el valor que ya tenía.
+ */
+const EMPTY_SEG_BASICO = {
+    estRad: '',
+    fecreci: '',
+    ObservacionCCX: '',
+};
+
 const EMPTY_INF = {
     fechaInicial: '',
     fechaFinal: '',
@@ -564,6 +575,13 @@ export default function RadicarSolicitud({
     // Sin esto un rechazo del servidor (validación, permisos) no dejaba rastro
     // en pantalla y el formulario parecía haber guardado.
     const [segError, setSegError] = useState<string | null>(null);
+    // Formulario básico: estado propio para que, cuando un rol tenga los dos
+    // formularios, lo que se escriba en uno no se mezcle con el otro ni sus
+    // avisos de guardado se enciendan a la vez.
+    const [segBasico, setSegBasico] = useState({ ...EMPTY_SEG_BASICO });
+    const [aplicandoBasico, setAplicandoBasico] = useState(false);
+    const [segBasicoOk, setSegBasicoOk] = useState(false);
+    const [segBasicoError, setSegBasicoError] = useState<string | null>(null);
     const [borrarOpen, setBorrarOpen] = useState(false);
     // Modificar radicado (botón del Historial)
     const [modifOpen, setModifOpen] = useState(false);
@@ -1329,12 +1347,22 @@ export default function RadicarSolicitud({
             .finally(() => setCotSaving(false));
     };
 
-    const aplicarModificacion = (e: FormEvent) => {
-        e.preventDefault();
+    /**
+     * Envía un seguimiento al caso. La usan los dos formularios del Historial
+     * —el completo y el básico—: ambos escriben en el mismo endpoint, así que
+     * solo cambian los campos que mandan y dónde se muestra el resultado.
+     */
+    const enviarSeguimiento = (
+        payload: Record<string, unknown>,
+        alGuardar: (casoActualizado: CasoDetalle) => void,
+        setOcupado: (v: boolean) => void,
+        setOk: (v: boolean) => void,
+        setError: (v: string | null) => void,
+    ) => {
         if (!caso) return;
-        setAplicando(true);
-        setSegOk(false);
-        setSegError(null);
+        setOcupado(true);
+        setOk(false);
+        setError(null);
         fetch(`/tools/radicar-solicitud/${caso.codrad}/seguimiento`, {
             method: 'POST',
             headers: {
@@ -1342,7 +1370,7 @@ export default function RadicarSolicitud({
                 Accept: 'application/json',
                 'X-XSRF-TOKEN': getXsrfToken(),
             },
-            body: JSON.stringify(seg),
+            body: JSON.stringify(payload),
         })
             .then(async (r) => {
                 if (r.status === 422) {
@@ -1350,13 +1378,11 @@ export default function RadicarSolicitud({
                     const primero = Object.values(
                         (d.errors ?? {}) as Record<string, string[]>,
                     )[0]?.[0];
-                    setSegError(
-                        primero ?? 'Revisa los datos de la modificación.',
-                    );
+                    setError(primero ?? 'Revisa los datos de la modificación.');
                     return null;
                 }
                 if (!r.ok) {
-                    setSegError(await mensajeDeError(r));
+                    setError(await mensajeDeError(r));
                     return null;
                 }
                 return r.json();
@@ -1364,15 +1390,43 @@ export default function RadicarSolicitud({
             .then((d) => {
                 if (d && d.ok) {
                     setCaso(d.caso);
-                    // MAOS refleja lo que ya tiene el caso; el resto del
-                    // formulario arranca en blanco para diligenciar el cambio.
-                    setSeg({ ...EMPTY_SEG, maos: d.caso.maos ?? false });
-                    setSubQuery('');
-                    setSegOk(true);
+                    alGuardar(d.caso);
+                    setOk(true);
                 }
             })
-            .catch(() => setSegError('No fue posible aplicar la modificación.'))
-            .finally(() => setAplicando(false));
+            .catch(() => setError('No fue posible aplicar la modificación.'))
+            .finally(() => setOcupado(false));
+    };
+
+    const aplicarModificacion = (e: FormEvent) => {
+        e.preventDefault();
+        enviarSeguimiento(
+            seg,
+            (actualizado) => {
+                // MAOS refleja lo que ya tiene el caso; el resto del
+                // formulario arranca en blanco para diligenciar el cambio.
+                setSeg({ ...EMPTY_SEG, maos: actualizado.maos ?? false });
+                setSubQuery('');
+            },
+            setAplicando,
+            setSegOk,
+            setSegError,
+        );
+    };
+
+    /**
+     * Formulario básico: manda solo sus tres campos. Los que no viaja no se
+     * tocan en el caso, así que no puede borrar lo que registró el completo.
+     */
+    const aplicarModificacionBasica = (e: FormEvent) => {
+        e.preventDefault();
+        enviarSeguimiento(
+            segBasico,
+            () => setSegBasico({ ...EMPTY_SEG_BASICO }),
+            setAplicandoBasico,
+            setSegBasicoOk,
+            setSegBasicoError,
+        );
     };
 
     const borrarCaso = () => {
@@ -1524,6 +1578,14 @@ export default function RadicarSolicitud({
     const puedeAplicarModificaciones =
         esSuperAdmin ||
         permisosUsuario['radicar-solicitud-seguimiento']?.ver !== false;
+
+    // Formulario básico (Historial): a diferencia del resto de sub-vistas, hay
+    // que asignarlo expresamente al rol. Es un formulario nuevo y añadido
+    // encima del completo: si se permitiera por omisión, todos los roles
+    // pasarían a ver dos formularios sin que nadie lo hubiera pedido.
+    const puedeAplicarModificacionesBasico =
+        esSuperAdmin ||
+        permisosUsuario['radicar-solicitud-seguimiento-basico']?.ver === true;
 
     const tabs = [
         { key: 'nueva' as const, label: 'NUEVA RADICACIÓN', icon: FilePlus2 },
@@ -3299,6 +3361,136 @@ export default function RadicarSolicitud({
                                                 }}
                                             >
                                                 {aplicando ? (
+                                                    <LoaderCircle className="size-5 animate-spin" />
+                                                ) : (
+                                                    <Save className="size-5" />
+                                                )}
+                                                Aplicar Modificaciones al Caso
+                                            </Button>
+                                        </form>
+                                    )}
+
+                                    {/* Segmento 5b: formulario básico. Solo lo
+                                        que registra el servicio al recibir la
+                                        radicación. Se administra por su propia
+                                        sub-vista del Gestor de Permisos y
+                                        convive con el completo cuando el rol
+                                        tiene las dos asignadas. */}
+                                    {puedeAplicarModificacionesBasico && (
+                                        <form
+                                            onSubmit={aplicarModificacionBasica}
+                                            className="rounded-xl border bg-card p-4 shadow-sm"
+                                        >
+                                            <div className="mb-3 text-xs font-bold tracking-wide text-[#2d3e83] uppercase dark:text-white">
+                                                Formulario básico — recepción
+                                                del servicio
+                                            </div>
+                                            {segBasicoOk && (
+                                                <div className="mb-3 flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800 dark:border-green-900 dark:bg-green-950 dark:text-green-200">
+                                                    <CheckCircle2 className="size-4" />
+                                                    Modificación registrada en
+                                                    la trazabilidad del caso.
+                                                </div>
+                                            )}
+                                            {segBasicoError && (
+                                                <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
+                                                    {segBasicoError}
+                                                </div>
+                                            )}
+                                            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                                                <Field label="Estado Actual">
+                                                    <Select
+                                                        value={segBasico.estRad}
+                                                        onValueChange={(v) =>
+                                                            setSegBasico(
+                                                                (prev) => ({
+                                                                    ...prev,
+                                                                    estRad: v,
+                                                                }),
+                                                            )
+                                                        }
+                                                    >
+                                                        <SelectTrigger>
+                                                            <SelectValue placeholder="Seleccione…" />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            {estados.length ===
+                                                                0 && (
+                                                                <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                                                                    Tu rol no
+                                                                    tiene
+                                                                    estados
+                                                                    asignados.
+                                                                </div>
+                                                            )}
+                                                            {estados.map(
+                                                                (s) => (
+                                                                    <SelectItem
+                                                                        key={
+                                                                            s.id
+                                                                        }
+                                                                        value={String(
+                                                                            s.id,
+                                                                        )}
+                                                                    >
+                                                                        {
+                                                                            s.Nombre
+                                                                        }
+                                                                    </SelectItem>
+                                                                ),
+                                                            )}
+                                                        </SelectContent>
+                                                    </Select>
+                                                </Field>
+                                                <Field label="Fecha Recibido Serv">
+                                                    <Input
+                                                        type="date"
+                                                        value={
+                                                            segBasico.fecreci
+                                                        }
+                                                        onChange={(e) =>
+                                                            setSegBasico(
+                                                                (prev) => ({
+                                                                    ...prev,
+                                                                    fecreci:
+                                                                        e.target
+                                                                            .value,
+                                                                }),
+                                                            )
+                                                        }
+                                                    />
+                                                </Field>
+                                                <Field
+                                                    label="Observaciones CCX"
+                                                    className="md:col-span-2 lg:col-span-3"
+                                                >
+                                                    <Textarea
+                                                        value={
+                                                            segBasico.ObservacionCCX
+                                                        }
+                                                        onChange={(e) =>
+                                                            setSegBasico(
+                                                                (prev) => ({
+                                                                    ...prev,
+                                                                    ObservacionCCX:
+                                                                        e.target
+                                                                            .value,
+                                                                }),
+                                                            )
+                                                        }
+                                                        rows={2}
+                                                    />
+                                                </Field>
+                                            </div>
+                                            <Button
+                                                type="submit"
+                                                disabled={aplicandoBasico}
+                                                className="mt-4 h-11 w-full gap-2 font-semibold text-gray-900 hover:opacity-90"
+                                                style={{
+                                                    backgroundColor: '#eab308',
+                                                }}
+                                            >
+                                                {aplicandoBasico ? (
                                                     <LoaderCircle className="size-5 animate-spin" />
                                                 ) : (
                                                     <Save className="size-5" />

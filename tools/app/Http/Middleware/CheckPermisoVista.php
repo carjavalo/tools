@@ -58,6 +58,18 @@ class CheckPermisoVista
                 default => null,
             };
 
+            // El formulario básico guarda por este mismo endpoint que el
+            // completo, así que basta con tener cualquiera de los dos. Sin
+            // esto, un rol que solo tuviera el básico se quedaba sin poder
+            // guardar: el permiso del completo, apagado, lo rechazaba.
+            if ($tab === 'radicar-solicitud-seguimiento') {
+                if (! $this->puedeSeguimiento($role->id)) {
+                    return $this->denegar($request, 'ver');
+                }
+
+                return $next($request);
+            }
+
             $permisoTab = null;
             if ($tab !== null) {
                 $permisoTab = Permiso::where('role_id', $role->id)
@@ -114,6 +126,28 @@ class CheckPermisoVista
         }
 
         return $next($request);
+    }
+
+    /**
+     * ¿El rol puede registrar un seguimiento? Lo autoriza cualquiera de los
+     * dos formularios que escriben en ese endpoint: el completo (Aplicar
+     * Modificaciones) o el básico.
+     *
+     * El completo, sin configurar, se permite —es la regla histórica de las
+     * sub-vistas—. El básico, en cambio, solo cuenta si está explícitamente
+     * asignado: es una sub-vista nueva y no debe activarse sola.
+     */
+    private function puedeSeguimiento(int $roleId): bool
+    {
+        $permisos = Permiso::where('role_id', $roleId)
+            ->whereIn('vista', ['radicar-solicitud-seguimiento', 'radicar-solicitud-seguimiento-basico'])
+            ->get()
+            ->keyBy('vista');
+
+        $completo = $permisos->get('radicar-solicitud-seguimiento');
+        $basico = $permisos->get('radicar-solicitud-seguimiento-basico');
+
+        return (! $completo || $completo->ver) || ($basico && $basico->ver);
     }
 
     /**

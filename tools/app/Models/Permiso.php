@@ -28,6 +28,12 @@ class Permiso extends Model
         ['key' => 'radicar-solicitud-informes', 'titulo' => 'Pestaña Informes', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver']],
         ['key' => 'radicar-solicitud-modificar', 'titulo' => 'Botón Modificar Radicado (Historial)', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver']],
         ['key' => 'radicar-solicitud-cotizaciones', 'titulo' => 'Formulario Cotizaciones de Conceptos No Convenidos (Historial)', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver']],
+        // Versión reducida del formulario Aplicar Modificaciones: solo Estado
+        // Actual, Fecha Recibido Serv y Observaciones CCX. Es para los perfiles
+        // del servicio, que únicamente registran la recepción del caso. Guarda
+        // en el mismo sitio que el completo. A diferencia del resto de
+        // sub-vistas, viene apagada: hay que asignarla al rol para que aparezca.
+        ['key' => 'radicar-solicitud-seguimiento-basico', 'titulo' => 'Formulario básico Cotizaciones de Conceptos No Convenidos (Historial)', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver']],
         ['key' => 'radicar-solicitud-seguimiento', 'titulo' => 'Formulario Aplicar Modificaciones (Historial)', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver']],
         ['key' => 'radicar-solicitud-grilla', 'titulo' => 'Grilla de Radicaciones (Historial)', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver']],
         ['key' => 'gestion-usuarios', 'titulo' => 'Gestión de Usuarios', 'grupo' => 'Herramientas', 'acciones' => ['ver', 'crear', 'editar', 'borrar']],
