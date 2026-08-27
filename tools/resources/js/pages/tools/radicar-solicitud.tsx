@@ -91,6 +91,9 @@ interface CasoListaRow {
     eps: string;
     convenio: string;
     estado: string;
+    // PDFs de los conceptos cotizados. Llega vacío para los roles que no
+    // pueden ver las cotizaciones.
+    cotizaciones: { id: number; tercero: string; url: string }[];
 }
 
 interface CotizacionServidor {
@@ -216,6 +219,9 @@ interface InformeRow {
     estadoQx: string;
     usuario: string;
     modificadoEn: string | null;
+    // PDFs de los conceptos cotizados del caso. Se repiten en todas las filas
+    // del mismo caso, igual que el estado o el paquete.
+    cotizaciones: { id: number; tercero: string; url: string }[];
 }
 
 type ProcRow = { cusv_id: string; N_Autorizacion: string };
@@ -1512,6 +1518,12 @@ export default function RadicarSolicitud({
                 r.copago && r.valorCopago ? Number(r.valorCopago) : '',
             MAOS: r.maos ? 'Sí' : 'No',
             Paquete: r.paqueteUrl ? 'Sí' : 'No',
+            // En Excel el enlace no sirve de nada: se exporta cuántas
+            // cotizaciones tienen PDF y de qué terceros son.
+            'Cotizaciones (PDF)': r.cotizaciones.length,
+            'Cotizaciones (terceros)': r.cotizaciones
+                .map((c) => c.tercero)
+                .join(' / '),
             Médico: r.medico,
             Especialidad: r.especialidad,
             Motivo: r.motivo,
@@ -2447,6 +2459,14 @@ export default function RadicarSolicitud({
                                                     <th className="px-3 py-2 font-medium">
                                                         Estado
                                                     </th>
+                                                    {/* Los PDF de los conceptos
+                                                        cotizados los ve todo
+                                                        el que ve la grilla:
+                                                        sirven para verificar
+                                                        qué se cotizó. */}
+                                                    <th className="px-3 py-2 font-medium">
+                                                        Cotización
+                                                    </th>
                                                 </tr>
                                             </thead>
                                             <tbody className="divide-y">
@@ -2514,12 +2534,55 @@ export default function RadicarSolicitud({
                                                                     {c.estado}
                                                                 </span>
                                                             </td>
+                                                            <td className="px-3 py-2">
+                                                                {c.cotizaciones
+                                                                    .length ===
+                                                                0 ? (
+                                                                    <span className="text-muted-foreground">
+                                                                        —
+                                                                    </span>
+                                                                ) : (
+                                                                    <div className="flex flex-wrap gap-1">
+                                                                        {c.cotizaciones.map(
+                                                                            (
+                                                                                cot,
+                                                                            ) => (
+                                                                                <a
+                                                                                    key={
+                                                                                        cot.id
+                                                                                    }
+                                                                                    href={
+                                                                                        cot.url
+                                                                                    }
+                                                                                    target="_blank"
+                                                                                    rel="noreferrer"
+                                                                                    // Sin esto el clic
+                                                                                    // también cargaría
+                                                                                    // el caso, porque
+                                                                                    // la fila entera
+                                                                                    // es un botón.
+                                                                                    onClick={(
+                                                                                        e,
+                                                                                    ) =>
+                                                                                        e.stopPropagation()
+                                                                                    }
+                                                                                    title={`Abrir la cotización de ${cot.tercero} en una pestaña nueva`}
+                                                                                    className="inline-flex items-center gap-1 rounded-md bg-[#2d3e83]/10 px-2 py-0.5 text-xs font-medium text-[#2d3e83] transition-colors hover:bg-[#2d3e83]/20 dark:bg-white/10 dark:text-white"
+                                                                                >
+                                                                                    <Eye className="size-3" />
+                                                                                    PDF
+                                                                                </a>
+                                                                            ),
+                                                                        )}
+                                                                    </div>
+                                                                )}
+                                                            </td>
                                                         </tr>
                                                     ))}
                                                 {casosLista.length === 0 && (
                                                     <tr>
                                                         <td
-                                                            colSpan={7}
+                                                            colSpan={8}
                                                             className="px-3 py-8 text-center text-muted-foreground"
                                                         >
                                                             No hay radicaciones
@@ -3772,6 +3835,9 @@ export default function RadicarSolicitud({
                                                     Paquete
                                                 </th>
                                                 <th className="px-3 py-2 font-medium">
+                                                    Cotización
+                                                </th>
+                                                <th className="px-3 py-2 font-medium">
                                                     Médico
                                                 </th>
                                                 <th className="px-3 py-2 font-medium">
@@ -3903,6 +3969,36 @@ export default function RadicarSolicitud({
                                                             <span className="text-muted-foreground">
                                                                 —
                                                             </span>
+                                                        )}
+                                                    </td>
+                                                    <td className="px-3 py-2">
+                                                        {r.cotizaciones
+                                                            .length === 0 ? (
+                                                            <span className="text-muted-foreground">
+                                                                —
+                                                            </span>
+                                                        ) : (
+                                                            <div className="flex flex-wrap gap-1">
+                                                                {r.cotizaciones.map(
+                                                                    (cot) => (
+                                                                        <a
+                                                                            key={
+                                                                                cot.id
+                                                                            }
+                                                                            href={
+                                                                                cot.url
+                                                                            }
+                                                                            target="_blank"
+                                                                            rel="noreferrer"
+                                                                            title={`Abrir la cotización de ${cot.tercero} en una pestaña nueva`}
+                                                                            className="inline-flex items-center gap-1 rounded-md bg-[#2d3e83]/10 px-2 py-0.5 text-xs font-medium text-[#2d3e83] transition-colors hover:bg-[#2d3e83]/20 dark:bg-white/10 dark:text-white"
+                                                                        >
+                                                                            <Eye className="size-3" />
+                                                                            PDF
+                                                                        </a>
+                                                                    ),
+                                                                )}
+                                                            </div>
                                                         )}
                                                     </td>
                                                     <td className="px-3 py-2">

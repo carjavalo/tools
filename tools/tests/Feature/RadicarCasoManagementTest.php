@@ -1518,3 +1518,204 @@ test('el formulario básico no borra los campos que solo trae el completo', func
         ->and(optional($caso->venc_anestesia)->format('Y-m-d'))->toBe('2026-09-01')
         ->and($caso->fecreci->format('Y-m-d'))->toBe('2026-08-26');
 });
+
+test('la grilla trae el PDF de los conceptos cotizados', function () {
+    Storage::fake('public');
+    $rol = Role::create(['Nombre' => 'Gestor Contratación', 'Estado' => true]);
+    $gestor = User::factory()->create(['rol' => 'Gestor Contratación']);
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud', 'ver' => true]);
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud-cotizaciones', 'ver' => true]);
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud-grilla', 'ver' => true]);
+
+    $caso = RadicarCaso::create(['Ndocumento' => '9993', 'estRad' => '1']);
+
+    CotizacionCaso::create([
+        'codrad' => $caso->codrad,
+        'tercero' => 'Proveedor Uno',
+        'fecha_cotizacion' => '2026-08-20',
+        'valor' => 1000,
+        'adjunto' => 'cotizaciones/uno.pdf',
+    ]);
+    // Sin adjunto: no debe aparecer, no hay archivo que abrir.
+    CotizacionCaso::create([
+        'codrad' => $caso->codrad,
+        'tercero' => 'Proveedor Sin PDF',
+        'fecha_cotizacion' => '2026-08-21',
+        'valor' => 2000,
+    ]);
+
+    $fila = collect(
+        $this->actingAs($gestor)
+            ->get('/tools/radicar-solicitud')
+            ->assertOk()
+            ->viewData('page')['props']['casosLista']
+    )->firstWhere('codrad', $caso->codrad);
+
+    expect($fila['cotizaciones'])->toHaveCount(1)
+        ->and($fila['cotizaciones'][0]['tercero'])->toBe('Proveedor Uno')
+        ->and($fila['cotizaciones'][0]['url'])->toContain('/cotizacion/');
+});
+
+test('quien ve la grilla verifica las cotizaciones aunque no las gestione', function () {
+    // La columna existe para que cualquiera pueda verificar lo cotizado, así
+    // que no depende del permiso del formulario de cotizaciones. Basta con ver
+    // la grilla.
+    Storage::fake('public');
+    $rol = Role::create(['Nombre' => 'Sin Cotiz', 'Estado' => true]);
+    $usuario = User::factory()->create(['rol' => 'Sin Cotiz']);
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud', 'ver' => true]);
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud-cotizaciones', 'ver' => false]);
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud-grilla', 'ver' => true]);
+
+    $caso = RadicarCaso::create(['Ndocumento' => '9994', 'estRad' => '1']);
+    $ruta = UploadedFile::fake()
+        ->create('cotizacion.pdf', 20, 'application/pdf')
+        ->store('cotizaciones', 'public');
+    $cot = CotizacionCaso::create([
+        'codrad' => $caso->codrad,
+        'tercero' => 'Proveedor Uno',
+        'fecha_cotizacion' => '2026-08-20',
+        'valor' => 1000,
+        'adjunto' => $ruta,
+    ]);
+
+    $fila = collect(
+        $this->actingAs($usuario)
+            ->get('/tools/radicar-solicitud')
+            ->assertOk()
+            ->viewData('page')['props']['casosLista']
+    )->firstWhere('codrad', $caso->codrad);
+
+    expect($fila['cotizaciones'])->toHaveCount(1)
+        ->and($fila['cotizaciones'][0]['tercero'])->toBe('Proveedor Uno');
+
+    // Y la ruta del archivo lo deja pasar: sin esto el enlace daría 403.
+    $this->actingAs($usuario)
+        ->get("/tools/radicar-solicitud/cotizacion/{$cot->id}/adjunto")
+        ->assertOk();
+});
+
+test('sin grilla ni cotizaciones, la pestaña Informes sin configurar deja abrir el PDF', function () {
+    // La pestaña Informes sigue la regla del resto de sub-vistas: sin
+    // configurar se permite. Como desde el informe también se verifica lo
+    // cotizado, el archivo se abre. Para cerrarlo hay que apagarla
+    // expresamente, y eso lo cubre la prueba siguiente.
+    Storage::fake('public');
+    $rol = Role::create(['Nombre' => 'Sin Nada Cotiz', 'Estado' => true]);
+    $usuario = User::factory()->create(['rol' => 'Sin Nada Cotiz']);
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud', 'ver' => true]);
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud-cotizaciones', 'ver' => false]);
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud-grilla', 'ver' => false]);
+
+    $caso = RadicarCaso::create(['Ndocumento' => '9995', 'estRad' => '1']);
+    $ruta = UploadedFile::fake()
+        ->create('cotizacion.pdf', 20, 'application/pdf')
+        ->store('cotizaciones', 'public');
+    $cot = CotizacionCaso::create([
+        'codrad' => $caso->codrad,
+        'tercero' => 'Proveedor Uno',
+        'fecha_cotizacion' => '2026-08-20',
+        'valor' => 1000,
+        'adjunto' => $ruta,
+    ]);
+
+    $this->actingAs($usuario)
+        ->get("/tools/radicar-solicitud/cotizacion/{$cot->id}/adjunto")
+        ->assertOk();
+});
+
+test('el informe trae el PDF de los conceptos cotizados en todas las filas del caso', function () {
+    Storage::fake('public');
+    $usuario = User::factory()->create();
+    $caso = RadicarCaso::create(['Ndocumento' => '9996', 'estRad' => '1']);
+
+    $ruta = UploadedFile::fake()
+        ->create('cotizacion.pdf', 20, 'application/pdf')
+        ->store('cotizaciones', 'public');
+    CotizacionCaso::create([
+        'codrad' => $caso->codrad,
+        'tercero' => 'Proveedor Informe',
+        'fecha_cotizacion' => '2026-08-20',
+        'valor' => 1000,
+        'adjunto' => $ruta,
+    ]);
+    // Sin adjunto: no hay archivo que abrir, no debe listarse.
+    CotizacionCaso::create([
+        'codrad' => $caso->codrad,
+        'tercero' => 'Proveedor Sin PDF',
+        'fecha_cotizacion' => '2026-08-21',
+        'valor' => 2000,
+    ]);
+
+    // Un seguimiento para que el caso tenga más de una fila en el informe.
+    SeguimientoCaso::create([
+        'codrad' => $caso->codrad,
+        'user_id' => $usuario->id,
+        'ObservacionCCX' => 'Movimiento',
+    ]);
+
+    $filas = collect(
+        $this->actingAs($usuario)
+            ->getJson('/tools/radicar-solicitud/informe?consecutivo='.$caso->codrad)
+            ->assertOk()
+            ->json('rows')
+    );
+
+    expect($filas)->not->toBeEmpty();
+    // El dato es del caso, así que acompaña a TODAS sus filas.
+    $filas->each(function ($fila) {
+        expect($fila['cotizaciones'])->toHaveCount(1)
+            ->and($fila['cotizaciones'][0]['tercero'])->toBe('Proveedor Informe');
+    });
+});
+
+test('quien ve el informe puede abrir el PDF aunque no tenga la grilla', function () {
+    // Sin esto la columna nueva del informe mostraría enlaces que responden
+    // 403 a los roles que solo tienen la pestaña Informes.
+    Storage::fake('public');
+    $rol = Role::create(['Nombre' => 'Solo Informes', 'Estado' => true]);
+    $usuario = User::factory()->create(['rol' => 'Solo Informes']);
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud', 'ver' => true]);
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud-cotizaciones', 'ver' => false]);
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud-grilla', 'ver' => false]);
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud-informes', 'ver' => true]);
+
+    $caso = RadicarCaso::create(['Ndocumento' => '9997', 'estRad' => '1']);
+    $ruta = UploadedFile::fake()
+        ->create('cotizacion.pdf', 20, 'application/pdf')
+        ->store('cotizaciones', 'public');
+    $cot = CotizacionCaso::create([
+        'codrad' => $caso->codrad,
+        'tercero' => 'Proveedor Uno',
+        'fecha_cotizacion' => '2026-08-20',
+        'valor' => 1000,
+        'adjunto' => $ruta,
+    ]);
+
+    $this->actingAs($usuario)
+        ->get("/tools/radicar-solicitud/cotizacion/{$cot->id}/adjunto")
+        ->assertOk();
+});
+
+test('con la pestaña Informes apagada y sin grilla el PDF sigue cerrado', function () {
+    Storage::fake('public');
+    $rol = Role::create(['Nombre' => 'Nada De Nada', 'Estado' => true]);
+    $usuario = User::factory()->create(['rol' => 'Nada De Nada']);
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud', 'ver' => true]);
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud-cotizaciones', 'ver' => false]);
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud-grilla', 'ver' => false]);
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud-informes', 'ver' => false]);
+
+    $caso = RadicarCaso::create(['Ndocumento' => '9998', 'estRad' => '1']);
+    $cot = CotizacionCaso::create([
+        'codrad' => $caso->codrad,
+        'tercero' => 'Proveedor Uno',
+        'fecha_cotizacion' => '2026-08-20',
+        'valor' => 1000,
+        'adjunto' => 'cotizaciones/uno.pdf',
+    ]);
+
+    $this->actingAs($usuario)
+        ->get("/tools/radicar-solicitud/cotizacion/{$cot->id}/adjunto")
+        ->assertForbidden();
+});

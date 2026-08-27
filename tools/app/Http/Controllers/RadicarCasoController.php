@@ -160,6 +160,44 @@ class RadicarCasoController extends Controller
     }
 
     /**
+     * ¿Puede abrir el PDF de una cotización?
+     *
+     * Lo autoriza cualquiera de las tres pantallas donde ese archivo se
+     * ofrece: el formulario de cotizaciones, la grilla del Historial y la
+     * grilla de Informes. Si no se comprobaran las tres, alguna de ellas
+     * mostraría un enlace que responde 403 al pulsarlo.
+     */
+    private function puedeVerAdjuntoCotizacion(Request $request): bool
+    {
+        if ($this->puedeGestionarCotizaciones($request) || $this->muestraGrillaCasos($request)) {
+            return true;
+        }
+
+        $user = $request->user();
+
+        if (! $user) {
+            return false;
+        }
+
+        if ($user->rol === User::SUPER_ADMIN) {
+            return true;
+        }
+
+        $role = Role::where('Nombre', $user->rol)->first();
+        if (! $role) {
+            return false;
+        }
+
+        // La pestaña Informes sigue la regla del resto de sub-vistas: sin
+        // configurar se permite, y solo se cierra apagándola expresamente.
+        $permiso = Permiso::where('role_id', $role->id)
+            ->where('vista', 'radicar-solicitud-informes')
+            ->first();
+
+        return ! $permiso || (bool) $permiso->ver;
+    }
+
+    /**
      * ¿El usuario activo puede gestionar las cotizaciones de conceptos no
      * convenidos? Si su rol tiene configurada la sub-vista en el Gestor de
      * Permisos, esa configuración manda; sin configurar, la ven Gestor
@@ -252,7 +290,19 @@ class RadicarCasoController extends Controller
         $estados = EstRadicado::pluck('Nombre', 'id');
         $convenios = Convenio::pluck('nombre', 'nit_Convenio');
 
-        return $casos->map(function ($caso) use ($pacientes, $estados, $convenios) {
+        // PDFs que Contratación adjunta a los conceptos cotizados. Se traen de
+        // una sola consulta para las 200 filas: uno por caso sería un N+1.
+        //
+        // Van para todo el que ve la grilla, no solo para quien gestiona las
+        // cotizaciones: el objetivo es que cualquiera pueda verificar qué se
+        // cotizó. La ruta que entrega el archivo aplica esa misma regla.
+        $adjuntos = CotizacionCaso::whereIn('codrad', $casos->pluck('codrad'))
+            ->whereNotNull('adjunto')
+            ->orderBy('id')
+            ->get(['id', 'codrad', 'tercero'])
+            ->groupBy('codrad');
+
+        return $casos->map(function ($caso) use ($pacientes, $estados, $convenios, $adjuntos) {
             $p = $pacientes->get($caso->Ndocumento);
 
             return [
@@ -267,6 +317,12 @@ class RadicarCasoController extends Controller
                     ? ($convenios[$caso->convenio] ?? $caso->convenio)
                     : '—',
                 'estado' => $estados[(int) $caso->estRad] ?? '—',
+                'cotizaciones' => ($adjuntos->get($caso->codrad) ?? collect())
+                    ->map(fn (CotizacionCaso $c) => [
+                        'id' => $c->id,
+                        'tercero' => $c->tercero,
+                        'url' => route('tools.radicar-solicitud.cotizacion-adjunto', $c->id),
+                    ])->values()->all(),
             ];
         })->values()->all();
     }
@@ -1040,6 +1096,15 @@ class RadicarCasoController extends Controller
             ->get(['id', 'name', 'Apellido1', 'apellido2'])
             ->keyBy('id');
 
+        // PDFs de los conceptos cotizados, para verificar desde el informe qué
+        // se cotizó. Una sola consulta para todos los casos: dentro del bucle
+        // de filas sería una por movimiento.
+        $adjuntosCotizacion = CotizacionCaso::whereIn('codrad', $codrads)
+            ->whereNotNull('adjunto')
+            ->orderBy('id')
+            ->get(['id', 'codrad', 'tercero'])
+            ->groupBy('codrad');
+
         $rangoFecha = function ($query) use ($request) {
             return $query
                 ->when($request->filled('fechaInicial'), fn ($q) => $q->whereDate('created_at', '>=', $request->query('fechaInicial')))
@@ -1104,7 +1169,7 @@ class RadicarCasoController extends Controller
             ->unique()
             ->flip();
 
-        $datosCaso = function (RadicarCaso $caso) use ($estados, $usuarios, $subesp, $especialidades, $pacientes) {
+        $datosCaso = function (RadicarCaso $caso) use ($estados, $usuarios, $subesp, $especialidades, $pacientes, $adjuntosCotizacion) {
             $med = $caso->codMed ? $usuarios->get($caso->codMed) : null;
             $pac = $caso->Ndocumento ? $pacientes->get($caso->Ndocumento) : null;
 
@@ -1129,6 +1194,14 @@ class RadicarCasoController extends Controller
                 'paqueteUrl' => $caso->paquete
                     ? route('tools.radicar-solicitud.paquete', $caso->codrad)
                     : null,
+                // Van en el bloque común: son del caso, así que acompañan a
+                // todas sus filas, igual que el estado o el paquete.
+                'cotizaciones' => ($adjuntosCotizacion->get($caso->codrad) ?? collect())
+                    ->map(fn (CotizacionCaso $c) => [
+                        'id' => $c->id,
+                        'tercero' => $c->tercero,
+                        'url' => route('tools.radicar-solicitud.cotizacion-adjunto', $c->id),
+                    ])->values()->all(),
             ];
         };
 
@@ -1459,7 +1532,7 @@ class RadicarCasoController extends Controller
      */
     public function verAdjuntoCotizacion(Request $request, CotizacionCaso $cotizacion)
     {
-        abort_unless($this->puedeGestionarCotizaciones($request), 403);
+        abort_unless($this->puedeVerAdjuntoCotizacion($request), 403);
         abort_unless($cotizacion->adjunto, 404);
         abort_unless(Almacenamiento::existe($cotizacion->adjunto), 404);
 
