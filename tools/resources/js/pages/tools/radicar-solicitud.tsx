@@ -620,7 +620,17 @@ export default function RadicarSolicitud({
     // El servidor avisa cuando recortó el informe por volumen.
     const [infTruncado, setInfTruncado] = useState(false);
     const [infLoading, setInfLoading] = useState(false);
-    const [expandedObs, setExpandedObs] = useState<Set<string>>(new Set());
+    // Texto largo del informe (Cambio y Observación) mostrado en un panel
+    // flotante. Antes se expandía dentro de la celda y estiraba la fila, que
+    // es lo que descolocaba la grilla. Solo uno abierto a la vez: dos paneles
+    // flotantes se solaparían.
+    const [flotante, setFlotante] = useState<{
+        key: string;
+        titulo: string;
+        texto: string;
+        top: number;
+        left: number;
+    } | null>(null);
 
     const form = useForm<RadicarForm>({
         Codesp: '',
@@ -1475,7 +1485,9 @@ export default function RadicarSolicitud({
     const generarInforme = (e: FormEvent) => {
         e.preventDefault();
         setInfLoading(true);
-        setExpandedObs(new Set());
+        // Las filas se reemplazan: un panel abierto quedaría apuntando a una
+        // celda que ya no existe.
+        setFlotante(null);
         const params = new URLSearchParams();
         Object.entries(inf).forEach(([k, v]) => {
             if (v) params.set(k, v);
@@ -1557,16 +1569,64 @@ export default function RadicarSolicitud({
         XLSX.writeFile(libro, `informe-radicaciones-${hoy}.xlsx`);
     };
 
-    const toggleObs = (id: string) =>
-        setExpandedObs((prev) => {
-            const next = new Set(prev);
-            if (next.has(id)) {
-                next.delete(id);
-            } else {
-                next.add(id);
-            }
-            return next;
-        });
+    /**
+     * Abre o cierra el panel flotante de una celda. El rectángulo se mide
+     * ANTES de tocar el estado: dentro del actualizador, currentTarget del
+     * evento ya no está disponible.
+     */
+    const alternarFlotante = (
+        key: string,
+        titulo: string,
+        texto: string,
+        origen: HTMLElement,
+    ) => {
+        const r = origen.getBoundingClientRect();
+        const ANCHO = 320;
+
+        setFlotante((prev) =>
+            prev?.key === key
+                ? null
+                : {
+                      key,
+                      titulo,
+                      texto,
+                      top: r.bottom + 6,
+                      // Sin el tope, una celda del extremo derecho abriría el
+                      // panel fuera de la pantalla.
+                      left: Math.max(
+                          8,
+                          Math.min(r.left, window.innerWidth - ANCHO - 8),
+                      ),
+                  },
+        );
+    };
+
+    // El panel va en posición fija, así que al desplazar o redimensionar
+    // quedaría separado de su celda: se cierra. Escape también lo cierra.
+    useEffect(() => {
+        if (!flotante) return;
+
+        const cerrar = () => setFlotante(null);
+        const porTecla = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') cerrar();
+        };
+
+        window.addEventListener('scroll', cerrar, true);
+        window.addEventListener('resize', cerrar);
+        window.addEventListener('keydown', porTecla);
+        // Cierre al pulsar fuera. Se hace desde document en vez de con una
+        // capa que tape la pantalla: con esa capa, saltar de una celda a otra
+        // costaba dos clics —uno para cerrar y otro para abrir—. Los botones y
+        // el propio panel frenan este evento, así que un solo clic basta.
+        document.addEventListener('pointerdown', cerrar);
+
+        return () => {
+            window.removeEventListener('scroll', cerrar, true);
+            window.removeEventListener('resize', cerrar);
+            window.removeEventListener('keydown', porTecla);
+            document.removeEventListener('pointerdown', cerrar);
+        };
+    }, [flotante]);
 
     // Pestañas visibles según el Gestor de Permisos: cada pestaña se rige por
     // el permiso "ver" de su sub-vista (radicar-solicitud-*). Sin
@@ -3912,17 +3972,43 @@ export default function RadicarSolicitud({
                                                                 —
                                                             </span>
                                                         ) : (
-                                                            <span className="flex flex-wrap items-center gap-1">
-                                                                <span className="text-muted-foreground line-through">
-                                                                    {r.anterior}
+                                                            <button
+                                                                type="button"
+                                                                onClick={(e) =>
+                                                                    alternarFlotante(
+                                                                        `${r.id}:cambio`,
+                                                                        r.campo,
+                                                                        `Anterior:\n${r.anterior}\n\nNuevo:\n${r.nuevo}`,
+                                                                        e.currentTarget,
+                                                                    )
+                                                                }
+                                                                onPointerDown={(
+                                                                    e,
+                                                                ) =>
+                                                                    e.stopPropagation()
+                                                                }
+                                                                title="Clic para ver el cambio completo"
+                                                                className="flex w-full items-start gap-1 text-left"
+                                                            >
+                                                                <span className="flex min-w-0 items-center gap-1">
+                                                                    <span className="line-clamp-1 text-muted-foreground line-through">
+                                                                        {
+                                                                            r.anterior
+                                                                        }
+                                                                    </span>
+                                                                    <span className="shrink-0 text-muted-foreground">
+                                                                        →
+                                                                    </span>
+                                                                    <span className="line-clamp-1 font-medium text-foreground">
+                                                                        {
+                                                                            r.nuevo
+                                                                        }
+                                                                    </span>
                                                                 </span>
-                                                                <span className="text-muted-foreground">
-                                                                    →
-                                                                </span>
-                                                                <span className="font-medium text-foreground">
-                                                                    {r.nuevo}
-                                                                </span>
-                                                            </span>
+                                                                <ChevronDown
+                                                                    className={`mt-0.5 size-3.5 shrink-0 text-muted-foreground transition-transform ${flotante?.key === `${r.id}:cambio` ? 'rotate-180' : ''}`}
+                                                                />
+                                                            </button>
                                                         )}
                                                     </td>
                                                     <td className="px-3 py-2">
@@ -4024,29 +4110,30 @@ export default function RadicarSolicitud({
                                                         {r.observacion ? (
                                                             <button
                                                                 type="button"
-                                                                onClick={() =>
-                                                                    toggleObs(
-                                                                        r.id,
+                                                                onClick={(e) =>
+                                                                    alternarFlotante(
+                                                                        `${r.id}:obs`,
+                                                                        'Observación',
+                                                                        r.observacion ??
+                                                                            '',
+                                                                        e.currentTarget,
                                                                     )
                                                                 }
+                                                                onPointerDown={(
+                                                                    e,
+                                                                ) =>
+                                                                    e.stopPropagation()
+                                                                }
                                                                 title="Clic para ver la observación completa"
-                                                                className="flex items-start gap-1 text-left hover:text-foreground"
+                                                                className="flex w-full items-start gap-1 text-left hover:text-foreground"
                                                             >
-                                                                <span
-                                                                    className={
-                                                                        expandedObs.has(
-                                                                            r.id,
-                                                                        )
-                                                                            ? 'whitespace-pre-wrap'
-                                                                            : 'line-clamp-1'
-                                                                    }
-                                                                >
+                                                                <span className="line-clamp-1">
                                                                     {
                                                                         r.observacion
                                                                     }
                                                                 </span>
                                                                 <ChevronDown
-                                                                    className={`mt-0.5 size-3.5 shrink-0 transition-transform ${expandedObs.has(r.id) ? 'rotate-180' : ''}`}
+                                                                    className={`mt-0.5 size-3.5 shrink-0 transition-transform ${flotante?.key === `${r.id}:obs` ? 'rotate-180' : ''}`}
                                                                 />
                                                             </button>
                                                         ) : (
@@ -4072,6 +4159,31 @@ export default function RadicarSolicitud({
                     )}
                 </div>
             </div>
+
+            {/* Panel flotante de Cambio y Observación (grilla de Informes).
+                Va fuera del contenedor de la tabla a propósito: ese tiene
+                overflow y recortaría el panel. Por eso se posiciona con
+                coordenadas fijas de pantalla. */}
+            {flotante && (
+                <div
+                    // Se frena aquí para que seleccionar el texto del panel no
+                    // lo cierre: el cierre por "clic fuera" vive en document.
+                    onPointerDown={(e) => e.stopPropagation()}
+                    style={{
+                        top: flotante.top,
+                        left: flotante.left,
+                        width: 320,
+                    }}
+                    className="fixed z-50 max-h-64 overflow-auto rounded-lg border bg-card p-3 shadow-xl"
+                >
+                    <div className="mb-1 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
+                        {flotante.titulo}
+                    </div>
+                    <p className="text-sm whitespace-pre-wrap text-foreground">
+                        {flotante.texto}
+                    </p>
+                </div>
+            )}
 
             {/* Modal: Crear usuario (paciente) sin salir de la radicación */}
             {/* Crear especialidad desde el botón + del campo Especialidad */}
