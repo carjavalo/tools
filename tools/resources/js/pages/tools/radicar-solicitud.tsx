@@ -28,6 +28,8 @@ import {
     BarChart3,
     CheckCircle2,
     ChevronDown,
+    ChevronLeft,
+    ChevronRight,
     Eye,
     FilePlus2,
     FileSpreadsheet,
@@ -620,6 +622,13 @@ export default function RadicarSolicitud({
     // El servidor avisa cuando recortó el informe por volumen.
     const [infTruncado, setInfTruncado] = useState(false);
     const [infLoading, setInfLoading] = useState(false);
+    // Paginación del informe. Se hace en el navegador porque las filas ya
+    // vienen todas en la respuesta: paginar contra el servidor obligaría a
+    // reconstruir y reordenar el informe entero en cada cambio de página.
+    // De paso, la grilla deja de pintar miles de filas de golpe.
+    const [infPorPagina, setInfPorPagina] = useState(12);
+    const [infPagina, setInfPagina] = useState(1);
+
     // Texto largo del informe (Cambio y Observación) mostrado en un panel
     // flotante. Antes se expandía dentro de la celda y estiraba la fila, que
     // es lo que descolocaba la grilla. Solo uno abierto a la vez: dos paneles
@@ -1471,6 +1480,20 @@ export default function RadicarSolicitud({
     const setInfField = (campo: string, valor: string) =>
         setInf((prev) => ({ ...prev, [campo]: valor }));
 
+    // Tramo del informe que se está viendo. El total y la última página salen
+    // de las filas ya cargadas, así que cambiar de página no pide nada al
+    // servidor.
+    const infTotal = infRows?.length ?? 0;
+    const infUltimaPagina = Math.max(1, Math.ceil(infTotal / infPorPagina));
+    // Acotada por si el número de filas por página sube y deja la actual
+    // fuera de rango.
+    const infPaginaActual = Math.min(infPagina, infUltimaPagina);
+    const infDesde = (infPaginaActual - 1) * infPorPagina;
+    const infRowsPagina = useMemo(
+        () => (infRows ?? []).slice(infDesde, infDesde + infPorPagina),
+        [infRows, infDesde, infPorPagina],
+    );
+
     // Subespecialidades del filtro, dependientes de la especialidad elegida.
     const subOptionsInforme = useMemo(
         () =>
@@ -1486,8 +1509,10 @@ export default function RadicarSolicitud({
         e.preventDefault();
         setInfLoading(true);
         // Las filas se reemplazan: un panel abierto quedaría apuntando a una
-        // celda que ya no existe.
+        // celda que ya no existe, y la página actual podría no existir en el
+        // resultado nuevo.
         setFlotante(null);
+        setInfPagina(1);
         const params = new URLSearchParams();
         Object.entries(inf).forEach(([k, v]) => {
             if (v) params.set(k, v);
@@ -1505,9 +1530,11 @@ export default function RadicarSolicitud({
     };
 
     /**
-     * Descarga en Excel exactamente lo que muestra la grilla: mismas columnas,
-     * mismo orden y mismas filas ya filtradas. La librería se carga solo al
-     * pulsar el botón para no engordar la vista.
+     * Descarga en Excel el informe completo: mismas columnas y mismo orden que
+     * la grilla, y TODAS las filas del resultado, no solo la página que se
+     * está viendo. Exportar una página suelta no serviría para nada.
+     *
+     * La librería se carga solo al pulsar el botón para no engordar la vista.
      */
     const exportarInformeExcel = async () => {
         if (!infRows || infRows.length === 0) return;
@@ -3930,7 +3957,7 @@ export default function RadicarSolicitud({
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y">
-                                            {infRows.map((r) => (
+                                            {infRowsPagina.map((r) => (
                                                 <tr
                                                     key={r.id}
                                                     className="hover:bg-muted/40"
@@ -4155,6 +4182,80 @@ export default function RadicarSolicitud({
                                     </table>
                                 )}
                             </div>
+
+                            {/* Paginación. Solo cuando hay filas: con el
+                                informe sin generar no hay nada que paginar. */}
+                            {infRows !== null && infTotal > 0 && (
+                                <div className="mt-3 flex flex-col gap-2 text-sm sm:flex-row sm:items-center sm:justify-between">
+                                    <span className="text-muted-foreground">
+                                        Mostrando {infDesde + 1}–
+                                        {Math.min(
+                                            infDesde + infPorPagina,
+                                            infTotal,
+                                        )}{' '}
+                                        de {infTotal}
+                                    </span>
+                                    <div className="flex items-center gap-2">
+                                        <Select
+                                            value={String(infPorPagina)}
+                                            onValueChange={(v) => {
+                                                setInfPorPagina(Number(v));
+                                                setInfPagina(1);
+                                                setFlotante(null);
+                                            }}
+                                        >
+                                            <SelectTrigger className="w-32">
+                                                <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {[12, 24, 48].map((n) => (
+                                                    <SelectItem
+                                                        key={n}
+                                                        value={String(n)}
+                                                    >
+                                                        {n} / página
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            size="sm"
+                                            disabled={infPaginaActual <= 1}
+                                            onClick={() => {
+                                                setInfPagina(
+                                                    infPaginaActual - 1,
+                                                );
+                                                setFlotante(null);
+                                            }}
+                                        >
+                                            <ChevronLeft className="size-4" />
+                                        </Button>
+                                        <span className="text-muted-foreground">
+                                            {infPaginaActual} /{' '}
+                                            {infUltimaPagina}
+                                        </span>
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            size="sm"
+                                            disabled={
+                                                infPaginaActual >=
+                                                infUltimaPagina
+                                            }
+                                            onClick={() => {
+                                                setInfPagina(
+                                                    infPaginaActual + 1,
+                                                );
+                                                setFlotante(null);
+                                            }}
+                                        >
+                                            <ChevronRight className="size-4" />
+                                        </Button>
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     )}
                 </div>
