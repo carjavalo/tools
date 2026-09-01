@@ -3,7 +3,9 @@
 namespace App\Providers;
 
 use App\Listeners\RegistrarSesionAuditoria;
+use App\Models\User;
 use App\Observers\AuditoriaObserver;
+use App\Observers\DocumentoPacienteObserver;
 use Illuminate\Auth\Events\Failed;
 use Illuminate\Auth\Events\Lockout;
 use Illuminate\Auth\Events\Login;
@@ -27,6 +29,10 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         $this->registrarAuditoria();
+
+        // Las radicaciones apuntan al paciente por su número de documento: si
+        // cambia, hay que llevarlas con él o quedan huérfanas.
+        User::observe(DocumentoPacienteObserver::class);
     }
 
     /**

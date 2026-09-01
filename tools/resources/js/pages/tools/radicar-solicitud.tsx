@@ -23,7 +23,7 @@ import AppLayout from '@/layouts/app-layout';
 import { camposParaRol } from '@/lib/roles';
 import { dashboard } from '@/routes';
 import { type BreadcrumbItem, type SharedData } from '@/types';
-import { Head, useForm, usePage } from '@inertiajs/react';
+import { Head, router, useForm, usePage } from '@inertiajs/react';
 import {
     BarChart3,
     CheckCircle2,
@@ -1115,6 +1115,21 @@ export default function RadicarSolicitud({
                 setCrearOpen(false);
                 setEditandoId(null);
                 setNuevoUsuario({ ...EMPTY_USUARIO });
+
+                // Consulta e Historial de Casos resuelve el paciente de cada
+                // radicación al leerla, así que basta con volver a pedir los
+                // datos para que el nombre —o la cédula, que el servidor ya
+                // repuntó en las radicaciones— aparezca actualizado sin
+                // recargar la vista. Los demás usuarios lo ven en su próxima
+                // consulta, sin importar su rol.
+                if (esEdicion) {
+                    router.reload({ only: ['casosLista'] });
+                    // El caso abierto se vuelve a pedir por su consecutivo y
+                    // no por lo que hay en el buscador: si lo que cambió fue
+                    // justamente la cédula, buscar por la vieja ya no daría
+                    // con él.
+                    if (caso) consultarCaso(String(caso.codrad));
+                }
             })
             .finally(() => setCreando(false));
     };

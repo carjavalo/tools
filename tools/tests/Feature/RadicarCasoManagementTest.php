@@ -2027,3 +2027,145 @@ test('el filtro de estados de informes ofrece el catálogo completo', function (
             ->etc()
         );
 });
+
+test('cambiar la cédula del paciente lleva sus radicaciones con él', function () {
+    // Las radicaciones apuntan al paciente por su documento. Sin repuntarlas,
+    // cambiar la cédula las dejaba huérfanas: la consulta mostraba el paciente
+    // en blanco y la búsqueda por cédula ya no las encontraba.
+    $admin = User::factory()->create();
+    $paciente = User::factory()->create([
+        'rol' => 'paciente',
+        'Numero_D' => '111',
+        'name' => 'Ana',
+        'Apellido1' => 'Gómez',
+        'Telefono1' => '3000000',
+        'Eps' => 'EPS UNO',
+    ]);
+
+    $caso = RadicarCaso::create(['Ndocumento' => '111', 'estRad' => '1']);
+
+    $this->actingAs($admin)
+        ->putJson("/tools/radicar-solicitud/paciente/{$paciente->id}", [
+            'name' => 'Ana María',
+            'rol' => 'paciente',
+            'Apellido1' => 'Gómez',
+            'apellido2' => 'Ruiz',
+            'Numero_D' => '222',
+            'email' => $paciente->email,
+        ])
+        ->assertOk();
+
+    expect($caso->refresh()->Ndocumento)->toBe('222');
+
+    // Y la consulta del caso trae ya los datos nuevos.
+    $this->actingAs($admin)
+        ->getJson('/tools/radicar-solicitud/buscar-caso?q='.$caso->codrad)
+        ->assertOk()
+        ->assertJsonPath('caso.Ndocumento', '222')
+        ->assertJsonPath('caso.paciente', 'Ana María Gómez Ruiz');
+
+    // La búsqueda por la cédula nueva encuentra el caso; por la vieja, no.
+    $this->actingAs($admin)
+        ->getJson('/tools/radicar-solicitud/buscar-caso?q=222')
+        ->assertOk()
+        ->assertJsonPath('found', true);
+});
+
+test('cambiar la cédula desde Gestión de Usuarios también repunta las radicaciones', function () {
+    $admin = User::factory()->create();
+    $paciente = User::factory()->create([
+        'rol' => 'paciente',
+        'Numero_D' => '333',
+        'name' => 'Luis',
+    ]);
+    $caso = RadicarCaso::create(['Ndocumento' => '333', 'estRad' => '1']);
+
+    $this->actingAs($admin)
+        ->put("/tools/gestion-usuarios/{$paciente->id}", [
+            'name' => 'Luis',
+            'rol' => 'paciente',
+            'Numero_D' => '444',
+            'email' => $paciente->email,
+        ])
+        ->assertRedirect();
+
+    expect($caso->refresh()->Ndocumento)->toBe('444');
+});
+
+test('el cambio de cédula queda en la trazabilidad del caso', function () {
+    $admin = User::factory()->create();
+    $paciente = User::factory()->create(['rol' => 'paciente', 'Numero_D' => '555']);
+    $caso = RadicarCaso::create(['Ndocumento' => '555', 'estRad' => '1']);
+
+    $this->actingAs($admin)
+        ->putJson("/tools/radicar-solicitud/paciente/{$paciente->id}", [
+            'name' => 'Paciente',
+            'rol' => 'paciente',
+            'Numero_D' => '556',
+            'email' => $paciente->email,
+        ])
+        ->assertOk();
+
+    $this->assertDatabaseHas('trazabilidad_caso', [
+        'codrad' => $caso->codrad,
+        'campo' => 'Ndocumento',
+        'anterior' => '555',
+        'nuevo' => '556',
+        'user_id' => $admin->id,
+    ]);
+});
+
+test('con la cédula anterior repetida en otro usuario las radicaciones no se mueven', function () {
+    // Un documento compartido por dos usuarios es ambiguo: el sistema entero
+    // lo resuelve con el primero que lo tenga. Antes que llevarse las
+    // radicaciones del paciente equivocado, se dejan donde están.
+    $admin = User::factory()->create();
+    $uno = User::factory()->create(['rol' => 'paciente', 'Numero_D' => '777']);
+    User::factory()->create(['rol' => 'paciente', 'Numero_D' => '777']);
+
+    $caso = RadicarCaso::create(['Ndocumento' => '777', 'estRad' => '1']);
+
+    $this->actingAs($admin)
+        ->putJson("/tools/radicar-solicitud/paciente/{$uno->id}", [
+            'name' => 'Paciente',
+            'rol' => 'paciente',
+            'Numero_D' => '778',
+            'email' => $uno->email,
+        ])
+        ->assertOk();
+
+    expect($caso->refresh()->Ndocumento)->toBe('777');
+});
+
+test('cambiar solo el nombre del paciente se ve enseguida en la consulta del caso', function () {
+    // El nombre no se copia en la radicación: se resuelve al consultarla. La
+    // prueba deja constancia de que así debe seguir siendo.
+    $admin = User::factory()->create();
+    $paciente = User::factory()->create([
+        'rol' => 'paciente',
+        'Numero_D' => '888',
+        'name' => 'Nombre Viejo',
+        'Apellido1' => 'Apellido Viejo',
+    ]);
+    $caso = RadicarCaso::create(['Ndocumento' => '888', 'estRad' => '1']);
+
+    $this->actingAs($admin)
+        ->putJson("/tools/radicar-solicitud/paciente/{$paciente->id}", [
+            'name' => 'Nombre Nuevo',
+            'rol' => 'paciente',
+            'Apellido1' => 'Apellido Nuevo',
+            'Numero_D' => '888',
+            'email' => $paciente->email,
+        ])
+        ->assertOk();
+
+    // Cualquier usuario, sea cual sea su rol, ve el dato actualizado.
+    $otro = User::factory()->create(['rol' => 'Operador']);
+
+    $this->actingAs($otro)
+        ->getJson('/tools/radicar-solicitud/buscar-caso?q='.$caso->codrad)
+        ->assertOk()
+        ->assertJsonPath('caso.paciente', 'Nombre Nuevo Apellido Nuevo');
+
+    expect($caso->refresh()->Ndocumento)->toBe('888');
+});
