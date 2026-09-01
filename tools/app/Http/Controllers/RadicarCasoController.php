@@ -115,6 +115,11 @@ class RadicarCasoController extends Controller
                 RadicarCaso::query()->whereNotNull('codsubesp')
                     ->where('codsubesp', '!=', '')->distinct()->pluck('codsubesp')
             )->orderBy('Nombre')->get(['cod_SubEspecialidad', 'Nombre', 'codespcodser']),
+            // Filtro de estado de INFORMES: catálogo completo, no el recortado
+            // al rol. Esa grilla muestra todas las radicaciones sin importar
+            // el estado, así que ofrecer solo los estados del rol dejaría
+            // filas visibles que nadie podría filtrar.
+            'estadosFiltro' => EstRadicado::orderBy('Nombre')->get(['id', 'Nombre']),
             'defaultEstadoId' => $defaultEstadoId,
             'today' => now()->toDateString(),
             // Formulario de cotizaciones: administrable por rol en el Gestor de
@@ -191,6 +196,12 @@ class RadicarCasoController extends Controller
 
         // La pestaña Informes sigue la regla del resto de sub-vistas: sin
         // configurar se permite, y solo se cierra apagándola expresamente.
+        //
+        // Es la puerta que deja abrir el PDF del concepto cotizado desde la
+        // grilla de INFORMES a cualquier rol, sin necesidad del permiso de
+        // cotizaciones ni de la grilla del Historial: quien ve esa grilla ve
+        // sus PDF. El resto de vistas sigue mostrando el enlace solo a quien
+        // tiene su propio permiso.
         $permiso = Permiso::where('role_id', $role->id)
             ->where('vista', 'radicar-solicitud-informes')
             ->first();
@@ -241,8 +252,9 @@ class RadicarCasoController extends Controller
      * configuración se conserva en role_estados_sec_grilla para cuando se
      * establezca su uso.
      *
-     * Lo usan por igual la grilla del Historial y la pestaña de Informes: un
-     * rol ve las mismas radicaciones en los dos lados.
+     * Lo usa la grilla del Historial. La pestaña de INFORMES NO lo usa: esa es
+     * la vista de auditoría y muestra todas las radicaciones, esté el caso en
+     * el estado que esté y consulte el rol que consulte.
      *
      * @param  \Illuminate\Database\Eloquent\Builder<RadicarCaso>  $query
      */
@@ -274,6 +286,9 @@ class RadicarCasoController extends Controller
      * rol en el Gestor de Permisos: con estados configurados solo ve los
      * casos en esos estados; sin configuración (o Super Admin), los ve todos.
      * Solo interviene el estado actual; el estado secundario no filtra.
+     *
+     * Esta restricción es propia del Historial. La grilla de INFORMES no la
+     * aplica: ahí se ven todas las radicaciones sin importar el estado.
      *
      * @return array<int, array<string, mixed>>
      */
@@ -1101,10 +1116,11 @@ class RadicarCasoController extends Controller
             ))
             ->orderByDesc('codrad');
 
-        // El informe respeta los estados autorizados al rol en el Gestor de
-        // Permisos, igual que la grilla del Historial: "todas las
-        // radicaciones" son todas las que ese rol tiene permitido ver.
-        $this->limitarPorEstadosDelRol($casos, $request);
+        // A diferencia de la grilla del Historial, el informe NO se recorta
+        // por los estados asignados al rol: es la vista de auditoría y debe
+        // mostrar todas las radicaciones sin importar en qué estado estén ni
+        // qué rol consulte. El resto de vistas conserva su restricción.
+        // Lo único que sigue oculto aquí es lo que hizo un Super Admin.
 
         // Tope de seguridad: sin él, un informe sin filtros materializaría en
         // memoria la tabla completa. Se avisa en la respuesta cuando recorta.
@@ -1125,12 +1141,25 @@ class RadicarCasoController extends Controller
         $motivos = Motivo::pluck('Nombre', 'id');
         $subesp = SubEspecialidad::pluck('Nombre', 'cod_SubEspecialidad');
         $especialidades = Especialidad::pluck('Nombre', 'espcodser');
+        $convenios = Convenio::pluck('nombre', 'nit_Convenio');
+        // Del paciente se traen también aseguradora y teléfonos: el informe
+        // muestra la radicación completa, no solo el nombre.
         $pacientes = User::whereIn('Numero_D', $casos->pluck('Ndocumento')->filter()->unique())
-            ->get(['Numero_D', 'name', 'Apellido1', 'apellido2'])
+            ->get(['Numero_D', 'name', 'Apellido1', 'apellido2', 'Eps', 'Telefono1', 'telefono2'])
             ->keyBy('Numero_D');
         $usuarios = User::whereIn('id', $casos->pluck('codMed')->filter()->unique())
             ->get(['id', 'name', 'Apellido1', 'apellido2'])
             ->keyBy('id');
+
+        // CUPS y autorizaciones de cada radicación. Se resuelven en dos
+        // consultas para todos los casos: dentro del bucle de filas serían dos
+        // por movimiento. codRadicado es columna de texto, de ahí el casteo.
+        $anexados = CupsAnezado::whereIn('codRadicado', $codrads->map(fn ($c) => (string) $c)->all())
+            ->orderBy('id')
+            ->get(['codRadicado', 'cusv_id', 'N_Autorizacion'])
+            ->groupBy('codRadicado');
+        $codigosCups = Cups::whereIn('id', $anexados->flatten(1)->pluck('cusv_id')->unique())
+            ->pluck('CodCupsHuv', 'id');
 
         // PDFs de los conceptos cotizados, para verificar desde el informe qué
         // se cotizó. Una sola consulta para todos los casos: dentro del bucle
@@ -1205,9 +1234,10 @@ class RadicarCasoController extends Controller
             ->unique()
             ->flip();
 
-        $datosCaso = function (RadicarCaso $caso) use ($estados, $usuarios, $subesp, $especialidades, $pacientes, $adjuntosCotizacion) {
+        $datosCaso = function (RadicarCaso $caso) use ($estados, $usuarios, $subesp, $especialidades, $pacientes, $adjuntosCotizacion, $convenios, $anexados, $codigosCups) {
             $med = $caso->codMed ? $usuarios->get($caso->codMed) : null;
             $pac = $caso->Ndocumento ? $pacientes->get($caso->Ndocumento) : null;
+            $procs = $anexados->get((string) $caso->codrad) ?? collect();
 
             return [
                 'codrad' => $caso->codrad,
@@ -1216,6 +1246,13 @@ class RadicarCasoController extends Controller
                 'paciente' => $pac
                     ? trim(implode(' ', array_filter([$pac->name, $pac->Apellido1, $pac->apellido2])))
                     : '—',
+                'telefonos' => $pac
+                    ? trim(implode(' / ', array_filter([$pac->Telefono1, $pac->telefono2])))
+                    : '',
+                'eps' => $pac?->Eps ?? '',
+                'convenio' => $caso->convenio
+                    ? ($convenios[$caso->convenio] ?? $caso->convenio)
+                    : '',
                 'estado' => $estados[(int) $caso->estRad] ?? '—',
                 // Fecha Recibido Serv vigente del caso. Va en el bloque común
                 // para que acompañe a TODA fila del informe (cambios de la
@@ -1238,6 +1275,20 @@ class RadicarCasoController extends Controller
                         'tercero' => $c->tercero,
                         'url' => route('tools.radicar-solicitud.cotizacion-adjunto', $c->id),
                     ])->values()->all(),
+                // Resto de campos de la radicación: el informe muestra el caso
+                // completo, no un resumen.
+                'entregaProg' => optional($caso->fentregapro)->format('Y-m-d'),
+                'fechaAutorizacion' => optional($caso->fecAutorizacion)->format('Y-m-d'),
+                'vencimientoAut' => optional($caso->fechavenautorizacion)->format('Y-m-d'),
+                'observacionTfx' => $caso->ObservacionTFX,
+                // Acumulado de Observaciones CCX del caso. Va aparte de la
+                // columna 'observacion', que es el tramo de cada seguimiento.
+                'observacionCcxCaso' => $caso->ObservacionCCX,
+                'cups' => $procs
+                    ->map(fn ($p) => $codigosCups[$p->cusv_id] ?? (string) $p->cusv_id)
+                    ->filter()->unique()->values()->all(),
+                'autorizacionesCups' => $procs
+                    ->pluck('N_Autorizacion')->filter()->unique()->values()->all(),
             ];
         };
 
@@ -1583,6 +1634,10 @@ class RadicarCasoController extends Controller
      * archivo quede sujeto a los mismos permisos que la vista: solo lo ve
      * quien puede entrar a Radicar Solicitud. Va con Content-Disposition
      * inline para que el navegador lo muestre en lugar de descargarlo.
+     *
+     * No lleva más restricción a propósito: desde la grilla de INFORMES el PDF
+     * adjunto a la radicación lo abre cualquier rol, esté el caso en el estado
+     * que esté. Las demás vistas solo enseñan el enlace a quien corresponde.
      */
     public function verPaquete(Request $request, RadicarCaso $caso)
     {

@@ -135,6 +135,10 @@ interface PageProps {
         Nombre: string;
         codespcodser: string;
     }[];
+    // Catálogo completo de estados, solo para el filtro de INFORMES: esa
+    // grilla muestra todas las radicaciones sin importar el estado, así que su
+    // filtro no puede quedar recortado a los estados del rol.
+    estadosFiltro: Option[];
     defaultEstadoId: number | null;
     today: string;
     puedeGestionarCotizaciones: boolean;
@@ -226,6 +230,19 @@ interface InformeRow {
     estadoQx: string;
     usuario: string;
     modificadoEn: string | null;
+    // Resto de la radicación: el informe la muestra completa.
+    telefonos: string;
+    eps: string;
+    convenio: string;
+    entregaProg: string | null;
+    fechaAutorizacion: string | null;
+    vencimientoAut: string | null;
+    observacionTfx: string | null;
+    // Acumulado de Observaciones CCX del caso, distinto de 'observacion', que
+    // es el tramo anexado en cada seguimiento.
+    observacionCcxCaso: string | null;
+    cups: string[];
+    autorizacionesCups: string[];
     // PDFs de los conceptos cotizados del caso. Se repiten en todas las filas
     // del mismo caso, igual que el estado o el paquete.
     cotizaciones: { id: number; tercero: string; url: string }[];
@@ -589,6 +606,7 @@ export default function RadicarSolicitud({
     rolesList,
     especialidadesFiltro,
     subespecialidadesFiltro,
+    estadosFiltro,
     defaultEstadoId,
     today,
     puedeGestionarCotizaciones,
@@ -1601,11 +1619,14 @@ export default function RadicarSolicitud({
             'Fecha Recibido': r.fechaRecibido ?? '',
             Documento: r.documento,
             Paciente: r.paciente,
+            Teléfonos: r.telefonos,
             Tipo: r.tipo,
             Campo: r.campo,
             Anterior: r.anterior,
             Nuevo: r.nuevo,
             Estado: r.estado,
+            'Aseguradora (EPS)': r.eps,
+            Convenio: r.convenio,
             Copago: r.copago ? 'Sí' : 'No',
             // Se exporta el número para poder sumarlo o filtrarlo en Excel.
             'Valor Copago':
@@ -1622,9 +1643,16 @@ export default function RadicarSolicitud({
             Especialidad: r.especialidad,
             Motivo: r.motivo,
             Subespecialidad: r.subespecialidad,
+            CUPS: r.cups.join(', '),
+            Autorizaciones: r.autorizacionesCups.join(', '),
+            'Entrega al Serv': r.entregaProg ?? '',
             'Fec. Recibido Serv': r.fechaRecibidoDev ?? '',
+            'Fecha Autorización': r.fechaAutorizacion ?? '',
+            'Venc. Aut.': r.vencimientoAut ?? '',
             'Venc. Anestesia': r.vencAnestesia ?? '',
             Observación: r.observacion ?? '',
+            'OB TFX': r.observacionTfx ?? '',
+            'Observaciones CCX': r.observacionCcxCaso ?? '',
             'Estado QX': r.estadoQx,
             Usuario: r.usuario,
             Modificado: r.modificadoEn ?? '',
@@ -1682,6 +1710,40 @@ export default function RadicarSolicitud({
                   },
         );
     };
+
+    /**
+     * Celda de la grilla de Informes cuyo texto no cabe en una línea: se
+     * recorta y el contenido completo se lee en el panel flotante. Se comparte
+     * entre las columnas largas (CUPS, autorizaciones, observaciones) para no
+     * repetir el mismo botón media docena de veces.
+     */
+    const celdaLarga = (
+        key: string,
+        titulo: string,
+        texto: string,
+        className = 'max-w-xs px-3 py-2 text-muted-foreground',
+    ) => (
+        <td className={className}>
+            {texto ? (
+                <button
+                    type="button"
+                    onClick={(e) =>
+                        alternarFlotante(key, titulo, texto, e.currentTarget)
+                    }
+                    onPointerDown={(e) => e.stopPropagation()}
+                    title={`Clic para ver ${titulo.toLowerCase()} completo`}
+                    className="flex w-full items-start gap-1 text-left hover:text-foreground"
+                >
+                    <span className="line-clamp-1">{texto}</span>
+                    <ChevronDown
+                        className={`mt-0.5 size-3.5 shrink-0 transition-transform ${flotante?.key === key ? 'rotate-180' : ''}`}
+                    />
+                </button>
+            ) : (
+                '—'
+            )}
+        </td>
+    );
 
     // El panel va en posición fija, así que al desplazar o redimensionar
     // quedaría separado de su celda: se cierra. Escape también lo cierra.
@@ -3733,6 +3795,19 @@ export default function RadicarSolicitud({
                                 </h1>
                             </div>
 
+                            {/* Esta grilla es la vista de auditoría: a
+                                diferencia del Historial, no se recorta por los
+                                estados asignados al rol y sus PDF los abre
+                                cualquier usuario. Se dice en pantalla para que
+                                nadie la confunda con las demás. */}
+                            <p className="mb-4 rounded-lg border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                                Esta grilla muestra todas las radicaciones y
+                                todos los cambios registrados, sin importar el
+                                estado de la radicación ni los estados asignados
+                                a tu rol. Los PDF del paquete y de los conceptos
+                                cotizados se pueden abrir desde aquí.
+                            </p>
+
                             {/* Filtros */}
                             <form
                                 onSubmit={generarInforme}
@@ -3885,7 +3960,7 @@ export default function RadicarSolicitud({
                                                 <SelectItem value="todos">
                                                     Todos
                                                 </SelectItem>
-                                                {estados.map((s) => (
+                                                {estadosFiltro.map((s) => (
                                                     <SelectItem
                                                         key={s.id}
                                                         value={String(s.id)}
@@ -3966,6 +4041,9 @@ export default function RadicarSolicitud({
                                                     Paciente
                                                 </th>
                                                 <th className="px-3 py-2 font-medium">
+                                                    Teléfonos
+                                                </th>
+                                                <th className="px-3 py-2 font-medium">
                                                     Tipo
                                                 </th>
                                                 <th className="px-3 py-2 font-medium">
@@ -3976,6 +4054,12 @@ export default function RadicarSolicitud({
                                                 </th>
                                                 <th className="px-3 py-2 font-medium">
                                                     Estado
+                                                </th>
+                                                <th className="px-3 py-2 font-medium">
+                                                    Aseguradora (EPS)
+                                                </th>
+                                                <th className="px-3 py-2 font-medium">
+                                                    Convenio
                                                 </th>
                                                 <th className="px-3 py-2 font-medium">
                                                     Copago
@@ -4002,13 +4086,34 @@ export default function RadicarSolicitud({
                                                     Subespecialidad
                                                 </th>
                                                 <th className="px-3 py-2 font-medium">
+                                                    CUPS
+                                                </th>
+                                                <th className="px-3 py-2 font-medium">
+                                                    Autorizaciones
+                                                </th>
+                                                <th className="px-3 py-2 font-medium">
+                                                    Entrega al Serv
+                                                </th>
+                                                <th className="px-3 py-2 font-medium">
                                                     Fec. Recibido Serv
+                                                </th>
+                                                <th className="px-3 py-2 font-medium">
+                                                    Fecha Autorización
+                                                </th>
+                                                <th className="px-3 py-2 font-medium">
+                                                    Venc. Aut.
                                                 </th>
                                                 <th className="px-3 py-2 font-medium">
                                                     Venc. Anest.
                                                 </th>
                                                 <th className="px-3 py-2 font-medium">
                                                     Observación
+                                                </th>
+                                                <th className="px-3 py-2 font-medium">
+                                                    OB TFX
+                                                </th>
+                                                <th className="px-3 py-2 font-medium">
+                                                    Observaciones CCX
                                                 </th>
                                                 <th className="px-3 py-2 font-medium">
                                                     Estado QX
@@ -4038,6 +4143,9 @@ export default function RadicarSolicitud({
                                                     </td>
                                                     <td className="px-3 py-2 font-medium text-foreground">
                                                         {r.paciente}
+                                                    </td>
+                                                    <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">
+                                                        {r.telefonos || '—'}
                                                     </td>
                                                     <td className="px-3 py-2">
                                                         <span
@@ -4105,6 +4213,12 @@ export default function RadicarSolicitud({
                                                     </td>
                                                     <td className="px-3 py-2">
                                                         {r.estado}
+                                                    </td>
+                                                    <td className="px-3 py-2 font-medium text-[#2d3e83] dark:text-white">
+                                                        {r.eps || '—'}
+                                                    </td>
+                                                    <td className="px-3 py-2">
+                                                        {r.convenio || '—'}
                                                     </td>
                                                     <td className="px-3 py-2 whitespace-nowrap">
                                                         {r.copago ? (
@@ -4191,8 +4305,33 @@ export default function RadicarSolicitud({
                                                     <td className="px-3 py-2">
                                                         {r.subespecialidad}
                                                     </td>
+                                                    {celdaLarga(
+                                                        `${r.id}:cups`,
+                                                        'CUPS',
+                                                        r.cups.join(', '),
+                                                        'max-w-xs px-3 py-2 font-mono text-xs text-muted-foreground',
+                                                    )}
+                                                    {celdaLarga(
+                                                        `${r.id}:aut`,
+                                                        'Autorizaciones',
+                                                        r.autorizacionesCups.join(
+                                                            ', ',
+                                                        ),
+                                                        'max-w-xs px-3 py-2 font-mono text-xs text-muted-foreground',
+                                                    )}
+                                                    <td className="px-3 py-2 text-muted-foreground">
+                                                        {r.entregaProg || '—'}
+                                                    </td>
                                                     <td className="px-3 py-2 text-muted-foreground">
                                                         {r.fechaRecibidoDev ||
+                                                            '—'}
+                                                    </td>
+                                                    <td className="px-3 py-2 text-muted-foreground">
+                                                        {r.fechaAutorizacion ||
+                                                            '—'}
+                                                    </td>
+                                                    <td className="px-3 py-2 text-muted-foreground">
+                                                        {r.vencimientoAut ||
                                                             '—'}
                                                     </td>
                                                     <td className="px-3 py-2 text-muted-foreground">
@@ -4232,6 +4371,17 @@ export default function RadicarSolicitud({
                                                             '—'
                                                         )}
                                                     </td>
+                                                    {celdaLarga(
+                                                        `${r.id}:tfx`,
+                                                        'OB TFX',
+                                                        r.observacionTfx ?? '',
+                                                    )}
+                                                    {celdaLarga(
+                                                        `${r.id}:ccx`,
+                                                        'Observaciones CCX',
+                                                        r.observacionCcxCaso ??
+                                                            '',
+                                                    )}
                                                     <td className="px-3 py-2">
                                                         {r.estadoQx}
                                                     </td>

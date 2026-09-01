@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\Convenio;
 use App\Models\CotizacionCaso;
 use App\Models\Cups;
 use App\Models\CupsAnezado;
@@ -598,7 +599,10 @@ test('aplicar modificacion registra el cambio campo a campo', function () {
     ]);
 });
 
-test('el informe respeta los estados autorizados al rol', function () {
+test('el informe NO se recorta por los estados del rol, pero la grilla del Historial sí', function () {
+    // La pestaña INFORMES es la vista de auditoría: muestra todas las
+    // radicaciones sin importar el estado ni el rol de quien consulta. El
+    // Historial conserva su restricción, que es justo lo que las diferencia.
     $rol = Role::create(['Nombre' => 'Gestor Ciau', 'Estado' => true]);
     $operador = User::factory()->create(['rol' => 'Gestor Ciau']);
 
@@ -608,11 +612,11 @@ test('el informe respeta los estados autorizados al rol', function () {
     // El rol solo tiene autorizado ver las radicaciones en "Recibido".
     $rol->estadosGrilla()->sync([$permitido->id]);
 
-    $visible = RadicarCaso::create([
+    $enEstadoDelRol = RadicarCaso::create([
         'Ndocumento' => '8700',
         'estRad' => (string) $permitido->id,
     ]);
-    $oculto = RadicarCaso::create([
+    $enOtroEstado = RadicarCaso::create([
         'Ndocumento' => '8701',
         'estRad' => (string) $vetado->id,
     ]);
@@ -625,6 +629,9 @@ test('el informe respeta los estados autorizados al rol', function () {
         'editar' => true,
         'borrar' => true,
     ]);
+    // Con la grilla del Historial encendida se puede comprobar que ESA sí
+    // sigue recortada.
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud-grilla', 'ver' => true]);
 
     $codrads = collect(
         $this->actingAs($operador)
@@ -633,10 +640,20 @@ test('el informe respeta los estados autorizados al rol', function () {
             ->json('rows')
     )->pluck('codrad');
 
-    expect($codrads)->toContain($visible->codrad)
-        ->and($codrads)->not->toContain($oculto->codrad);
+    expect($codrads)->toContain($enEstadoDelRol->codrad)
+        ->and($codrads)->toContain($enOtroEstado->codrad);
 
-    // Un Super Admin no queda limitado por esa configuración.
+    // La grilla del Historial sigue mostrando solo los estados del rol.
+    $this->actingAs($operador)
+        ->get('/tools/radicar-solicitud')
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('casosLista', fn ($lista) => collect($lista)->pluck('codrad')->contains($enEstadoDelRol->codrad)
+                && ! collect($lista)->pluck('codrad')->contains($enOtroEstado->codrad))
+            ->etc()
+        );
+
+    // Un Super Admin ve lo mismo en el informe.
     $root = User::factory()->create();
     $codradsRoot = collect(
         $this->actingAs($root)
@@ -645,8 +662,8 @@ test('el informe respeta los estados autorizados al rol', function () {
             ->json('rows')
     )->pluck('codrad');
 
-    expect($codradsRoot)->toContain($visible->codrad)
-        ->and($codradsRoot)->toContain($oculto->codrad);
+    expect($codradsRoot)->toContain($enEstadoDelRol->codrad)
+        ->and($codradsRoot)->toContain($enOtroEstado->codrad);
 });
 
 test('el estado secundario asignado al rol no filtra la grilla', function () {
@@ -1838,4 +1855,175 @@ test('el Vencimiento Anestesia se consulta del último seguimiento cuando el cas
         ->getJson('/tools/radicar-solicitud/buscar-caso?q='.$caso->codrad)
         ->assertOk()
         ->assertJsonPath('caso.vencAnestesia', '2026-11-30');
+});
+
+test('desde el informe cualquier rol abre el PDF del paquete y el del concepto cotizado', function () {
+    // El rol no tiene la grilla del Historial ni el permiso de cotizaciones, y
+    // la radicación está en un estado que no es el suyo. Aun así, los PDF que
+    // enseña la grilla de INFORMES se abren: es la excepción pedida para esa
+    // pestaña.
+    Storage::fake('public');
+
+    $rol = Role::create(['Nombre' => 'Consulta Informes', 'Estado' => true]);
+    $usuario = User::factory()->create(['rol' => 'Consulta Informes']);
+
+    $suyo = EstRadicado::create(['Nombre' => 'Recibido', 'Estado' => true]);
+    $ajeno = EstRadicado::create(['Nombre' => 'Anulado', 'Estado' => true]);
+    $rol->estadosGrilla()->sync([$suyo->id]);
+
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud', 'ver' => true]);
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud-grilla', 'ver' => false]);
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud-cotizaciones', 'ver' => false]);
+
+    $paquete = UploadedFile::fake()
+        ->create('paquete.pdf', 60, 'application/pdf')
+        ->store('paquetes', 'public');
+    $caso = RadicarCaso::create([
+        'Ndocumento' => '8800',
+        'estRad' => (string) $ajeno->id,
+        'paquete' => $paquete,
+    ]);
+
+    $adjunto = UploadedFile::fake()
+        ->create('cotizacion.pdf', 60, 'application/pdf')
+        ->store('cotizaciones', 'public');
+    $cotizacion = CotizacionCaso::create([
+        'codrad' => $caso->codrad,
+        'tercero' => 'Proveedor X',
+        'fecha_cotizacion' => '2026-08-20',
+        'valor' => 1000,
+        'adjunto' => $adjunto,
+    ]);
+
+    // La radicación aparece en el informe con los dos enlaces.
+    $fila = collect(
+        $this->actingAs($usuario)
+            ->getJson('/tools/radicar-solicitud/informe')
+            ->assertOk()
+            ->json('rows')
+    )->firstWhere('codrad', $caso->codrad);
+
+    expect($fila)->not->toBeNull()
+        ->and($fila['paqueteUrl'])->not->toBeNull()
+        ->and($fila['cotizaciones'])->toHaveCount(1);
+
+    // Y ambos se abren.
+    $this->actingAs($usuario)->get($fila['paqueteUrl'])->assertOk();
+    $this->actingAs($usuario)
+        ->get("/tools/radicar-solicitud/cotizacion/{$cotizacion->id}/adjunto")
+        ->assertOk();
+});
+
+test('sin la pestaña de informes el PDF del concepto cotizado sigue cerrado', function () {
+    // La excepción es solo para quien ve esa grilla: apagada la pestaña, el
+    // adjunto vuelve a regirse por los permisos de siempre.
+    Storage::fake('public');
+
+    $rol = Role::create(['Nombre' => 'Sin Informes', 'Estado' => true]);
+    $usuario = User::factory()->create(['rol' => 'Sin Informes']);
+
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud', 'ver' => true]);
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud-grilla', 'ver' => false]);
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud-cotizaciones', 'ver' => false]);
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud-informes', 'ver' => false]);
+
+    $caso = RadicarCaso::create(['Ndocumento' => '8801', 'estRad' => '1']);
+    $cotizacion = CotizacionCaso::create([
+        'codrad' => $caso->codrad,
+        'tercero' => 'Proveedor Y',
+        'fecha_cotizacion' => '2026-08-20',
+        'valor' => 500,
+        'adjunto' => UploadedFile::fake()
+            ->create('cot.pdf', 60, 'application/pdf')
+            ->store('cotizaciones', 'public'),
+    ]);
+
+    $this->actingAs($usuario)
+        ->get("/tools/radicar-solicitud/cotizacion/{$cotizacion->id}/adjunto")
+        ->assertForbidden();
+});
+
+test('cada fila del informe lleva la radicación completa', function () {
+    $usuario = User::factory()->create();
+
+    Especialidad::create(['espcodser' => 'E9', 'Nombre' => 'Cirugía del Tórax', 'Estado' => true]);
+    Eps::create(['Nombre' => 'EMSSANAR', 'nit_empresa' => 'NIT-E9', 'Estado' => true]);
+    Convenio::create([
+        'nit_Convenio' => 'NIT-9',
+        'nombre' => 'EMSSANAR EPS SAS',
+        'regimen' => 'Subsidiado',
+        'tarifa' => 'SOAT',
+        'nit_empresa' => 'NIT-E9',
+        'Estado' => true,
+    ]);
+    $cups = Cups::create(['Nombre' => 'Toracoscopia', 'CodCupsHuv' => 'HUV-321', 'Estado' => true]);
+
+    User::factory()->create([
+        'rol' => 'paciente',
+        'Numero_D' => '19208693',
+        'name' => 'Luis',
+        'Apellido1' => 'Tavera',
+        'Eps' => 'EMSSANAR EPS SAS',
+        'Telefono1' => '3185946740',
+        'telefono2' => '3167579149',
+    ]);
+
+    $caso = RadicarCaso::create([
+        'Ndocumento' => '19208693',
+        'estRad' => '1',
+        'Codesp' => 'E9',
+        'convenio' => 'NIT-9',
+        'fentregapro' => '2026-08-26',
+        'fecAutorizacion' => '2026-08-20',
+        'fechavenautorizacion' => '2027-02-20',
+        'ObservacionTFX' => 'Texto TFX',
+        'ObservacionCCX' => 'Anotación de contratación',
+    ]);
+    CupsAnezado::create([
+        'codRadicado' => (string) $caso->codrad,
+        'cusv_id' => $cups->id,
+        'N_Autorizacion' => 'AUT-777',
+    ]);
+
+    $fila = collect(
+        $this->actingAs($usuario)
+            ->getJson('/tools/radicar-solicitud/informe?consecutivo='.$caso->codrad)
+            ->assertOk()
+            ->json('rows')
+    )->firstWhere('codrad', $caso->codrad);
+
+    expect($fila['telefonos'])->toBe('3185946740 / 3167579149')
+        ->and($fila['eps'])->toBe('EMSSANAR EPS SAS')
+        ->and($fila['convenio'])->toBe('EMSSANAR EPS SAS')
+        ->and($fila['entregaProg'])->toBe('2026-08-26')
+        ->and($fila['fechaAutorizacion'])->toBe('2026-08-20')
+        ->and($fila['vencimientoAut'])->toBe('2027-02-20')
+        ->and($fila['observacionTfx'])->toBe('Texto TFX')
+        ->and($fila['observacionCcxCaso'])->toBe('Anotación de contratación')
+        ->and($fila['cups'])->toBe(['HUV-321'])
+        ->and($fila['autorizacionesCups'])->toBe(['AUT-777']);
+});
+
+test('el filtro de estados de informes ofrece el catálogo completo', function () {
+    // Si el filtro se quedara con los estados del rol, la grilla mostraría
+    // radicaciones en estados que nadie podría seleccionar.
+    $rol = Role::create(['Nombre' => 'Gestor Filtro', 'Estado' => true]);
+    $usuario = User::factory()->create(['rol' => 'Gestor Filtro']);
+
+    $suyo = EstRadicado::create(['Nombre' => 'Recibido', 'Estado' => true]);
+    EstRadicado::create(['Nombre' => 'Anulado', 'Estado' => true]);
+    $rol->estadosRadicado()->sync([$suyo->id]);
+
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud', 'ver' => true]);
+
+    $this->actingAs($usuario)
+        ->get('/tools/radicar-solicitud')
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            // El rol solo tiene uno asignado…
+            ->has('estados', 1)
+            // …pero el filtro del informe los ofrece todos.
+            ->has('estadosFiltro', 2)
+            ->etc()
+        );
 });
