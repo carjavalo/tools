@@ -35,6 +35,7 @@ import {
     FileSpreadsheet,
     FileText,
     LoaderCircle,
+    Lock,
     Pencil,
     Plus,
     Save,
@@ -188,7 +189,11 @@ interface CasoDetalle {
     entregaProg: string | null;
     fechaAutorizacion: string | null;
     vencimientoAut: string | null;
+    vencAnestesia: string | null;
     ObservacionTFX: string | null;
+    // Acumulado de Observaciones CCX. Solo se lee: lo registrado no se puede
+    // modificar ni borrar, únicamente anexarle texto nuevo.
+    ObservacionCCX: string | null;
     procedimientos: ProcDetalle[];
     autorizaciones: string[];
     cotizaciones: CotizacionServidor[];
@@ -520,6 +525,56 @@ function Dato({
                 {value || '—'}
             </div>
         </div>
+    );
+}
+
+/**
+ * Observaciones CCX: campo de solo-anexar. Lo ya registrado se muestra en modo
+ * lectura y el usuario únicamente escribe el texto nuevo; el servidor lo firma
+ * con su nombre y lo agrega al final. Así nadie puede borrar ni reescribir lo
+ * que dejó otro, y quien lea sabe quién anexó cada tramo.
+ */
+function ObservacionesCcx({
+    registrado,
+    value,
+    onChange,
+    className = '',
+}: {
+    registrado: string | null | undefined;
+    value: string;
+    onChange: (valor: string) => void;
+    className?: string;
+}) {
+    const historial = (registrado ?? '').trim();
+
+    return (
+        <Field label="Observaciones CCX" className={className}>
+            <div className="grid gap-2">
+                {historial !== '' && (
+                    <div className="rounded-md border bg-muted/40 p-2">
+                        <div className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold tracking-wide text-muted-foreground uppercase">
+                            <Lock className="size-3" />
+                            Registrado — no se puede modificar ni borrar
+                        </div>
+                        {/* Solo lectura de verdad: no es un input, así que no
+                            hay forma de editarlo desde la vista. */}
+                        <div className="max-h-40 overflow-y-auto text-xs leading-relaxed break-words whitespace-pre-wrap text-foreground">
+                            {historial}
+                        </div>
+                    </div>
+                )}
+                <Textarea
+                    value={value}
+                    onChange={(e) => onChange(e.target.value)}
+                    rows={2}
+                    placeholder="Escriba aquí lo que desea anexar…"
+                />
+                <p className="text-[11px] text-muted-foreground">
+                    El texto se agrega al final y queda firmado con su nombre y
+                    la fecha. Lo ya registrado no se modifica.
+                </p>
+            </div>
+        </Field>
     );
 }
 
@@ -2451,6 +2506,16 @@ export default function RadicarSolicitud({
                                             rows={3}
                                             placeholder="Información adicional"
                                         />
+                                        {/* Primera entrada del campo. Queda
+                                            firmada con quien radica y, de ahí
+                                            en adelante, solo se le puede
+                                            anexar texto desde el Historial. */}
+                                        <span className="text-[11px] text-muted-foreground">
+                                            Queda firmado con su nombre. Después
+                                            de radicar solo se le puede anexar
+                                            texto: nadie podrá modificarlo ni
+                                            borrarlo.
+                                        </span>
                                         {form.errors.ObservacionCCX && (
                                             <span className="text-xs text-red-600">
                                                 {form.errors.ObservacionCCX}
@@ -2857,6 +2922,13 @@ export default function RadicarSolicitud({
                                             <Dato
                                                 label="Vencimiento Aut."
                                                 value={caso.vencimientoAut}
+                                            />
+                                            {/* Lo diligencia el servicio desde
+                                                Aplicar Modificaciones; aquí
+                                                solo se consulta. */}
+                                            <Dato
+                                                label="Vencimiento Anestesia"
+                                                value={caso.vencAnestesia}
                                             />
                                             <Dato
                                                 label="Copago"
@@ -3484,23 +3556,19 @@ export default function RadicarSolicitud({
                                                         </SelectContent>
                                                     </Select>
                                                 </Field>
-                                                <Field
-                                                    label="Observaciones CCX"
+                                                <ObservacionesCcx
                                                     className="lg:col-span-3"
-                                                >
-                                                    <Textarea
-                                                        value={
-                                                            seg.ObservacionCCX
-                                                        }
-                                                        onChange={(e) =>
-                                                            setSegField(
-                                                                'ObservacionCCX',
-                                                                e.target.value,
-                                                            )
-                                                        }
-                                                        rows={2}
-                                                    />
-                                                </Field>
+                                                    registrado={
+                                                        caso.ObservacionCCX
+                                                    }
+                                                    value={seg.ObservacionCCX}
+                                                    onChange={(v) =>
+                                                        setSegField(
+                                                            'ObservacionCCX',
+                                                            v,
+                                                        )
+                                                    }
+                                                />
                                             </div>
                                             <Button
                                                 type="submit"
@@ -3610,27 +3678,24 @@ export default function RadicarSolicitud({
                                                         }
                                                     />
                                                 </Field>
-                                                <Field
-                                                    label="Observaciones CCX"
+                                                <ObservacionesCcx
                                                     className="md:col-span-2 lg:col-span-3"
-                                                >
-                                                    <Textarea
-                                                        value={
-                                                            segBasico.ObservacionCCX
-                                                        }
-                                                        onChange={(e) =>
-                                                            setSegBasico(
-                                                                (prev) => ({
-                                                                    ...prev,
-                                                                    ObservacionCCX:
-                                                                        e.target
-                                                                            .value,
-                                                                }),
-                                                            )
-                                                        }
-                                                        rows={2}
-                                                    />
-                                                </Field>
+                                                    registrado={
+                                                        caso.ObservacionCCX
+                                                    }
+                                                    value={
+                                                        segBasico.ObservacionCCX
+                                                    }
+                                                    onChange={(v) =>
+                                                        setSegBasico(
+                                                            (prev) => ({
+                                                                ...prev,
+                                                                ObservacionCCX:
+                                                                    v,
+                                                            }),
+                                                        )
+                                                    }
+                                                />
                                             </div>
                                             <Button
                                                 type="submit"

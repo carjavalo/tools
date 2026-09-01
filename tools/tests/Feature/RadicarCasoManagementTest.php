@@ -245,7 +245,9 @@ test('aplicar modificacion logs a trazabilidad record and updates the case', fun
 
     $caso->refresh();
     expect($caso->codestsecundario)->toBe((string) $estadoQx->id);
-    expect($caso->ObservacionCCX)->toBe('Revisión');
+    // Observaciones CCX queda firmado con quien lo anexó.
+    expect($caso->ObservacionCCX)->toStartWith('Revisión')
+        ->and($caso->ObservacionCCX)->toContain($user->name);
 });
 
 test('la Fecha Recibido Serv se guarda sola y se ve en la consulta y en el informe', function () {
@@ -1470,7 +1472,8 @@ test('un rol que solo tiene el formulario básico puede guardar el seguimiento',
 
     $caso->refresh();
     expect($caso->fecreci->format('Y-m-d'))->toBe('2026-08-26')
-        ->and($caso->ObservacionCCX)->toBe('Recibido por el servicio');
+        ->and($caso->ObservacionCCX)->toStartWith('Recibido por el servicio')
+        ->and($caso->ObservacionCCX)->toContain($usuario->name);
 });
 
 test('sin ninguno de los dos formularios asignados no se puede guardar el seguimiento', function () {
@@ -1718,4 +1721,121 @@ test('con la pestaña Informes apagada y sin grilla el PDF sigue cerrado', funct
     $this->actingAs($usuario)
         ->get("/tools/radicar-solicitud/cotizacion/{$cot->id}/adjunto")
         ->assertForbidden();
+});
+
+test('Observaciones CCX solo se puede anexar: lo anterior no se borra ni se reescribe', function () {
+    // Cada usuario manda únicamente su tramo. El contenido previo no viaja en
+    // la petición, así que no hay forma de borrarlo desde ningún formulario.
+    $primero = User::factory()->create(['name' => 'Ana', 'Apellido1' => 'Gómez']);
+    $segundo = User::factory()->create(['name' => 'Luis', 'Apellido1' => 'Pérez']);
+    $caso = RadicarCaso::create(['Ndocumento' => '9995', 'estRad' => '1']);
+
+    $this->actingAs($primero)
+        ->postJson("/tools/radicar-solicitud/{$caso->codrad}/seguimiento", [
+            'ObservacionCCX' => 'Falta soporte de la EPS',
+        ])
+        ->assertOk();
+
+    $this->actingAs($segundo)
+        ->postJson("/tools/radicar-solicitud/{$caso->codrad}/seguimiento", [
+            'ObservacionCCX' => 'Soporte recibido',
+        ])
+        ->assertOk();
+
+    $acumulado = $caso->refresh()->ObservacionCCX;
+
+    expect($acumulado)->toContain('Falta soporte de la EPS')
+        ->and($acumulado)->toContain('Ana Gómez')
+        ->and($acumulado)->toContain('Soporte recibido')
+        ->and($acumulado)->toContain('Luis Pérez')
+        // El orden importa: lo nuevo se agrega al final, detrás de lo que ya
+        // estaba registrado.
+        ->and(mb_strpos($acumulado, 'Falta soporte de la EPS'))
+        ->toBeLessThan(mb_strpos($acumulado, 'Soporte recibido'));
+});
+
+test('mandar Observaciones CCX vacío no borra lo que ya estaba registrado', function () {
+    $usuario = User::factory()->create();
+    $caso = RadicarCaso::create(['Ndocumento' => '9996', 'estRad' => '1']);
+
+    $this->actingAs($usuario)
+        ->postJson("/tools/radicar-solicitud/{$caso->codrad}/seguimiento", [
+            'ObservacionCCX' => 'Anotación inicial',
+        ])
+        ->assertOk();
+
+    $antes = $caso->refresh()->ObservacionCCX;
+
+    // Un movimiento que solo diligencia otro campo deja intacto el acumulado.
+    $this->actingAs($usuario)
+        ->postJson("/tools/radicar-solicitud/{$caso->codrad}/seguimiento", [
+            'fecreci' => '2026-08-26',
+            'ObservacionCCX' => '',
+        ])
+        ->assertOk();
+
+    expect($caso->refresh()->ObservacionCCX)->toBe($antes);
+});
+
+test('el seguimiento guarda solo el tramo anexado, no el acumulado del caso', function () {
+    $usuario = User::factory()->create();
+    $caso = RadicarCaso::create(['Ndocumento' => '9997', 'estRad' => '1']);
+
+    $this->actingAs($usuario)
+        ->postJson("/tools/radicar-solicitud/{$caso->codrad}/seguimiento", [
+            'ObservacionCCX' => 'Primer tramo',
+        ])
+        ->assertOk();
+
+    $this->actingAs($usuario)
+        ->postJson("/tools/radicar-solicitud/{$caso->codrad}/seguimiento", [
+            'ObservacionCCX' => 'Segundo tramo',
+        ])
+        ->assertOk();
+
+    $ultimo = SeguimientoCaso::where('codrad', $caso->codrad)->orderByDesc('id')->first();
+
+    expect($ultimo->ObservacionCCX)->toContain('Segundo tramo')
+        ->and($ultimo->ObservacionCCX)->not->toContain('Primer tramo');
+});
+
+test('la consulta del caso trae el Vencimiento Anestesia y el acumulado de CCX', function () {
+    $usuario = User::factory()->create();
+    $caso = RadicarCaso::create(['Ndocumento' => '9998', 'estRad' => '1']);
+
+    $this->actingAs($usuario)
+        ->postJson("/tools/radicar-solicitud/{$caso->codrad}/seguimiento", [
+            'venc_anestesia' => '2027-01-15',
+            'ObservacionCCX' => 'Anestesia vigente',
+        ])
+        ->assertOk();
+
+    $this->actingAs($usuario)
+        ->getJson('/tools/radicar-solicitud/buscar-caso?q='.$caso->codrad)
+        ->assertOk()
+        ->assertJsonPath('caso.vencAnestesia', '2027-01-15')
+        ->assertJsonPath(
+            'caso.ObservacionCCX',
+            fn ($valor) => str_contains((string) $valor, 'Anestesia vigente'),
+        );
+});
+
+test('el Vencimiento Anestesia se consulta del último seguimiento cuando el caso no lo tiene', function () {
+    // Mismo respaldo que la Fecha Recibido Serv: si la columna del caso quedó
+    // vacía, manda el último seguimiento que sí lo diligenció.
+    $usuario = User::factory()->create();
+    $caso = RadicarCaso::create(['Ndocumento' => '9999', 'estRad' => '1']);
+
+    SeguimientoCaso::create([
+        'codrad' => $caso->codrad,
+        'user_id' => $usuario->id,
+        'venc_anestesia' => '2026-11-30',
+    ]);
+
+    expect($caso->refresh()->venc_anestesia)->toBeNull();
+
+    $this->actingAs($usuario)
+        ->getJson('/tools/radicar-solicitud/buscar-caso?q='.$caso->codrad)
+        ->assertOk()
+        ->assertJsonPath('caso.vencAnestesia', '2026-11-30');
 });

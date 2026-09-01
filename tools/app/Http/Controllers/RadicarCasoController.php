@@ -29,6 +29,7 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Password;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -719,7 +720,10 @@ class RadicarCasoController extends Controller
             'codsubesp' => ['nullable', 'string', 'max:10'],
             'estcod' => ['nullable', 'string', 'max:5'],
             'ObservacionTFX' => ['required', 'string', 'max:65535'],
-            'ObservacionCCX' => ['required', 'string', 'max:65535'],
+            // Observaciones CCX solo se anexa: esta es la primera entrada y se
+            // acota al mismo tramo que las siguientes, para que la columna no
+            // quede llena desde la radicación y sin espacio para los anexos.
+            'ObservacionCCX' => ['required', 'string', 'max:10000'],
             // Debe registrarse al menos un procedimiento (CUPS) con su autorización.
             'procedimientos' => ['required', 'array', 'min:1'],
             'procedimientos.*.cusv_id' => ['required', 'integer', 'exists:cups,id'],
@@ -754,6 +758,11 @@ class RadicarCasoController extends Controller
 
         // El PDF se guarda en disco y en la columna queda solo su ruta.
         $data['paquete'] = $this->guardarPaquete($request, null, null, $data['Ndocumento'] ?? null);
+
+        // Observaciones CCX es un campo de solo-anexar en todo el sistema: la
+        // primera entrada también se firma, para que el historial tenga un
+        // único formato y se sepa quién escribió cada tramo.
+        $data['ObservacionCCX'] = $this->entradaObservacionCcx($data['ObservacionCCX'] ?? null, $request) ?? '';
 
         // El caso, sus procedimientos y su bitácora se guardan o fallan juntos:
         // una radicación sin su registro de creación quedaría fuera del informe.
@@ -967,18 +976,41 @@ class RadicarCasoController extends Controller
             'venc_anestesia' => ['nullable', 'date'],
             // Estado QX: se escoge del catálogo (tabla EstRadisecundario).
             'codestsecundario' => ['nullable', 'string', 'max:5'],
-            'ObservacionCCX' => ['nullable', 'string', 'max:65535'],
+            // Observaciones CCX es de solo-anexar: aquí llega únicamente el
+            // texto nuevo, nunca el contenido completo del campo. Se limita a
+            // un tramo razonable para que el acumulado no reviente la columna.
+            'ObservacionCCX' => ['nullable', 'string', 'max:10000'],
         ], [
             'estRad.in' => 'El estado seleccionado no está asignado a tu rol.',
         ], [
             'estRad' => 'estado actual',
             'fecreci' => 'fecha recibido serv',
+            'ObservacionCCX' => 'observaciones CCX',
         ]);
 
-        DB::transaction(function () use ($caso, $data, $request) {
+        // El texto nuevo se firma con quien lo anexa y se agrega al final de
+        // lo que ya tenía el caso. Nadie puede borrar ni reescribir lo que
+        // registró otro: el contenido anterior no viaja en la petición.
+        $entradaCcx = $this->entradaObservacionCcx($data['ObservacionCCX'] ?? null, $request);
+        $acumuladoCcx = $entradaCcx !== null
+            ? $this->anexarObservacionCcx($caso->ObservacionCCX, $entradaCcx)
+            : null;
+
+        // El tope se mide en bytes y no en caracteres: la columna es TEXT
+        // (65.535 bytes) y el español acentuado gasta más de uno por letra.
+        if ($acumuladoCcx !== null && strlen($acumuladoCcx) > 64000) {
+            throw ValidationException::withMessages([
+                'ObservacionCCX' => 'Las observaciones CCX del caso llegaron a su tope de capacidad y no admiten más texto.',
+            ]);
+        }
+
+        DB::transaction(function () use ($caso, $data, $request, $entradaCcx, $acumuladoCcx) {
             // Foto del seguimiento. Estado y MAOS no se guardan aquí porque
             // seguimiento_caso no tiene esas columnas: sus cambios quedan en
             // la bitácora, que además registra el valor anterior y el nuevo.
+            // En Observaciones CCX queda solo lo que se anexó en este
+            // movimiento; el acumulado vive en el caso.
+            $data['ObservacionCCX'] = $entradaCcx;
             SeguimientoCaso::create(array_merge(Arr::except($data, ['estRad', 'maos']), [
                 'codrad' => $caso->codrad,
                 'user_id' => $request->user()?->id,
@@ -986,6 +1018,10 @@ class RadicarCasoController extends Controller
 
             // Aplicar al caso solo los campos diligenciados (no vaciar con blancos).
             $aplicar = array_filter($data, fn ($v) => $v !== null && $v !== '');
+            // Observaciones CCX se aplica ya acumulado, no como el tramo suelto.
+            if ($acumuladoCcx !== null) {
+                $aplicar['ObservacionCCX'] = $acumuladoCcx;
+            }
             if (! empty($aplicar)) {
                 $antes = $caso->getRawOriginal();
                 $caso->update($aplicar);
@@ -1440,6 +1476,45 @@ class RadicarCasoController extends Controller
     }
 
     /**
+     * Una entrada de Observaciones CCX firmada por quien la anexa. Devuelve
+     * null cuando no se escribió nada: sin texto no hay nada que anexar y una
+     * firma suelta solo ensuciaría el historial.
+     */
+    private function entradaObservacionCcx(?string $texto, Request $request): ?string
+    {
+        $texto = trim((string) $texto);
+
+        if ($texto === '') {
+            return null;
+        }
+
+        $usuario = $request->user();
+        $nombre = $usuario
+            ? trim(implode(' ', array_filter([$usuario->name, $usuario->Apellido1, $usuario->apellido2])))
+            : '';
+
+        if ($nombre === '') {
+            $nombre = $usuario?->email ?? 'Usuario del sistema';
+        }
+
+        // La firma va después del texto para que quien lea sepa de inmediato
+        // quién escribió el tramo que acaba de terminar.
+        return $texto."\n— ".$nombre.' · '.now()->format('Y-m-d H:i');
+    }
+
+    /**
+     * Observaciones CCX solo crece. El tramo nuevo se agrega al final y lo que
+     * ya estaba queda intacto: ningún usuario puede borrar ni reescribir lo
+     * que registró otro.
+     */
+    private function anexarObservacionCcx(?string $actual, string $entrada): string
+    {
+        $actual = rtrim((string) $actual);
+
+        return $actual === '' ? $entrada : $actual."\n\n".$entrada;
+    }
+
+    /**
      * Registra un evento de la radicación que no corresponde a un campo
      * concreto (creación, cambio de procedimientos, cotizaciones…).
      */
@@ -1574,7 +1649,6 @@ class RadicarCasoController extends Controller
         return Almacenamiento::guardarComo($archivo, 'paquetes', Almacenamiento::nombreDocumento($codrad, $documento));
     }
 
-
     /**
      * Renombra el PDF de una radicación recién creada para incluir su
      * consecutivo.
@@ -1690,6 +1764,14 @@ class RadicarCasoController extends Controller
             ->orderByDesc('id')
             ->value('fecreci');
 
+        // Vencimiento Anestesia: mismo respaldo que Fecha Recibido Serv. Si la
+        // columna del caso está vacía se toma del último seguimiento que sí lo
+        // diligenció, para que la consulta no lo muestre en blanco.
+        $vencAnestesia = $caso->venc_anestesia ?? SeguimientoCaso::where('codrad', $caso->codrad)
+            ->whereNotNull('venc_anestesia')
+            ->orderByDesc('id')
+            ->value('venc_anestesia');
+
         $procs = CupsAnezado::where('codRadicado', (string) $caso->codrad)->get();
         $procedimientos = $procs->map(function ($p) {
             $cups = Cups::find($p->cusv_id);
@@ -1749,6 +1831,13 @@ class RadicarCasoController extends Controller
             'fechaAutorizacion' => optional($caso->fecAutorizacion)->format('Y-m-d'),
             'vencimientoAut' => optional($caso->fechavenautorizacion)->format('Y-m-d'),
             'ObservacionTFX' => $caso->ObservacionTFX,
+            // Vencimiento Anestesia: se diligencia desde Aplicar
+            // Modificaciones y se consulta aquí junto al resto del caso.
+            'vencAnestesia' => optional($vencAnestesia)->format('Y-m-d'),
+            // Acumulado de Observaciones CCX. Viaja completo porque la vista
+            // lo muestra en modo lectura: es lo único que se puede hacer con
+            // lo ya registrado.
+            'ObservacionCCX' => $caso->ObservacionCCX,
             'procedimientos' => $procedimientos,
             'autorizaciones' => $procs->pluck('N_Autorizacion')->filter()->values(),
             'cotizaciones' => $this->cotizacionesDeCaso($caso->codrad),
