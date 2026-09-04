@@ -85,6 +85,7 @@ Route::prefix('tools')->name('tools.')->group(function () {
         // no por la URL del disco: en S3 el bucket es privado.
         Route::get('radicar-solicitud/cotizacion/{cotizacion}/adjunto', [App\Http\Controllers\RadicarCasoController::class, 'verAdjuntoCotizacion'])->name('radicar-solicitud.cotizacion-adjunto');
         Route::get('radicar-solicitud/informe', [App\Http\Controllers\RadicarCasoController::class, 'informe'])->name('radicar-solicitud.informe');
+        Route::get('radicar-solicitud/programados', [App\Http\Controllers\RadicarCasoController::class, 'programados'])->name('radicar-solicitud.programados');
         Route::post('radicar-solicitud/{caso}/seguimiento', [App\Http\Controllers\RadicarCasoController::class, 'aplicarModificacion'])->name('radicar-solicitud.seguimiento');
         Route::put('radicar-solicitud/{caso}', [App\Http\Controllers\RadicarCasoController::class, 'actualizarCaso'])->name('radicar-solicitud.actualizar-caso');
         Route::post('radicar-solicitud/{caso}/cotizaciones', [App\Http\Controllers\RadicarCasoController::class, 'guardarCotizaciones'])->name('radicar-solicitud.cotizaciones');

@@ -1105,6 +1105,82 @@ class RadicarCasoController extends Controller
     }
 
     /**
+     * Grilla de radicaciones programadas para cirugía. Alimenta el modal
+     * "Ver Programados": cada fila cruza una programación con su radicación,
+     * el paciente, la especialidad, el especialista y los PDFs (paquete y
+     * cotizaciones). Las consultas se hacen por lote —una por relación, no una
+     * por fila— para no multiplicar el acceso a la base.
+     */
+    public function programados(Request $request): JsonResponse
+    {
+        $programaciones = ProgramacionCaso::query()
+            ->orderByDesc('fecha_programacion')
+            ->orderByDesc('id')
+            ->limit(self::TOPE_FILAS_INFORME)
+            ->get();
+
+        $codrads = $programaciones->pluck('codrad')->filter()->unique();
+
+        $casos = RadicarCaso::whereIn('codrad', $codrads)
+            ->get(['codrad', 'Ndocumento', 'Codesp', 'codMed', 'paquete'])
+            ->keyBy('codrad');
+
+        $pacientes = User::whereIn('Numero_D', $casos->pluck('Ndocumento')->filter()->unique())
+            ->get(['Numero_D', 'name', 'Apellido1', 'apellido2'])
+            ->keyBy('Numero_D');
+
+        // Médico tratante de la radicación (codMed) y especialista de la
+        // cirugía (especialista_medico_id) se resuelven juntos, en una sola
+        // consulta a users.
+        $medicosIds = $casos->pluck('codMed')
+            ->merge($programaciones->pluck('especialista_medico_id'))
+            ->filter()
+            ->unique();
+        $medicos = User::whereIn('id', $medicosIds)
+            ->get(['id', 'name', 'Apellido1', 'apellido2'])
+            ->keyBy('id');
+        $especialistas = $medicos;
+
+        $especialidades = Especialidad::pluck('Nombre', 'espcodser');
+
+        $adjuntosCotizacion = CotizacionCaso::whereIn('codrad', $codrads)
+            ->whereNotNull('adjunto')
+            ->orderBy('id')
+            ->get(['id', 'codrad', 'tercero'])
+            ->groupBy('codrad');
+
+        $rows = $programaciones->map(function (ProgramacionCaso $prog) use ($casos, $pacientes, $especialistas, $medicos, $especialidades, $adjuntosCotizacion) {
+            $caso = $casos->get($prog->codrad);
+            $pac = $caso && $caso->Ndocumento ? $pacientes->get($caso->Ndocumento) : null;
+            $esp = $prog->especialista_medico_id ? $especialistas->get($prog->especialista_medico_id) : null;
+            $med = $caso && $caso->codMed ? $medicos->get($caso->codMed) : null;
+
+            return [
+                'id' => $prog->id,
+                'codrad' => $prog->codrad,
+                'paciente' => $this->nombreUsuario($pac) ?? '—',
+                'documento' => $caso?->Ndocumento ?? '—',
+                'especialidad' => $caso ? ($especialidades[$caso->Codesp] ?? '—') : '—',
+                'medico' => $this->nombreUsuario($med) ?? '—',
+                'especialista' => $this->nombreUsuario($esp) ?? '—',
+                'fechaProgramacion' => optional($prog->fecha_programacion)->format('Y-m-d H:i'),
+                'paqueteUrl' => $caso && $caso->paquete
+                    ? route('tools.radicar-solicitud.paquete', $caso->codrad)
+                    : null,
+                'cotizaciones' => ($adjuntosCotizacion->get($prog->codrad) ?? collect())
+                    ->map(fn (CotizacionCaso $c) => [
+                        'id' => $c->id,
+                        'tercero' => $c->tercero,
+                        'url' => route('tools.radicar-solicitud.cotizacion-adjunto', $c->id),
+                    ])->values()->all(),
+                'observaciones' => $prog->observaciones_prg ?? '',
+            ];
+        })->values()->all();
+
+        return response()->json(['rows' => $rows]);
+    }
+
+    /**
      * Eliminar un caso (solo Super Admin). Borra también sus procedimientos
      * y su trazabilidad.
      */

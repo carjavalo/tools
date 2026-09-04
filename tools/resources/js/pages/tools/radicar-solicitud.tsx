@@ -26,6 +26,7 @@ import { type BreadcrumbItem, type SharedData } from '@/types';
 import { Head, router, useForm, usePage } from '@inertiajs/react';
 import {
     BarChart3,
+    CalendarClock,
     CheckCircle2,
     ChevronDown,
     ChevronLeft,
@@ -118,6 +119,20 @@ interface CotizacionItem {
     observacion: string;
     adjunto_url: string | null;
     file: File | null;
+}
+
+interface ProgramadoRow {
+    id: number;
+    codrad: number;
+    paciente: string;
+    documento: string;
+    especialidad: string;
+    medico: string;
+    especialista: string;
+    fechaProgramacion: string | null;
+    paqueteUrl: string | null;
+    cotizaciones: { id: number; tercero: string; url: string }[];
+    observaciones: string;
 }
 
 interface PageProps {
@@ -693,6 +708,17 @@ export default function RadicarSolicitud({
     const [segBasicoOk, setSegBasicoOk] = useState(false);
     const [segBasicoError, setSegBasicoError] = useState<string | null>(null);
     const [borrarOpen, setBorrarOpen] = useState(false);
+    // Modal "Ver Programados": grilla con todas las radicaciones que están en
+    // Estado QX = Programados, con sus datos de programación de cirugía.
+    const [programadosOpen, setProgramadosOpen] = useState(false);
+    const [programadosRows, setProgramadosRows] = useState<ProgramadoRow[]>([]);
+    const [programadosLoading, setProgramadosLoading] = useState(false);
+    const [programadosError, setProgramadosError] = useState<string | null>(
+        null,
+    );
+    // Filtro de texto del modal: busca en N° caso, documento, paciente,
+    // especialidad y médico a la vez.
+    const [programadosFiltro, setProgramadosFiltro] = useState('');
     // Modificar radicado (botón del Historial)
     const [modifOpen, setModifOpen] = useState(false);
     const [modifSaving, setModifSaving] = useState(false);
@@ -1248,6 +1274,94 @@ export default function RadicarSolicitud({
                       observaciones_prg: '',
                   }),
         }));
+    };
+
+    // Abre el modal "Ver Programados" y trae la grilla desde el servidor.
+    const abrirProgramados = () => {
+        setProgramadosOpen(true);
+        setProgramadosLoading(true);
+        setProgramadosError(null);
+        setProgramadosFiltro('');
+        fetch('/tools/radicar-solicitud/programados', {
+            headers: { Accept: 'application/json' },
+        })
+            .then((r) => (r.ok ? r.json() : null))
+            .then((d) => {
+                if (d && Array.isArray(d.rows)) {
+                    setProgramadosRows(d.rows);
+                } else {
+                    setProgramadosError(
+                        'No fue posible cargar las programaciones.',
+                    );
+                }
+            })
+            .catch(() =>
+                setProgramadosError('Ocurrió un error al cargar las programaciones.'),
+            )
+            .finally(() => setProgramadosLoading(false));
+    };
+
+    // Filas del modal ya filtradas por el texto. Coincide si el término aparece
+    // en el N° de caso, documento, paciente, especialidad o médico.
+    const programadosFiltrados = useMemo(() => {
+        const q = programadosFiltro.trim().toLowerCase();
+        if (q === '') return programadosRows;
+
+        return programadosRows.filter((r) =>
+            [
+                String(r.codrad),
+                r.documento,
+                r.paciente,
+                r.especialidad,
+                r.medico,
+            ]
+                .join(' ')
+                .toLowerCase()
+                .includes(q),
+        );
+    }, [programadosRows, programadosFiltro]);
+
+    // Descarga en Excel lo que muestra la grilla (ya filtrado). La librería se
+    // carga solo al pulsar, para no engordar la vista.
+    const exportarProgramadosExcel = async () => {
+        if (programadosFiltrados.length === 0) return;
+
+        const XLSX = await import('xlsx');
+
+        const filas = programadosFiltrados.map((r) => ({
+            'N° Caso': r.codrad,
+            Paciente: r.paciente,
+            Identificación: r.documento,
+            Especialidad: r.especialidad,
+            Médico: r.medico,
+            'Especialista Médico': r.especialista,
+            'Fecha y Hora Programación': r.fechaProgramacion ?? '',
+            Paquete: r.paqueteUrl ? 'Sí' : 'No',
+            'Cotizaciones (PDF)': r.cotizaciones.length,
+            'Cotizaciones (terceros)': r.cotizaciones
+                .map((c) => c.tercero)
+                .join(' / '),
+            'Observaciones Prg': r.observaciones,
+        }));
+
+        const hoja = XLSX.utils.json_to_sheet(filas);
+        hoja['!cols'] = Object.keys(filas[0]).map((clave) => ({
+            wch: Math.min(
+                45,
+                Math.max(
+                    clave.length + 2,
+                    ...filas.map(
+                        (f) => String(f[clave as keyof typeof f] ?? '').length,
+                    ),
+                ),
+            ),
+        }));
+
+        const libro = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(libro, hoja, 'Programados');
+
+        const hoy = new Date().toISOString().slice(0, 10);
+        XLSX.writeFile(libro, `radicaciones-programadas-${hoy}.xlsx`);
     };
 
     // ----- Modificar radicado (botón del Historial) -----
@@ -3839,21 +3953,35 @@ export default function RadicarSolicitud({
                                                     }
                                                 />
                                             </div>
-                                            <Button
-                                                type="submit"
-                                                disabled={aplicando}
-                                                className="mt-4 h-11 w-full gap-2 font-semibold text-gray-900 hover:opacity-90"
-                                                style={{
-                                                    backgroundColor: '#eab308',
-                                                }}
-                                            >
-                                                {aplicando ? (
-                                                    <LoaderCircle className="size-5 animate-spin" />
-                                                ) : (
-                                                    <Save className="size-5" />
-                                                )}
-                                                Aplicar Modificaciones al Caso
-                                            </Button>
+                                            <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                                                <Button
+                                                    type="submit"
+                                                    disabled={aplicando}
+                                                    className="h-11 flex-1 gap-2 font-semibold text-gray-900 hover:opacity-90"
+                                                    style={{
+                                                        backgroundColor:
+                                                            '#eab308',
+                                                    }}
+                                                >
+                                                    {aplicando ? (
+                                                        <LoaderCircle className="size-5 animate-spin" />
+                                                    ) : (
+                                                        <Save className="size-5" />
+                                                    )}
+                                                    Aplicar Modificaciones al
+                                                    Caso
+                                                </Button>
+                                                <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    onClick={abrirProgramados}
+                                                    title="Ver las radicaciones programadas para cirugía"
+                                                    className="h-11 gap-2 text-[#2d3e83] dark:text-white"
+                                                >
+                                                    <CalendarClock className="size-5" />
+                                                    Ver programados
+                                                </Button>
+                                            </div>
                                         </form>
                                     )}
 
@@ -5145,6 +5273,190 @@ export default function RadicarSolicitud({
                                 <LoaderCircle className="size-4 animate-spin" />
                             )}
                             Eliminar
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Modal "Ver Programados": grilla de radicaciones programadas para
+                cirugía (Estado QX = Programados). */}
+            <Dialog open={programadosOpen} onOpenChange={setProgramadosOpen}>
+                <DialogContent className="max-h-[90vh] overflow-hidden sm:max-w-6xl">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <CalendarClock className="size-5 text-[#2d3e83] dark:text-white" />
+                            Radicaciones programadas para cirugía
+                        </DialogTitle>
+                        <DialogDescription>
+                            Casos con Estado QX en “Programados”. Se ordenan por
+                            fecha y hora de programación, de la más reciente a la
+                            más antigua.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                        <div className="relative flex-1">
+                            <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+                            <Input
+                                value={programadosFiltro}
+                                onChange={(e) =>
+                                    setProgramadosFiltro(e.target.value)
+                                }
+                                placeholder="Filtrar por N° caso, documento, paciente, especialidad o médico…"
+                                className="pl-9"
+                            />
+                        </div>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            onClick={exportarProgramadosExcel}
+                            disabled={programadosFiltrados.length === 0}
+                            title="Descargar en Excel lo que muestra la grilla"
+                            className="gap-2 text-green-700 disabled:opacity-40 dark:text-green-400"
+                        >
+                            <FileSpreadsheet className="size-4" />
+                            Exportar a Excel
+                        </Button>
+                    </div>
+
+                    {programadosError && (
+                        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
+                            {programadosError}
+                        </div>
+                    )}
+
+                    <div className="max-h-[65vh] overflow-auto rounded-lg border">
+                        <table className="w-full min-w-[1000px] text-sm">
+                            <thead className="sticky top-0 z-10 bg-muted/80 backdrop-blur">
+                                <tr className="text-left text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
+                                    <th className="px-3 py-2">N° Caso</th>
+                                    <th className="px-3 py-2">Paciente</th>
+                                    <th className="px-3 py-2">Identificación</th>
+                                    <th className="px-3 py-2">Especialidad</th>
+                                    <th className="px-3 py-2">Médico</th>
+                                    <th className="px-3 py-2">
+                                        Especialista Médico
+                                    </th>
+                                    <th className="px-3 py-2">
+                                        Fecha y Hora Prog.
+                                    </th>
+                                    <th className="px-3 py-2">Paquete</th>
+                                    <th className="px-3 py-2">Cotización</th>
+                                    <th className="px-3 py-2">
+                                        Observaciones Prg
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y">
+                                {programadosLoading && (
+                                    <tr>
+                                        <td
+                                            colSpan={10}
+                                            className="px-3 py-8 text-center text-muted-foreground"
+                                        >
+                                            <LoaderCircle className="mx-auto size-5 animate-spin" />
+                                        </td>
+                                    </tr>
+                                )}
+                                {!programadosLoading &&
+                                    programadosFiltrados.length === 0 && (
+                                        <tr>
+                                            <td
+                                                colSpan={10}
+                                                className="px-3 py-8 text-center text-muted-foreground"
+                                            >
+                                                {programadosRows.length === 0
+                                                    ? 'No hay radicaciones programadas.'
+                                                    : 'Ningún registro coincide con el filtro.'}
+                                            </td>
+                                        </tr>
+                                    )}
+                                {!programadosLoading &&
+                                    programadosFiltrados.map((r) => (
+                                        <tr
+                                            key={r.id}
+                                            className="align-top hover:bg-muted/40"
+                                        >
+                                            <td className="px-3 py-2 font-semibold text-foreground">
+                                                #{r.codrad}
+                                            </td>
+                                            <td className="px-3 py-2">
+                                                {r.paciente}
+                                            </td>
+                                            <td className="px-3 py-2">
+                                                {r.documento}
+                                            </td>
+                                            <td className="px-3 py-2">
+                                                {r.especialidad}
+                                            </td>
+                                            <td className="px-3 py-2">
+                                                {r.medico}
+                                            </td>
+                                            <td className="px-3 py-2">
+                                                {r.especialista}
+                                            </td>
+                                            <td className="px-3 py-2 whitespace-nowrap">
+                                                {r.fechaProgramacion ?? '—'}
+                                            </td>
+                                            <td className="px-3 py-2">
+                                                {r.paqueteUrl ? (
+                                                    <a
+                                                        href={r.paqueteUrl}
+                                                        target="_blank"
+                                                        rel="noreferrer"
+                                                        className="inline-flex items-center gap-1 text-[#2d3e83] hover:underline dark:text-white"
+                                                    >
+                                                        <FileText className="size-4" />
+                                                        Ver PDF
+                                                    </a>
+                                                ) : (
+                                                    '—'
+                                                )}
+                                            </td>
+                                            <td className="px-3 py-2">
+                                                {r.cotizaciones.length === 0
+                                                    ? '—'
+                                                    : r.cotizaciones.map((c) => (
+                                                          <a
+                                                              key={c.id}
+                                                              href={c.url}
+                                                              target="_blank"
+                                                              rel="noreferrer"
+                                                              title={c.tercero}
+                                                              className="mb-1 flex items-center gap-1 text-[#2d3e83] hover:underline dark:text-white"
+                                                          >
+                                                              <FileText className="size-4 shrink-0" />
+                                                              <span className="truncate">
+                                                                  {c.tercero ||
+                                                                      'Ver PDF'}
+                                                              </span>
+                                                          </a>
+                                                      ))}
+                                            </td>
+                                            <td className="max-w-xs px-3 py-2 whitespace-pre-wrap text-muted-foreground">
+                                                {r.observaciones || '—'}
+                                            </td>
+                                        </tr>
+                                    ))}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <DialogFooter>
+                        <span className="mr-auto self-center text-xs text-muted-foreground">
+                            {programadosFiltrados.length}
+                            {programadosFiltro.trim() !== ''
+                                ? ` de ${programadosRows.length}`
+                                : ''}{' '}
+                            programación
+                            {programadosFiltrados.length === 1 ? '' : 'es'}
+                        </span>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => setProgramadosOpen(false)}
+                        >
+                            Cerrar
                         </Button>
                     </DialogFooter>
                 </DialogContent>
