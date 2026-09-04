@@ -996,7 +996,9 @@ class RadicarCasoController extends Controller
             // "Programados". Los tres campos son opcionales y no viven en el
             // caso ni en el seguimiento, sino en su propia tabla.
             'fecha_programacion' => ['nullable', 'date'],
-            'especialista_medico' => ['nullable', 'string', 'max:200'],
+            // El especialista se escoge del banco de médicos (users con rol
+            // Medico); el modal de crear médico lo alimenta.
+            'especialista_medico_id' => ['nullable', 'integer', Rule::exists('users', 'id')->where('rol', 'Medico')],
             'observaciones_prg' => ['nullable', 'string', 'max:10000'],
             // Observaciones CCX es de solo-anexar: aquí llega únicamente el
             // texto nuevo, nunca el contenido completo del campo. Se limita a
@@ -1008,7 +1010,7 @@ class RadicarCasoController extends Controller
             'estRad' => 'estado actual',
             'fecreci' => 'fecha recibido serv',
             'fecha_programacion' => 'fecha de programación',
-            'especialista_medico' => 'especialista médico',
+            'especialista_medico_id' => 'especialista médico',
             'observaciones_prg' => 'observaciones de programación',
             'ObservacionCCX' => 'observaciones CCX',
         ]);
@@ -1016,7 +1018,7 @@ class RadicarCasoController extends Controller
         // Los campos de programación viajan aparte: no son columnas del caso ni
         // del seguimiento, así que se sacan de $data antes de esas escrituras y
         // se guardan en programacion_caso solo si el Estado QX es "Programados".
-        $camposProgramacion = ['fecha_programacion', 'especialista_medico', 'observaciones_prg'];
+        $camposProgramacion = ['fecha_programacion', 'especialista_medico_id', 'observaciones_prg'];
         $datosProgramacion = Arr::only($data, $camposProgramacion);
         $data = Arr::except($data, $camposProgramacion);
 

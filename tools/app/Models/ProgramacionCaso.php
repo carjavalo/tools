@@ -22,7 +22,7 @@ class ProgramacionCaso extends Model
     protected $fillable = [
         'codrad',
         'fecha_programacion',
-        'especialista_medico',
+        'especialista_medico_id',
         'observaciones_prg',
         'user_id',
     ];
@@ -46,5 +46,13 @@ class ProgramacionCaso extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class, 'user_id');
+    }
+
+    /**
+     * Especialista (médico) que realizará la cirugía programada.
+     */
+    public function especialista(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'especialista_medico_id');
     }
 }

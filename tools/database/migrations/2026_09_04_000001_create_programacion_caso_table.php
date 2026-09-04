@@ -22,7 +22,9 @@ return new class extends Migration
             $table->unsignedBigInteger('codrad');
             // Fecha y hora de la cirugía programada: lleva hora, no solo fecha.
             $table->dateTime('fecha_programacion')->nullable();
-            $table->string('especialista_medico', 200)->nullable();
+            // Especialista que hará la cirugía: apunta al banco de médicos
+            // (users con rol Medico), no a un texto suelto.
+            $table->unsignedBigInteger('especialista_medico_id')->nullable();
             $table->text('observaciones_prg')->nullable();
             $table->unsignedBigInteger('user_id')->nullable();
             $table->timestamps();

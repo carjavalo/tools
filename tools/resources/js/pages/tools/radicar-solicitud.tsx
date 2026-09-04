@@ -312,9 +312,10 @@ const EMPTY_SEG = {
     ObservacionCCX: '',
     // Programación de cirugía: solo se diligencia cuando el Estado QX es
     // "Programados". Se guardan en su propia tabla (programacion_caso), no en
-    // el caso ni en el seguimiento.
+    // el caso ni en el seguimiento. El especialista se escoge del banco de
+    // médicos, así que aquí va su id.
     fecha_programacion: '',
-    especialista_medico: '',
+    especialista_medico_id: '',
     observaciones_prg: '',
 };
 
@@ -647,6 +648,13 @@ export default function RadicarSolicitud({
     // (botón + de Médico). Define qué se hace con el usuario ya creado.
     const [modoUsuario, setModoUsuario] = useState<'paciente' | 'medico'>(
         'paciente',
+    );
+    // Cuando el modal se abre en modo 'medico', dice a qué campo va el médico
+    // recién creado: al de Nueva Radicación ('codMed') o al de Especialista de
+    // la programación de cirugía ('especialista'). Así el mismo modal sirve a
+    // los dos selectores sin pisarse.
+    const [medicoDestino, setMedicoDestino] = useState<'codMed' | 'especialista'>(
+        'codMed',
     );
     // Lista de médicos del selector: parte de la prop del servidor y crece
     // cuando se crea uno desde el modal, sin recargar la página.
@@ -1009,6 +1017,19 @@ export default function RadicarSolicitud({
         setUserErrors({});
         setEditandoId(null);
         setModoUsuario('medico');
+        setMedicoDestino('codMed');
+        setNuevoUsuario({ ...EMPTY_USUARIO, rol: 'Medico' });
+        setCrearOpen(true);
+    };
+
+    // Botón + del campo Especialista Médico (programación de cirugía): mismo
+    // modal de crear médico, pero el médico creado queda seleccionado en el
+    // campo de programación, no en el de Nueva Radicación.
+    const openCrearEspecialista = () => {
+        setUserErrors({});
+        setEditandoId(null);
+        setModoUsuario('medico');
+        setMedicoDestino('especialista');
         setNuevoUsuario({ ...EMPTY_USUARIO, rol: 'Medico' });
         setCrearOpen(true);
     };
@@ -1111,7 +1132,17 @@ export default function RadicarSolicitud({
                         ...prev.filter((m) => m.id !== medico.id),
                         medico,
                     ]);
-                    form.setData('codMed', String(medico.id));
+                    // Según de dónde se abrió el modal, el médico creado entra
+                    // al selector de Nueva Radicación o al de Especialista de la
+                    // programación de cirugía.
+                    if (medicoDestino === 'especialista') {
+                        setSegField(
+                            'especialista_medico_id',
+                            String(medico.id),
+                        );
+                    } else {
+                        form.setData('codMed', String(medico.id));
+                    }
                     setCrearOpen(false);
                     setEditandoId(null);
                     setNuevoUsuario({ ...EMPTY_USUARIO });
@@ -1213,7 +1244,7 @@ export default function RadicarSolicitud({
                 ? {}
                 : {
                       fecha_programacion: '',
-                      especialista_medico: '',
+                      especialista_medico_id: '',
                       observaciones_prg: '',
                   }),
         }));
@@ -3706,20 +3737,72 @@ export default function RadicarSolicitud({
                                                                 }
                                                             />
                                                         </Field>
-                                                        <Field label="Especialista Médico">
-                                                            <Input
+                                                        <Field
+                                                            label="Especialista Médico"
+                                                            action={
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={
+                                                                        openCrearEspecialista
+                                                                    }
+                                                                    title="Crear un médico nuevo si no aparece en la lista"
+                                                                    className="inline-flex size-5 items-center justify-center rounded-md bg-[#2d3e83]/10 text-[#2d3e83] transition-colors hover:bg-[#2d3e83]/20 dark:bg-white/10 dark:text-white"
+                                                                >
+                                                                    <UserPlus className="size-3.5" />
+                                                                </button>
+                                                            }
+                                                        >
+                                                            <Select
                                                                 value={
-                                                                    seg.especialista_medico
+                                                                    seg.especialista_medico_id
                                                                 }
-                                                                onChange={(e) =>
+                                                                onValueChange={(
+                                                                    v,
+                                                                ) =>
                                                                     setSegField(
-                                                                        'especialista_medico',
-                                                                        e.target
-                                                                            .value,
+                                                                        'especialista_medico_id',
+                                                                        v,
                                                                     )
                                                                 }
-                                                                placeholder="Nombre del especialista…"
-                                                            />
+                                                            >
+                                                                <SelectTrigger>
+                                                                    <SelectValue placeholder="Seleccione…" />
+                                                                </SelectTrigger>
+                                                                <SelectContent>
+                                                                    {medicosList.length ===
+                                                                        0 && (
+                                                                        <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                                                                            No hay
+                                                                            médicos
+                                                                            registrados.
+                                                                        </div>
+                                                                    )}
+                                                                    {medicosList.map(
+                                                                        (m) => (
+                                                                            <SelectItem
+                                                                                key={
+                                                                                    m.id
+                                                                                }
+                                                                                value={String(
+                                                                                    m.id,
+                                                                                )}
+                                                                            >
+                                                                                {[
+                                                                                    m.name,
+                                                                                    m.Apellido1,
+                                                                                    m.apellido2,
+                                                                                ]
+                                                                                    .filter(
+                                                                                        Boolean,
+                                                                                    )
+                                                                                    .join(
+                                                                                        ' ',
+                                                                                    )}
+                                                                            </SelectItem>
+                                                                        ),
+                                                                    )}
+                                                                </SelectContent>
+                                                            </Select>
                                                         </Field>
                                                         <Field
                                                             label="Observaciones Prg"

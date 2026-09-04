@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS `programacion_caso` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
   `codrad` bigint(20) unsigned NOT NULL,
   `fecha_programacion` datetime DEFAULT NULL,
-  `especialista_medico` varchar(200) DEFAULT NULL,
+  `especialista_medico_id` bigint(20) unsigned DEFAULT NULL,
   `observaciones_prg` text DEFAULT NULL,
   `user_id` bigint(20) unsigned DEFAULT NULL,
   `created_at` timestamp NULL DEFAULT NULL,
