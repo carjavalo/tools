@@ -310,7 +310,28 @@ const EMPTY_SEG = {
     fecreci: '',
     venc_anestesia: '',
     ObservacionCCX: '',
+    // Programación de cirugía: solo se diligencia cuando el Estado QX es
+    // "Programados". Se guardan en su propia tabla (programacion_caso), no en
+    // el caso ni en el seguimiento.
+    fecha_programacion: '',
+    especialista_medico: '',
+    observaciones_prg: '',
 };
+
+/**
+ * ¿El nombre de un Estado QX corresponde a "Programados"? Se compara sin
+ * tildes, sin mayúsculas y por prefijo, para que active los campos de
+ * programación tanto con "Programado" como con "Programados", sin depender de
+ * un id fijo del catálogo.
+ */
+function esEstadoProgramado(nombre: string | null | undefined): boolean {
+    return (nombre ?? '')
+        .normalize('NFD')
+        .replace(/[̀-ͯ]/g, '')
+        .trim()
+        .toLowerCase()
+        .startsWith('programad');
+}
 
 /**
  * Formulario básico del Historial: solo lo que registra el servicio al recibir
@@ -1166,6 +1187,37 @@ export default function RadicarSolicitud({
 
     const setSegField = (campo: string, valor: string) =>
         setSeg((prev) => ({ ...prev, [campo]: valor }));
+
+    // El Estado QX escogido en "Aplicar Modificaciones" corresponde a
+    // "Programados": solo entonces se piden los datos de la cirugía programada.
+    const segEsProgramado = useMemo(
+        () =>
+            esEstadoProgramado(
+                estadosSecundarios.find(
+                    (s) => String(s.id) === String(seg.codestsecundario),
+                )?.Nombre,
+            ),
+        [estadosSecundarios, seg.codestsecundario],
+    );
+
+    // Cambiar el Estado QX. Al dejar de ser "Programados" se limpian los tres
+    // campos de programación para que no viajen valores de un estado anterior.
+    const setEstadoQx = (valor: string) => {
+        const programado = esEstadoProgramado(
+            estadosSecundarios.find((s) => String(s.id) === valor)?.Nombre,
+        );
+        setSeg((prev) => ({
+            ...prev,
+            codestsecundario: valor,
+            ...(programado
+                ? {}
+                : {
+                      fecha_programacion: '',
+                      especialista_medico: '',
+                      observaciones_prg: '',
+                  }),
+        }));
+    };
 
     // ----- Modificar radicado (botón del Historial) -----
 
@@ -3595,11 +3647,8 @@ export default function RadicarSolicitud({
                                                         value={
                                                             seg.codestsecundario
                                                         }
-                                                        onValueChange={(v) =>
-                                                            setSegField(
-                                                                'codestsecundario',
-                                                                v,
-                                                            )
+                                                        onValueChange={
+                                                            setEstadoQx
                                                         }
                                                     >
                                                         <SelectTrigger>
@@ -3633,6 +3682,66 @@ export default function RadicarSolicitud({
                                                         </SelectContent>
                                                     </Select>
                                                 </Field>
+                                                {/* Programación de cirugía: se
+                                                    activa solo cuando el Estado
+                                                    QX es "Programados". Estos
+                                                    tres campos se guardan en su
+                                                    propia tabla para llevar el
+                                                    control de las cirugías
+                                                    programadas. */}
+                                                {segEsProgramado && (
+                                                    <>
+                                                        <Field label="Fecha y Hora de Programación">
+                                                            <Input
+                                                                type="datetime-local"
+                                                                value={
+                                                                    seg.fecha_programacion
+                                                                }
+                                                                onChange={(e) =>
+                                                                    setSegField(
+                                                                        'fecha_programacion',
+                                                                        e.target
+                                                                            .value,
+                                                                    )
+                                                                }
+                                                            />
+                                                        </Field>
+                                                        <Field label="Especialista Médico">
+                                                            <Input
+                                                                value={
+                                                                    seg.especialista_medico
+                                                                }
+                                                                onChange={(e) =>
+                                                                    setSegField(
+                                                                        'especialista_medico',
+                                                                        e.target
+                                                                            .value,
+                                                                    )
+                                                                }
+                                                                placeholder="Nombre del especialista…"
+                                                            />
+                                                        </Field>
+                                                        <Field
+                                                            label="Observaciones Prg"
+                                                            className="lg:col-span-2"
+                                                        >
+                                                            <Textarea
+                                                                value={
+                                                                    seg.observaciones_prg
+                                                                }
+                                                                onChange={(e) =>
+                                                                    setSegField(
+                                                                        'observaciones_prg',
+                                                                        e.target
+                                                                            .value,
+                                                                    )
+                                                                }
+                                                                rows={2}
+                                                                placeholder="Observaciones de la programación…"
+                                                            />
+                                                        </Field>
+                                                    </>
+                                                )}
                                                 <ObservacionesCcx
                                                     className="lg:col-span-3"
                                                     registrado={

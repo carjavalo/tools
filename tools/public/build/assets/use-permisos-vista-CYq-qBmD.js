@@ -1,1 +1,0 @@
-import{b as s}from"./app-BSmTs_54.js";function i(a){const{auth:t}=s().props,o=t.user?.rol;if(o==="Super Admin")return{ver:!0,crear:!0,editar:!0,borrar:!0};const r=t.permisos?.[a];if(r)return{ver:r.ver,crear:r.ver&&r.crear,editar:r.ver&&r.editar,borrar:r.ver&&r.borrar};const e=o==="Operador";return{ver:e,crear:e,editar:e,borrar:e}}export{i as u};

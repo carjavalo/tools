@@ -12,6 +12,7 @@ use App\Models\EstRadicado;
 use App\Models\EstRadisecundario;
 use App\Models\Motivo;
 use App\Models\Permiso;
+use App\Models\ProgramacionCaso;
 use App\Models\RadicarCaso;
 use App\Models\Role;
 use App\Models\SeguimientoCaso;
@@ -991,6 +992,12 @@ class RadicarCasoController extends Controller
             'venc_anestesia' => ['nullable', 'date'],
             // Estado QX: se escoge del catálogo (tabla EstRadisecundario).
             'codestsecundario' => ['nullable', 'string', 'max:5'],
+            // Programación de cirugía: solo aplica cuando el Estado QX es
+            // "Programados". Los tres campos son opcionales y no viven en el
+            // caso ni en el seguimiento, sino en su propia tabla.
+            'fecha_programacion' => ['nullable', 'date'],
+            'especialista_medico' => ['nullable', 'string', 'max:200'],
+            'observaciones_prg' => ['nullable', 'string', 'max:10000'],
             // Observaciones CCX es de solo-anexar: aquí llega únicamente el
             // texto nuevo, nunca el contenido completo del campo. Se limita a
             // un tramo razonable para que el acumulado no reviente la columna.
@@ -1000,8 +1007,18 @@ class RadicarCasoController extends Controller
         ], [
             'estRad' => 'estado actual',
             'fecreci' => 'fecha recibido serv',
+            'fecha_programacion' => 'fecha de programación',
+            'especialista_medico' => 'especialista médico',
+            'observaciones_prg' => 'observaciones de programación',
             'ObservacionCCX' => 'observaciones CCX',
         ]);
+
+        // Los campos de programación viajan aparte: no son columnas del caso ni
+        // del seguimiento, así que se sacan de $data antes de esas escrituras y
+        // se guardan en programacion_caso solo si el Estado QX es "Programados".
+        $camposProgramacion = ['fecha_programacion', 'especialista_medico', 'observaciones_prg'];
+        $datosProgramacion = Arr::only($data, $camposProgramacion);
+        $data = Arr::except($data, $camposProgramacion);
 
         // El texto nuevo se firma con quien lo anexa y se agrega al final de
         // lo que ya tenía el caso. Nadie puede borrar ni reescribir lo que
@@ -1019,7 +1036,16 @@ class RadicarCasoController extends Controller
             ]);
         }
 
-        DB::transaction(function () use ($caso, $data, $request, $entradaCcx, $acumuladoCcx) {
+        // ¿El Estado QX escogido es "Programados"? Se resuelve por el nombre del
+        // catálogo (no por un id fijo, que cambia entre bases) y solo entonces
+        // se registra la programación de cirugía.
+        $esProgramado = false;
+        if (! empty($data['codestsecundario'])) {
+            $estadoQx = EstRadisecundario::find($data['codestsecundario']);
+            $esProgramado = $estadoQx !== null && $this->esEstadoProgramado($estadoQx->Nombre);
+        }
+
+        DB::transaction(function () use ($caso, $data, $request, $entradaCcx, $acumuladoCcx, $esProgramado, $datosProgramacion) {
             // Foto del seguimiento. Estado y MAOS no se guardan aquí porque
             // seguimiento_caso no tiene esas columnas: sus cambios quedan en
             // la bitácora, que además registra el valor anterior y el nuevo.
@@ -1044,12 +1070,36 @@ class RadicarCasoController extends Controller
                 // a campo con el valor anterior y el nuevo.
                 $this->registrarCambios($caso, $antes, $request, 'seguimiento');
             }
+
+            // Cada vez que el caso pasa a "Programados" queda una fila en la
+            // tabla de programaciones con lo diligenciado (los tres campos son
+            // opcionales) más quién y cuándo. Es una bitácora de la cirugía
+            // programada, independiente del caso.
+            if ($esProgramado) {
+                ProgramacionCaso::create(array_merge($datosProgramacion, [
+                    'codrad' => $caso->codrad,
+                    'user_id' => $request->user()?->id,
+                ]));
+            }
         });
 
         return response()->json([
             'ok' => true,
             'caso' => $this->casoDetalle($caso->fresh()),
         ]);
+    }
+
+    /**
+     * ¿El nombre de un Estado QX corresponde a "Programados"? Se compara sin
+     * tildes, sin mayúsculas y por prefijo para que valga tanto "Programado"
+     * como "Programados" o "PROGRAMADA", sin depender de un id fijo del
+     * catálogo (que cambia entre la base local y la del servidor).
+     */
+    private function esEstadoProgramado(?string $nombre): bool
+    {
+        $normalizado = strtolower(trim(\Illuminate\Support\Str::ascii((string) $nombre)));
+
+        return str_starts_with($normalizado, 'programad');
     }
 
     /**
