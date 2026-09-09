@@ -13,6 +13,17 @@ use Inertia\Testing\AssertableInertia as Assert;
 // Gestor de Permisos, que hay que asignar expresamente: sin ella, solo el Super
 // Admin edita o borra una programación.
 
+test('una consulta sin sesion responde 401 y no una pagina de login', function () {
+    // La vista distingue "sin sesión" de "no hay datos" por este código. Si
+    // estas rutas empezaran a responder una redirección o un 200 con HTML, el
+    // aviso de sesión caducada dejaría de aparecer y volverían los mensajes
+    // engañosos ("no se encontró el caso", grillas vacías).
+    $this->getJson('/tools/radicar-solicitud/programados')->assertStatus(401);
+    $this->getJson('/tools/radicar-solicitud/buscar-caso?q=109')->assertStatus(401);
+    $this->putJson('/tools/radicar-solicitud/programacion/1', [])->assertStatus(401);
+    $this->deleteJson('/tools/radicar-solicitud/programacion/1')->assertStatus(401);
+});
+
 test('la grilla de programados entrega los valores crudos para editar la fila', function () {
     $admin = User::factory()->create();
     $especialista = User::factory()->create([

@@ -390,6 +390,33 @@ function formatoMoneda(valor: string | number | null | undefined): string {
 }
 
 /**
+ * La página avisa por aquí de que el servidor dejó de reconocer la sesión.
+ * Se hace con un evento del navegador y no con un estado porque los avisos
+ * nacen en cualquier punto del archivo —incluidos los componentes sueltos de
+ * más arriba, que no pueden tocar el estado de la vista.
+ */
+const EVENTO_SESION_CADUCADA = 'radicar-solicitud:sesion-caducada';
+
+/**
+ * ¿El servidor respondió que la sesión ya no vale? 401 es una petición sin
+ * sesión y 419 un token expirado: en ambos casos la página está consultando
+ * contra un servidor que ya no la reconoce.
+ *
+ * Devuelve true y levanta el aviso general para que quien llama corte ahí
+ * mismo. Sin esto, una sesión caída se disfrazaba de "no se encontró el caso"
+ * o de grilla vacía, y el usuario volvía a intentarlo una y otra vez.
+ */
+function sesionCaducada(r: Response): boolean {
+    if (r.status !== 401 && r.status !== 419) {
+        return false;
+    }
+
+    window.dispatchEvent(new Event(EVENTO_SESION_CADUCADA));
+
+    return true;
+}
+
+/**
  * Convierte una respuesta fallida en un mensaje que diga qué pasó.
  *
  * Un texto genérico obliga a ir al log del servidor para saber si fue la
@@ -397,6 +424,11 @@ function formatoMoneda(valor: string | number | null | undefined): string {
  * distinguen los casos que el usuario puede resolver por su cuenta.
  */
 async function mensajeDeError(r: Response): Promise<string> {
+    // Además del mensaje, una sesión caída levanta el aviso general: el texto
+    // suelto de un formulario se pierde de vista y el resto de la página
+    // seguiría fallando sin explicación.
+    sesionCaducada(r);
+
     if (r.status === 419) {
         return 'Tu sesión expiró. Recarga la página (F5) e intenta de nuevo.';
     }
@@ -473,8 +505,9 @@ function CupsCombobox({
                 `/tools/radicar-solicitud/buscar-cups?q=${encodeURIComponent(q)}`,
                 { headers: { Accept: 'application/json' } },
             )
-                .then((r) => r.json())
-                .then((d) => setResults(d.cups ?? []))
+                // Sin sesión, la lista vacía haría creer que el CUPS no existe.
+                .then((r) => (sesionCaducada(r) ? null : r.json()))
+                .then((d) => setResults(d?.cups ?? []))
                 .catch(() => setResults([]))
                 .finally(() => setLoading(false));
         }, 300);
@@ -713,6 +746,11 @@ export default function RadicarSolicitud({
     const [segBasicoOk, setSegBasicoOk] = useState(false);
     const [segBasicoError, setSegBasicoError] = useState<string | null>(null);
     const [borrarOpen, setBorrarOpen] = useState(false);
+    const [borrarError, setBorrarError] = useState<string | null>(null);
+    // El servidor dejó de reconocer la sesión (401 o 419). Se avisa en un
+    // diálogo y una sola vez: cada consulta que falle por lo mismo levanta el
+    // mismo aviso en lugar de inventar un mensaje sobre los datos.
+    const [sesionExpirada, setSesionExpirada] = useState(false);
     // Modal "Ver Programados": grilla con todas las radicaciones que están en
     // Estado QX = Programados, con sus datos de programación de cirugía.
     const [programadosOpen, setProgramadosOpen] = useState(false);
@@ -829,8 +867,12 @@ export default function RadicarSolicitud({
                 `/tools/radicar-solicitud/buscar-paciente?documento=${encodeURIComponent(doc)}`,
                 { headers: { Accept: 'application/json' } },
             )
-                .then((r) => r.json())
+                // Sin sesión no se borran los datos del paciente en pantalla:
+                // parecería que la cédula dejó de existir.
+                .then((r) => (sesionCaducada(r) ? null : r.json()))
                 .then((d) => {
+                    if (!d) return;
+
                     if (d.found) {
                         setPaciente({
                             tipo_Docu: d.tipo_Docu ?? '',
@@ -1013,6 +1055,15 @@ export default function RadicarSolicitud({
         setEspecialidadesList(especialidades);
     }, [especialidades]);
 
+    // Cualquier consulta de la vista que reciba un 401 o un 419 avisa por aquí.
+    useEffect(() => {
+        const alCaducar = () => setSesionExpirada(true);
+        window.addEventListener(EVENTO_SESION_CADUCADA, alCaducar);
+
+        return () =>
+            window.removeEventListener(EVENTO_SESION_CADUCADA, alCaducar);
+    }, []);
+
     // Botón + del campo Especialidad: abre el modal con lo ya digitado en el
     // combobox precargado como nombre, para no volver a escribirlo.
     const openCrearEspecialidad = () => {
@@ -1045,7 +1096,15 @@ export default function RadicarSolicitud({
                     setEspErrors(errs);
                     return null;
                 }
-                return r.ok ? r.json() : null;
+                if (!r.ok) {
+                    // El formulario solo tiene sitio para errores por campo;
+                    // una sesión caída se avisa por su cuenta.
+                    sesionCaducada(r);
+
+                    return null;
+                }
+
+                return r.json();
             })
             .then((d) => {
                 if (!d || !d.found) return;
@@ -1105,8 +1164,12 @@ export default function RadicarSolicitud({
             `/tools/radicar-solicitud/editar-paciente?documento=${encodeURIComponent(doc)}`,
             { headers: { Accept: 'application/json' } },
         )
-            .then((r) => r.json())
+            // Sin sesión no se abre el modal: se abriría en blanco, como si la
+            // cédula no estuviera registrada, y guardar crearía un duplicado.
+            .then((r) => (sesionCaducada(r) ? null : r.json()))
             .then((d) => {
+                if (!d) return;
+
                 if (d.found && d.usuario) {
                     setEditandoId(d.usuario.id);
                     setNuevoUsuario({
@@ -1165,7 +1228,15 @@ export default function RadicarSolicitud({
                     setUserErrors(errs);
                     return null;
                 }
-                return r.ok ? r.json() : null;
+                if (!r.ok) {
+                    // Igual que en especialidades: el modal solo muestra
+                    // errores por campo, así que la sesión se avisa aparte.
+                    sesionCaducada(r);
+
+                    return null;
+                }
+
+                return r.json();
             })
             .then((d) => {
                 if (!d || !d.found) return;
@@ -1249,8 +1320,20 @@ export default function RadicarSolicitud({
             `/tools/radicar-solicitud/buscar-caso?q=${encodeURIComponent(q)}`,
             { headers: { Accept: 'application/json' } },
         )
-            .then((r) => r.json())
+            // Una consulta que falla no es un caso inexistente: con la sesión
+            // caída se respondía "no se encontró", y el usuario reintentaba
+            // convencido de que el problema era el número que digitó.
+            .then(async (r) => {
+                if (!r.ok) {
+                    setHistError(await mensajeDeError(r));
+                    return null;
+                }
+
+                return r.json();
+            })
             .then((d) => {
+                if (!d) return;
+
                 if (d.found) {
                     setCaso(d.caso);
                     // MAOS refleja lo que ya tiene el caso; el resto del
@@ -1311,9 +1394,20 @@ export default function RadicarSolicitud({
         fetch('/tools/radicar-solicitud/programados', {
             headers: { Accept: 'application/json' },
         })
-            .then((r) => (r.ok ? r.json() : null))
+            .then(async (r) => {
+                // El motivo real (sesión caída, permisos, error del servidor)
+                // vale más que un "no fue posible" que no dice qué hacer.
+                if (!r.ok) {
+                    setProgramadosError(await mensajeDeError(r));
+                    return null;
+                }
+
+                return r.json();
+            })
             .then((d) => {
-                if (d && Array.isArray(d.rows)) {
+                if (d === null) return;
+
+                if (Array.isArray(d.rows)) {
                     setProgramadosRows(d.rows);
                 } else {
                     setProgramadosError(
@@ -1883,6 +1977,7 @@ export default function RadicarSolicitud({
     const borrarCaso = () => {
         if (!caso) return;
         setBorrando(true);
+        setBorrarError(null);
         fetch(`/tools/radicar-solicitud/${caso.codrad}`, {
             method: 'DELETE',
             headers: {
@@ -1890,7 +1985,16 @@ export default function RadicarSolicitud({
                 'X-XSRF-TOKEN': getXsrfToken(),
             },
         })
-            .then((r) => (r.ok ? r.json() : null))
+            .then(async (r) => {
+                // Un borrado que falla en silencio deja el diálogo abierto sin
+                // decir nada: el usuario no sabe si el caso se fue o no.
+                if (!r.ok) {
+                    setBorrarError(await mensajeDeError(r));
+                    return null;
+                }
+
+                return r.json();
+            })
             .then((d) => {
                 if (d && d.ok) {
                     const num = caso.codrad;
@@ -1946,8 +2050,12 @@ export default function RadicarSolicitud({
         fetch(`/tools/radicar-solicitud/informe?${params.toString()}`, {
             headers: { Accept: 'application/json' },
         })
-            .then((r) => r.json())
+            // Sin sesión no se vacía la grilla: un informe en blanco se lee
+            // como "no hay movimientos en ese rango".
+            .then((r) => (sesionCaducada(r) ? null : r.json()))
             .then((d) => {
+                if (!d) return;
+
                 setInfRows(d.rows ?? []);
                 setInfTruncado(Boolean(d.truncado));
             })
@@ -3236,7 +3344,10 @@ export default function RadicarSolicitud({
                                         <Button
                                             type="button"
                                             variant="ghost"
-                                            onClick={() => setBorrarOpen(true)}
+                                            onClick={() => {
+                                                setBorrarError(null);
+                                                setBorrarOpen(true);
+                                            }}
                                             disabled={!caso}
                                             title={
                                                 caso
@@ -5415,6 +5526,11 @@ export default function RadicarSolicitud({
                             ¿Deseas continuar?
                         </DialogDescription>
                     </DialogHeader>
+
+                    {borrarError && (
+                        <p className="text-sm text-red-600">{borrarError}</p>
+                    )}
+
                     <DialogFooter>
                         <Button
                             type="button"
@@ -6165,6 +6281,51 @@ export default function RadicarSolicitud({
                                 <Save className="size-4" />
                             )}
                             Guardar cambios
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Sesión caducada. Se puede cerrar a propósito: si había texto
+                escrito sin guardar, esta es la única oportunidad de copiarlo
+                antes de volver a entrar. */}
+            <Dialog open={sesionExpirada} onOpenChange={setSesionExpirada}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <Lock className="size-5 text-amber-600 dark:text-amber-400" />
+                            Tu sesión expiró
+                        </DialogTitle>
+                        <DialogDescription>
+                            El servidor dejó de reconocer esta sesión, así que
+                            las consultas y los guardados ya no llegan. Nada de
+                            lo que veas en pantalla se está guardando. Vuelve a
+                            iniciar sesión para seguir trabajando; si tenías
+                            algo escrito sin guardar, cierra este aviso y
+                            cópialo antes de salir.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => setSesionExpirada(false)}
+                        >
+                            Cerrar
+                        </Button>
+                        <Button
+                            type="button"
+                            // Recarga completa a propósito: hay que traer una
+                            // sesión y un token nuevos, y la página que quedó
+                            // en pantalla ya no sirve.
+                            onClick={() => {
+                                window.location.href = '/login';
+                            }}
+                            className="gap-2"
+                            style={{ backgroundColor: BRAND }}
+                        >
+                            <Lock className="size-4" />
+                            Iniciar sesión
                         </Button>
                     </DialogFooter>
                 </DialogContent>
