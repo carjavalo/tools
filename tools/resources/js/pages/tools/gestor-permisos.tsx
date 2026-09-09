@@ -766,11 +766,28 @@ export default function GestorPermisos({
                         </table>
                     </div>
                     <div className="flex flex-col items-center justify-between gap-3 border-t p-4 sm:flex-row">
-                        <p className="text-xs text-muted-foreground">
-                            Si «Ver» está apagado, el rol no ve la opción en el
-                            menú ni puede abrir la vista, y sus demás acciones
-                            quedan bloqueadas.
-                        </p>
+                        <div className="grid gap-1">
+                            <p className="text-xs text-muted-foreground">
+                                Si «Ver» está apagado, el rol no ve la opción en
+                                el menú ni puede abrir la vista, y sus demás
+                                acciones quedan bloqueadas.
+                            </p>
+                            {/* Esta sub-vista no es una pantalla sino tres
+                                botones, así que sus acciones no significan lo
+                                mismo que en el resto de la matriz: sin decirlo
+                                aquí, no hay forma de saber qué activa cada
+                                interruptor. */}
+                            <p className="text-xs text-muted-foreground">
+                                En <em>Grilla ver programados</em> cada acción
+                                es un botón del modal «Radicaciones programadas
+                                para cirugía» del Historial:{' '}
+                                <strong>Ver</strong> abre el radicado,{' '}
+                                <strong>Editar</strong> corrige la programación
+                                y <strong>Borrar</strong> la elimina. Viene
+                                apagada: mientras no la marques aquí, solo el
+                                Super Admin ve esos botones.
+                            </p>
+                        </div>
                         <Button
                             onClick={guardar}
                             disabled={saving || !roleId}

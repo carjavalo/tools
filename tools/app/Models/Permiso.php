@@ -36,6 +36,12 @@ class Permiso extends Model
         ['key' => 'radicar-solicitud-seguimiento-basico', 'titulo' => 'Formulario básico Cotizaciones de Conceptos No Convenidos (Historial)', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver']],
         ['key' => 'radicar-solicitud-seguimiento', 'titulo' => 'Formulario Aplicar Modificaciones (Historial)', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver']],
         ['key' => 'radicar-solicitud-grilla', 'titulo' => 'Grilla de Radicaciones (Historial)', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver']],
+        // Botones por fila del modal "Radicaciones programadas para cirugía".
+        // Cada acción manda sobre su propio botón: ver = Ver radicado,
+        // editar = Editar programación, borrar = Borrar programación. Como el
+        // formulario básico, viene apagada: sin asignarla al rol solo el Super
+        // Admin ve los botones.
+        ['key' => 'radicar-solicitud-programados', 'titulo' => 'Grilla ver programados', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver', 'editar', 'borrar']],
         ['key' => 'gestion-usuarios', 'titulo' => 'Gestión de Usuarios', 'grupo' => 'Herramientas', 'acciones' => ['ver', 'crear', 'editar', 'borrar']],
         ['key' => 'gestion-roles', 'titulo' => 'Gestión de Roles', 'grupo' => 'Herramientas', 'acciones' => ['ver', 'crear', 'editar', 'borrar']],
         ['key' => 'gestion-eps', 'titulo' => 'Gestión de EPS', 'grupo' => 'Herramientas', 'acciones' => ['ver', 'crear', 'editar', 'borrar']],
@@ -54,6 +60,18 @@ class Permiso extends Model
         // desde la interfaz, porque un registro de auditoría alterable no
         // sirve como evidencia.
         ['key' => 'herramientas-seguimiento', 'titulo' => 'Herramientas - Seguimiento', 'grupo' => 'Herramientas', 'acciones' => ['ver']],
+    ];
+
+    /**
+     * Vistas que no se activan solas: mientras el rol no tenga fila guardada,
+     * se dan por negadas. El resto conserva la regla histórica —sin
+     * configurar, se permite—, que no puede aplicarse a una opción nueva sin
+     * repartirla de golpe entre todos los roles.
+     *
+     * @var list<string>
+     */
+    public const VISTAS_OPT_IN = [
+        'radicar-solicitud-programados',
     ];
 
     /**

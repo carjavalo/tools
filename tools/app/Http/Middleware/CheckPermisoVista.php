@@ -46,6 +46,24 @@ class CheckPermisoVista
         if ($vista === 'radicar-solicitud') {
             $sub = $request->segment(3);
             $sub4 = $request->segment(4);
+
+            // Botones de la grilla "Ver programados": editar y borrar una
+            // programación de cirugía. Se rigen por su propia sub-vista y cada
+            // botón por su propia acción. Hay que asignarla expresamente: sin
+            // fila guardada no se autoriza (el Super Admin ya pasó arriba).
+            if ($sub === 'programacion') {
+                $accionGrilla = $request->isMethod('DELETE') ? 'borrar' : 'editar';
+                $permisoGrilla = Permiso::where('role_id', $role->id)
+                    ->where('vista', 'radicar-solicitud-programados')
+                    ->first();
+
+                if (! $permisoGrilla || ! $permisoGrilla->ver || ! $permisoGrilla->{$accionGrilla}) {
+                    return $this->denegar($request, $accionGrilla);
+                }
+
+                return $next($request);
+            }
+
             $tab = match (true) {
                 $sub === 'buscar-caso' => 'radicar-solicitud-historial',
                 $sub === 'informe' => 'radicar-solicitud-informes',

@@ -41,13 +41,17 @@ class GestorPermisosController extends Controller
 
         $permisos = collect(Permiso::VISTAS)->mapWithKeys(function ($vista) use ($configurados) {
             $p = $configurados->get($vista['key']);
+            // Las opciones que hay que asignar expresamente arrancan apagadas:
+            // mostrarlas encendidas sin fila guardada haría creer que el rol ya
+            // las tiene, cuando el sistema se las niega.
+            $defecto = ! in_array($vista['key'], Permiso::VISTAS_OPT_IN, true);
 
             return [
                 $vista['key'] => [
-                    'ver' => $p?->ver ?? true,
-                    'crear' => $p?->crear ?? true,
-                    'editar' => $p?->editar ?? true,
-                    'borrar' => $p?->borrar ?? true,
+                    'ver' => $p?->ver ?? $defecto,
+                    'crear' => $p?->crear ?? $defecto,
+                    'editar' => $p?->editar ?? $defecto,
+                    'borrar' => $p?->borrar ?? $defecto,
                 ],
             ];
         })->all();

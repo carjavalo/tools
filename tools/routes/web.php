@@ -86,6 +86,12 @@ Route::prefix('tools')->name('tools.')->group(function () {
         Route::get('radicar-solicitud/cotizacion/{cotizacion}/adjunto', [App\Http\Controllers\RadicarCasoController::class, 'verAdjuntoCotizacion'])->name('radicar-solicitud.cotizacion-adjunto');
         Route::get('radicar-solicitud/informe', [App\Http\Controllers\RadicarCasoController::class, 'informe'])->name('radicar-solicitud.informe');
         Route::get('radicar-solicitud/programados', [App\Http\Controllers\RadicarCasoController::class, 'programados'])->name('radicar-solicitud.programados');
+        // Botones de cada fila de la grilla "Ver programados". Van bajo
+        // /programacion/{id} —y no bajo /{caso}— porque editan la programación
+        // de cirugía, no la radicación: así el middleware los distingue y los
+        // rige por la sub-vista "Grilla ver programados".
+        Route::put('radicar-solicitud/programacion/{programacion}', [App\Http\Controllers\RadicarCasoController::class, 'actualizarProgramacion'])->name('radicar-solicitud.actualizar-programacion');
+        Route::delete('radicar-solicitud/programacion/{programacion}', [App\Http\Controllers\RadicarCasoController::class, 'destroyProgramacion'])->name('radicar-solicitud.destroy-programacion');
         Route::post('radicar-solicitud/{caso}/seguimiento', [App\Http\Controllers\RadicarCasoController::class, 'aplicarModificacion'])->name('radicar-solicitud.seguimiento');
         Route::put('radicar-solicitud/{caso}', [App\Http\Controllers\RadicarCasoController::class, 'actualizarCaso'])->name('radicar-solicitud.actualizar-caso');
         Route::post('radicar-solicitud/{caso}/cotizaciones', [App\Http\Controllers\RadicarCasoController::class, 'guardarCotizaciones'])->name('radicar-solicitud.cotizaciones');

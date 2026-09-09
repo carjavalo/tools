@@ -1164,6 +1164,11 @@ class RadicarCasoController extends Controller
                 'medico' => $this->nombreUsuario($med) ?? '—',
                 'especialista' => $this->nombreUsuario($esp) ?? '—',
                 'fechaProgramacion' => optional($prog->fecha_programacion)->format('Y-m-d H:i'),
+                // Valores crudos para el formulario de edición de la fila: el
+                // input datetime-local y el selector de especialista no
+                // trabajan con el texto que se muestra en la grilla.
+                'fechaProgramacionInput' => optional($prog->fecha_programacion)->format('Y-m-d\TH:i'),
+                'especialistaId' => $prog->especialista_medico_id,
                 'paqueteUrl' => $caso && $caso->paquete
                     ? route('tools.radicar-solicitud.paquete', $caso->codrad)
                     : null,
@@ -1178,6 +1183,121 @@ class RadicarCasoController extends Controller
         })->values()->all();
 
         return response()->json(['rows' => $rows]);
+    }
+
+    /**
+     * Editar una programación desde la grilla "Ver programados". Solo toca los
+     * tres campos de la cirugía programada —fecha, especialista y
+     * observaciones—: la radicación en sí no se modifica desde aquí.
+     *
+     * Quién puede hacerlo lo decide la sub-vista "Grilla ver programados" del
+     * Gestor de Permisos (acción editar), que valida el middleware.
+     */
+    public function actualizarProgramacion(Request $request, ProgramacionCaso $programacion): JsonResponse
+    {
+        $data = $request->validate([
+            'fecha_programacion' => ['nullable', 'date'],
+            'especialista_medico_id' => ['nullable', 'integer', Rule::exists('users', 'id')->where('rol', 'Medico')],
+            'observaciones_prg' => ['nullable', 'string', 'max:10000'],
+        ], [], [
+            'fecha_programacion' => 'fecha de programación',
+            'especialista_medico_id' => 'especialista médico',
+            'observaciones_prg' => 'observaciones de programación',
+        ]);
+
+        $etiquetas = [
+            'fecha_programacion' => 'Fecha y Hora de Programación',
+            'especialista_medico_id' => 'Especialista Médico',
+            'observaciones_prg' => 'Observaciones Prg',
+        ];
+
+        // El antes se congela en texto legible antes de escribir: después del
+        // update ya no hay forma de reconstruirlo.
+        $antes = [];
+        foreach ($etiquetas as $campo => $etiqueta) {
+            $antes[$campo] = $this->valorProgramacion($campo, $programacion->$campo);
+        }
+
+        // Aquí se corrige la programación, no se anexa a ella: un campo que el
+        // usuario dejó vacío se guarda vacío.
+        $programacion->update([
+            'fecha_programacion' => ($data['fecha_programacion'] ?? '') !== '' ? $data['fecha_programacion'] : null,
+            'especialista_medico_id' => ($data['especialista_medico_id'] ?? '') !== '' ? $data['especialista_medico_id'] : null,
+            'observaciones_prg' => trim((string) ($data['observaciones_prg'] ?? '')) !== '' ? $data['observaciones_prg'] : null,
+        ]);
+
+        // La corrección queda en la bitácora del caso, igual que los cambios
+        // del formulario de seguimiento: una programación reescrita sin rastro
+        // dejaría el historial contando algo distinto de lo que ve la grilla.
+        foreach ($etiquetas as $campo => $etiqueta) {
+            $despues = $this->valorProgramacion($campo, $programacion->$campo);
+
+            if ($antes[$campo] === $despues) {
+                continue;
+            }
+
+            $this->registrarEvento(
+                $programacion->codrad,
+                $request,
+                'programacion',
+                $etiqueta,
+                $antes[$campo],
+                $despues,
+            );
+        }
+
+        return response()->json(['ok' => true]);
+    }
+
+    /**
+     * Borrar una programación desde la grilla "Ver programados". Se elimina la
+     * fila de la bitácora de programaciones; el caso y su Estado QX quedan
+     * como están, porque lo que se corrige es el registro de la cirugía
+     * programada y no el estado de la radicación.
+     */
+    public function destroyProgramacion(Request $request, ProgramacionCaso $programacion): JsonResponse
+    {
+        // Lo borrado queda descrito en la bitácora: sin la fila, el caso no
+        // conservaría ninguna huella de que estuvo programado.
+        $resumen = sprintf(
+            'Fecha: %s — Especialista: %s',
+            $this->valorProgramacion('fecha_programacion', $programacion->fecha_programacion),
+            $this->valorProgramacion('especialista_medico_id', $programacion->especialista_medico_id),
+        );
+
+        $codrad = $programacion->codrad;
+        $programacion->delete();
+
+        $this->registrarEvento(
+            $codrad,
+            $request,
+            'programacion',
+            'Programación de cirugía eliminada',
+            $resumen,
+            null,
+        );
+
+        return response()->json(['ok' => true]);
+    }
+
+    /**
+     * Texto legible de un campo de la programación para la bitácora: el nombre
+     * del especialista en lugar de su id, la fecha con hora y un guion cuando
+     * el campo quedó vacío.
+     */
+    private function valorProgramacion(string $campo, mixed $valor): string
+    {
+        if ($valor === null || $valor === '') {
+            return '—';
+        }
+
+        return match ($campo) {
+            'fecha_programacion' => $valor instanceof \DateTimeInterface
+                ? $valor->format('Y-m-d H:i')
+                : (string) $valor,
+            'especialista_medico_id' => $this->nombreUsuario(User::find($valor)) ?? (string) $valor,
+            default => (string) $valor,
+        };
     }
 
     /**

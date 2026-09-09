@@ -130,6 +130,11 @@ interface ProgramadoRow {
     medico: string;
     especialista: string;
     fechaProgramacion: string | null;
+    // Valores crudos de la fila, para el formulario de edición: el input
+    // datetime-local y el selector de especialista no trabajan con el texto
+    // que se muestra en la grilla.
+    fechaProgramacionInput: string | null;
+    especialistaId: number | null;
     paqueteUrl: string | null;
     cotizaciones: { id: number; tercero: string; url: string }[];
     observaciones: string;
@@ -719,6 +724,27 @@ export default function RadicarSolicitud({
     // Filtro de texto del modal: busca en N° caso, documento, paciente,
     // especialidad y médico a la vez.
     const [programadosFiltro, setProgramadosFiltro] = useState('');
+    // Aviso de lo último que se hizo sobre una fila (editar o borrar). Vive
+    // aparte del error para que un guardado bueno no borre un mensaje de fallo
+    // anterior ni al revés.
+    const [programadosOk, setProgramadosOk] = useState<string | null>(null);
+    // Editar una programación desde la grilla: el formulario trabaja sobre una
+    // copia de la fila, así cancelar no deja la grilla a medio cambiar.
+    const [progEditOpen, setProgEditOpen] = useState(false);
+    const [progEditRow, setProgEditRow] = useState<ProgramadoRow | null>(null);
+    const [progEdit, setProgEdit] = useState({
+        fecha_programacion: '',
+        especialista_medico_id: '',
+        observaciones_prg: '',
+    });
+    const [progEditSaving, setProgEditSaving] = useState(false);
+    const [progEditError, setProgEditError] = useState<string | null>(null);
+    // Borrar una programación: la fila pendiente de confirmación.
+    const [progBorrarRow, setProgBorrarRow] = useState<ProgramadoRow | null>(
+        null,
+    );
+    const [progBorrando, setProgBorrando] = useState(false);
+    const [progBorrarError, setProgBorrarError] = useState<string | null>(null);
     // Modificar radicado (botón del Historial)
     const [modifOpen, setModifOpen] = useState(false);
     const [modifSaving, setModifSaving] = useState(false);
@@ -1276,12 +1302,12 @@ export default function RadicarSolicitud({
         }));
     };
 
-    // Abre el modal "Ver Programados" y trae la grilla desde el servidor.
-    const abrirProgramados = () => {
-        setProgramadosOpen(true);
+    // Trae la grilla desde el servidor. Se usa al abrir el modal y después de
+    // editar o borrar una fila: como el orden depende de la fecha programada,
+    // corregirla puede mover la fila de sitio y solo el servidor sabe dónde.
+    const cargarProgramados = () => {
         setProgramadosLoading(true);
         setProgramadosError(null);
-        setProgramadosFiltro('');
         fetch('/tools/radicar-solicitud/programados', {
             headers: { Accept: 'application/json' },
         })
@@ -1296,9 +1322,124 @@ export default function RadicarSolicitud({
                 }
             })
             .catch(() =>
-                setProgramadosError('Ocurrió un error al cargar las programaciones.'),
+                setProgramadosError(
+                    'Ocurrió un error al cargar las programaciones.',
+                ),
             )
             .finally(() => setProgramadosLoading(false));
+    };
+
+    // Abre el modal "Ver Programados" y trae la grilla desde el servidor.
+    const abrirProgramados = () => {
+        setProgramadosOpen(true);
+        setProgramadosFiltro('');
+        setProgramadosOk(null);
+        cargarProgramados();
+    };
+
+    // Botón "Ver radicado" de la fila: cierra el modal y deja el caso abierto
+    // en el Historial, que es donde se consulta y se modifica.
+    const verRadicadoProgramado = (r: ProgramadoRow) => {
+        setProgramadosOpen(false);
+        setTab('historial');
+        setHistQuery(String(r.codrad));
+        consultarCaso(String(r.codrad));
+    };
+
+    // Botón "Editar" de la fila: abre el formulario con lo que hoy tiene la
+    // programación.
+    const abrirEditarProgramacion = (r: ProgramadoRow) => {
+        setProgEditRow(r);
+        setProgEdit({
+            fecha_programacion: r.fechaProgramacionInput ?? '',
+            especialista_medico_id: r.especialistaId
+                ? String(r.especialistaId)
+                : '',
+            observaciones_prg: r.observaciones ?? '',
+        });
+        setProgEditError(null);
+        setProgEditOpen(true);
+    };
+
+    const guardarProgramacion = () => {
+        if (!progEditRow) return;
+        setProgEditSaving(true);
+        setProgEditError(null);
+        fetch(`/tools/radicar-solicitud/programacion/${progEditRow.id}`, {
+            method: 'PUT',
+            headers: {
+                Accept: 'application/json',
+                'Content-Type': 'application/json',
+                'X-XSRF-TOKEN': getXsrfToken(),
+            },
+            body: JSON.stringify(progEdit),
+        })
+            .then(async (r) => {
+                if (r.status === 422) {
+                    const d = await r.json();
+                    const primero = Object.values(
+                        (d.errors ?? {}) as Record<string, string[]>,
+                    )[0]?.[0];
+                    setProgEditError(
+                        primero ?? 'Revisa los datos de la programación.',
+                    );
+                    return null;
+                }
+                if (!r.ok) {
+                    setProgEditError(await mensajeDeError(r));
+                    return null;
+                }
+                return r.json();
+            })
+            .then((d) => {
+                if (d && d.ok) {
+                    const num = progEditRow.codrad;
+                    setProgEditOpen(false);
+                    setProgEditRow(null);
+                    setProgramadosOk(
+                        `La programación del caso #${num} fue actualizada.`,
+                    );
+                    cargarProgramados();
+                }
+            })
+            .catch(() =>
+                setProgEditError('No fue posible guardar la programación.'),
+            )
+            .finally(() => setProgEditSaving(false));
+    };
+
+    const borrarProgramacion = () => {
+        if (!progBorrarRow) return;
+        setProgBorrando(true);
+        setProgBorrarError(null);
+        fetch(`/tools/radicar-solicitud/programacion/${progBorrarRow.id}`, {
+            method: 'DELETE',
+            headers: {
+                Accept: 'application/json',
+                'X-XSRF-TOKEN': getXsrfToken(),
+            },
+        })
+            .then(async (r) => {
+                if (!r.ok) {
+                    setProgBorrarError(await mensajeDeError(r));
+                    return null;
+                }
+                return r.json();
+            })
+            .then((d) => {
+                if (d && d.ok) {
+                    const num = progBorrarRow.codrad;
+                    setProgBorrarRow(null);
+                    setProgramadosOk(
+                        `Se eliminó la programación del caso #${num}.`,
+                    );
+                    cargarProgramados();
+                }
+            })
+            .catch(() =>
+                setProgBorrarError('No fue posible eliminar la programación.'),
+            )
+            .finally(() => setProgBorrando(false));
     };
 
     // Filas del modal ya filtradas por el texto. Coincide si el término aparece
@@ -2014,6 +2155,26 @@ export default function RadicarSolicitud({
     const puedeAplicarModificacionesBasico =
         esSuperAdmin ||
         permisosUsuario['radicar-solicitud-seguimiento-basico']?.ver === true;
+
+    // Botones de cada fila del modal "Ver programados". Se rigen por la
+    // sub-vista "Grilla ver programados" del Gestor de Permisos: "ver" habilita
+    // el botón Ver radicado y es la llave de los otros dos, tal como en el
+    // resto de la matriz de permisos. Sin asignarla al rol, solo el Super Admin
+    // ve los botones: son acciones sobre lo ya programado y no se reparten
+    // solas.
+    const programadosCfg = permisosUsuario['radicar-solicitud-programados'];
+    const puedeVerRadicadoProgramado =
+        esSuperAdmin || programadosCfg?.ver === true;
+    const puedeEditarProgramacion =
+        esSuperAdmin ||
+        (programadosCfg?.ver === true && programadosCfg?.editar === true);
+    const puedeBorrarProgramacion =
+        esSuperAdmin ||
+        (programadosCfg?.ver === true && programadosCfg?.borrar === true);
+    const hayAccionesProgramados =
+        puedeVerRadicadoProgramado ||
+        puedeEditarProgramacion ||
+        puedeBorrarProgramacion;
 
     const tabs = [
         { key: 'nueva' as const, label: 'NUEVA RADICACIÓN', icon: FilePlus2 },
@@ -5325,6 +5486,12 @@ export default function RadicarSolicitud({
                         </div>
                     )}
 
+                    {programadosOk && (
+                        <div className="rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700 dark:border-green-900 dark:bg-green-950 dark:text-green-300">
+                            {programadosOk}
+                        </div>
+                    )}
+
                     <div className="max-h-[65vh] overflow-auto rounded-lg border">
                         <table className="w-full min-w-[1000px] text-sm">
                             <thead className="sticky top-0 z-10 bg-muted/80 backdrop-blur">
@@ -5345,13 +5512,20 @@ export default function RadicarSolicitud({
                                     <th className="px-3 py-2">
                                         Observaciones Prg
                                     </th>
+                                    {hayAccionesProgramados && (
+                                        <th className="px-3 py-2 text-center">
+                                            Acciones
+                                        </th>
+                                    )}
                                 </tr>
                             </thead>
                             <tbody className="divide-y">
                                 {programadosLoading && (
                                     <tr>
                                         <td
-                                            colSpan={10}
+                                            colSpan={
+                                                hayAccionesProgramados ? 11 : 10
+                                            }
                                             className="px-3 py-8 text-center text-muted-foreground"
                                         >
                                             <LoaderCircle className="mx-auto size-5 animate-spin" />
@@ -5362,7 +5536,11 @@ export default function RadicarSolicitud({
                                     programadosFiltrados.length === 0 && (
                                         <tr>
                                             <td
-                                                colSpan={10}
+                                                colSpan={
+                                                    hayAccionesProgramados
+                                                        ? 11
+                                                        : 10
+                                                }
                                                 className="px-3 py-8 text-center text-muted-foreground"
                                             >
                                                 {programadosRows.length === 0
@@ -5436,6 +5614,68 @@ export default function RadicarSolicitud({
                                             <td className="max-w-xs px-3 py-2 whitespace-pre-wrap text-muted-foreground">
                                                 {r.observaciones || '—'}
                                             </td>
+                                            {hayAccionesProgramados && (
+                                                <td className="px-3 py-2">
+                                                    <div className="flex items-center justify-center gap-1">
+                                                        {puedeVerRadicadoProgramado && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() =>
+                                                                    verRadicadoProgramado(
+                                                                        r,
+                                                                    )
+                                                                }
+                                                                title={`Ver el radicado #${r.codrad} en el Historial`}
+                                                                className="inline-flex size-8 items-center justify-center rounded-md text-[#2d3e83] transition-colors hover:bg-[#2d3e83]/10 dark:text-white dark:hover:bg-white/10"
+                                                            >
+                                                                <Eye className="size-4" />
+                                                                <span className="sr-only">
+                                                                    Ver radicado
+                                                                </span>
+                                                            </button>
+                                                        )}
+                                                        {puedeEditarProgramacion && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() =>
+                                                                    abrirEditarProgramacion(
+                                                                        r,
+                                                                    )
+                                                                }
+                                                                title="Editar la programación de esta cirugía"
+                                                                className="inline-flex size-8 items-center justify-center rounded-md text-amber-600 transition-colors hover:bg-amber-50 dark:text-amber-400 dark:hover:bg-amber-950"
+                                                            >
+                                                                <Pencil className="size-4" />
+                                                                <span className="sr-only">
+                                                                    Editar
+                                                                    programación
+                                                                </span>
+                                                            </button>
+                                                        )}
+                                                        {puedeBorrarProgramacion && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    setProgBorrarError(
+                                                                        null,
+                                                                    );
+                                                                    setProgBorrarRow(
+                                                                        r,
+                                                                    );
+                                                                }}
+                                                                title="Eliminar esta programación"
+                                                                className="inline-flex size-8 items-center justify-center rounded-md text-red-600 transition-colors hover:bg-red-50 dark:hover:bg-red-950"
+                                                            >
+                                                                <Trash2 className="size-4" />
+                                                                <span className="sr-only">
+                                                                    Borrar
+                                                                    programación
+                                                                </span>
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                </td>
+                                            )}
                                         </tr>
                                     ))}
                             </tbody>
@@ -5457,6 +5697,167 @@ export default function RadicarSolicitud({
                             onClick={() => setProgramadosOpen(false)}
                         >
                             Cerrar
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Editar una programación desde la grilla "Ver programados". Solo
+                los tres campos de la cirugía programada: el caso se modifica
+                desde el Historial, no desde aquí. */}
+            <Dialog open={progEditOpen} onOpenChange={setProgEditOpen}>
+                <DialogContent className="sm:max-w-lg">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <Pencil className="size-5 text-[#2d3e83] dark:text-white" />
+                            Editar programación — Caso #{progEditRow?.codrad}
+                        </DialogTitle>
+                        <DialogDescription>
+                            {progEditRow?.paciente}
+                            {progEditRow?.documento
+                                ? ` — ${progEditRow.documento}`
+                                : ''}
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="grid gap-4">
+                        <Field label="Fecha y Hora de Programación">
+                            <Input
+                                type="datetime-local"
+                                value={progEdit.fecha_programacion}
+                                onChange={(e) =>
+                                    setProgEdit((prev) => ({
+                                        ...prev,
+                                        fecha_programacion: e.target.value,
+                                    }))
+                                }
+                            />
+                        </Field>
+                        <Field label="Especialista Médico">
+                            <Select
+                                value={progEdit.especialista_medico_id}
+                                onValueChange={(v) =>
+                                    setProgEdit((prev) => ({
+                                        ...prev,
+                                        especialista_medico_id: v,
+                                    }))
+                                }
+                            >
+                                <SelectTrigger>
+                                    <SelectValue placeholder="Seleccione…" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {medicosList.length === 0 && (
+                                        <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                                            No hay médicos registrados.
+                                        </div>
+                                    )}
+                                    {medicosList.map((m) => (
+                                        <SelectItem
+                                            key={m.id}
+                                            value={String(m.id)}
+                                        >
+                                            {[m.name, m.Apellido1, m.apellido2]
+                                                .filter(Boolean)
+                                                .join(' ')}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </Field>
+                        <Field label="Observaciones Prg">
+                            <Textarea
+                                value={progEdit.observaciones_prg}
+                                onChange={(e) =>
+                                    setProgEdit((prev) => ({
+                                        ...prev,
+                                        observaciones_prg: e.target.value,
+                                    }))
+                                }
+                                rows={3}
+                                placeholder="Observaciones de la programación…"
+                            />
+                        </Field>
+                    </div>
+
+                    {progEditError && (
+                        <p className="text-sm text-red-600">{progEditError}</p>
+                    )}
+
+                    <DialogFooter>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => setProgEditOpen(false)}
+                        >
+                            Cancelar
+                        </Button>
+                        <Button
+                            type="button"
+                            onClick={guardarProgramacion}
+                            disabled={progEditSaving}
+                            className="gap-2"
+                        >
+                            {progEditSaving ? (
+                                <LoaderCircle className="size-4 animate-spin" />
+                            ) : (
+                                <Save className="size-4" />
+                            )}
+                            Guardar cambios
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Borrar una programación desde la grilla "Ver programados". */}
+            <Dialog
+                open={progBorrarRow !== null}
+                onOpenChange={(open) => {
+                    if (!open) setProgBorrarRow(null);
+                }}
+            >
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>Eliminar programación</DialogTitle>
+                        <DialogDescription>
+                            Esta acción no se puede deshacer. Se eliminará la
+                            programación de cirugía del caso{' '}
+                            <span className="font-semibold text-foreground">
+                                #{progBorrarRow?.codrad}
+                            </span>
+                            {progBorrarRow?.fechaProgramacion
+                                ? ` (${progBorrarRow.fechaProgramacion})`
+                                : ''}
+                            . El caso y su Estado QX no se modifican. ¿Deseas
+                            continuar?
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    {progBorrarError && (
+                        <p className="text-sm text-red-600">
+                            {progBorrarError}
+                        </p>
+                    )}
+
+                    <DialogFooter>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => setProgBorrarRow(null)}
+                        >
+                            Cancelar
+                        </Button>
+                        <Button
+                            type="button"
+                            variant="destructive"
+                            onClick={borrarProgramacion}
+                            disabled={progBorrando}
+                            className="gap-2"
+                        >
+                            {progBorrando && (
+                                <LoaderCircle className="size-4 animate-spin" />
+                            )}
+                            Eliminar
                         </Button>
                     </DialogFooter>
                 </DialogContent>
