@@ -1349,10 +1349,34 @@ class RadicarCasoController extends Controller
         $documentoF = trim((string) $request->query('documento', ''));
         $consecutivoF = trim((string) $request->query('consecutivo', ''));
 
+        // Período de programación: la Fecha y Hora Prog. de la cirugía, la
+        // misma de la grilla "Ver programados". Se valida porque, a
+        // diferencia de los demás filtros, se compara como fecha en SQL.
+        $periodo = $request->validate([
+            'programadoInicial' => ['nullable', 'date'],
+            'programadoFinal' => ['nullable', 'date'],
+        ], [], [
+            'programadoInicial' => 'fecha inicial programados',
+            'programadoFinal' => 'fecha final programados',
+        ]);
+        $progInicialF = $periodo['programadoInicial'] ?? null;
+        $progFinalF = $periodo['programadoFinal'] ?? null;
+
         // 1) Radicaciones que entran al informe. El filtrado por atributos del
         //    caso (estado, especialidad, subespecialidad, médico, documento)
         //    se hace aquí, en SQL, y no fila por fila después del límite.
         $casos = RadicarCaso::query()
+            // Con período de programación solo entran las radicaciones con
+            // alguna cirugía programada dentro de él. Vale cualquiera de sus
+            // programaciones, no solo la última: la grilla "Ver programados"
+            // también las muestra todas.
+            ->when($progInicialF !== null || $progFinalF !== null, fn ($q) => $q->whereIn(
+                'codrad',
+                ProgramacionCaso::query()
+                    ->when($progInicialF !== null, fn ($p) => $p->whereDate('fecha_programacion', '>=', $progInicialF))
+                    ->when($progFinalF !== null, fn ($p) => $p->whereDate('fecha_programacion', '<=', $progFinalF))
+                    ->select('codrad'),
+            ))
             ->when($consecutivoF !== '', fn ($q) => $q->where('codrad', (int) $consecutivoF))
             ->when($documentoF !== '', fn ($q) => $q->where('Ndocumento', $documentoF))
             ->when($estadoF !== '', fn ($q) => $q->where('estRad', $estadoF))
@@ -1421,6 +1445,15 @@ class RadicarCasoController extends Controller
             ->get(['id', 'codrad', 'tercero'])
             ->groupBy('codrad');
 
+        // Fechas de cirugía programada de cada radicación, la más reciente
+        // primero. Van todas —también las de fuera del período filtrado—: una
+        // reprogramación posterior es justo lo que interesa ver.
+        $fechasProgramacion = ProgramacionCaso::whereIn('codrad', $codrads)
+            ->whereNotNull('fecha_programacion')
+            ->orderByDesc('fecha_programacion')
+            ->get(['codrad', 'fecha_programacion'])
+            ->groupBy('codrad');
+
         $rangoFecha = function ($query) use ($request) {
             return $query
                 ->when($request->filled('fechaInicial'), fn ($q) => $q->whereDate('created_at', '>=', $request->query('fechaInicial')))
@@ -1485,7 +1518,7 @@ class RadicarCasoController extends Controller
             ->unique()
             ->flip();
 
-        $datosCaso = function (RadicarCaso $caso) use ($estados, $usuarios, $subesp, $especialidades, $pacientes, $adjuntosCotizacion, $convenios, $anexados, $codigosCups) {
+        $datosCaso = function (RadicarCaso $caso) use ($estados, $usuarios, $subesp, $especialidades, $pacientes, $adjuntosCotizacion, $convenios, $anexados, $codigosCups, $fechasProgramacion) {
             $med = $caso->codMed ? $usuarios->get($caso->codMed) : null;
             $pac = $caso->Ndocumento ? $pacientes->get($caso->Ndocumento) : null;
             $procs = $anexados->get((string) $caso->codrad) ?? collect();
@@ -1540,6 +1573,9 @@ class RadicarCasoController extends Controller
                     ->filter()->unique()->values()->all(),
                 'autorizacionesCups' => $procs
                     ->pluck('N_Autorizacion')->filter()->unique()->values()->all(),
+                'fechasProgramacion' => ($fechasProgramacion->get($caso->codrad) ?? collect())
+                    ->map(fn (ProgramacionCaso $p) => $p->fecha_programacion->format('Y-m-d H:i'))
+                    ->unique()->values()->all(),
             ];
         };
 

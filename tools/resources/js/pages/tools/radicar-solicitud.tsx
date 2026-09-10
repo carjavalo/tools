@@ -267,6 +267,9 @@ interface InformeRow {
     // PDFs de los conceptos cotizados del caso. Se repiten en todas las filas
     // del mismo caso, igual que el estado o el paquete.
     cotizaciones: { id: number; tercero: string; url: string }[];
+    // Fecha y Hora Prog. de cada cirugía programada del caso, la más reciente
+    // primero. Vacío si nunca se programó.
+    fechasProgramacion: string[];
 }
 
 type ProcRow = { cusv_id: string; N_Autorizacion: string };
@@ -375,6 +378,10 @@ const EMPTY_INF = {
     especialidad: '',
     subespecialidad: '',
     estado: '',
+    // Período de la cirugía programada (Fecha y Hora Prog.), distinto del de
+    // Fecha Inicial / Fecha Final, que es el de los movimientos.
+    programadoInicial: '',
+    programadoFinal: '',
 };
 
 /** Muestra un monto en pesos; '—' cuando no hay valor. */
@@ -763,6 +770,10 @@ export default function RadicarSolicitud({
     // Filtro de texto del modal: busca en N° caso, documento, paciente,
     // especialidad y médico a la vez.
     const [programadosFiltro, setProgramadosFiltro] = useState('');
+    // Período de la cirugía (Fecha y Hora Prog.), como en Informes. Se filtra
+    // en el navegador junto con el texto: la grilla ya llega completa.
+    const [programadosDesde, setProgramadosDesde] = useState('');
+    const [programadosHasta, setProgramadosHasta] = useState('');
     // Aviso de lo último que se hizo sobre una fila (editar o borrar). Vive
     // aparte del error para que un guardado bueno no borre un mensaje de fallo
     // anterior ni al revés.
@@ -823,6 +834,9 @@ export default function RadicarSolicitud({
     // El servidor avisa cuando recortó el informe por volumen.
     const [infTruncado, setInfTruncado] = useState(false);
     const [infLoading, setInfLoading] = useState(false);
+    // Filtros que el servidor rechazó (p. ej. una fecha inválida). Sin esto,
+    // el rechazo se veía como un informe sin resultados.
+    const [infError, setInfError] = useState<string | null>(null);
     // Paginación del informe. Se hace en el navegador porque las filas ya
     // vienen todas en la respuesta: paginar contra el servidor obligaría a
     // reconstruir y reordenar el informe entero en cada cambio de página.
@@ -1436,6 +1450,8 @@ export default function RadicarSolicitud({
     const abrirProgramados = () => {
         setProgramadosOpen(true);
         setProgramadosFiltro('');
+        setProgramadosDesde('');
+        setProgramadosHasta('');
         setProgramadosOk(null);
         setProgObsAbiertas(new Set());
         cargarProgramados();
@@ -1557,25 +1573,60 @@ export default function RadicarSolicitud({
             .finally(() => setProgBorrando(false));
     };
 
-    // Filas del modal ya filtradas por el texto. Coincide si el término aparece
-    // en el N° de caso, documento, paciente, especialidad o médico.
+    const hayFiltroProgramados =
+        programadosFiltro.trim() !== '' ||
+        programadosDesde !== '' ||
+        programadosHasta !== '';
+    // Con las fechas al revés ninguna fila puede coincidir: se dice por qué en
+    // lugar del genérico "ningún registro coincide".
+    const periodoProgramadosInvertido =
+        programadosDesde !== '' &&
+        programadosHasta !== '' &&
+        programadosDesde > programadosHasta;
+
+    // Filas del modal ya filtradas. El texto coincide si aparece en el N° de
+    // caso, documento, paciente, especialidad o médico; el período, por el
+    // día de la Fecha y Hora Prog. con ambos extremos incluidos.
     const programadosFiltrados = useMemo(() => {
         const q = programadosFiltro.trim().toLowerCase();
-        if (q === '') return programadosRows;
+        if (q === '' && programadosDesde === '' && programadosHasta === '') {
+            return programadosRows;
+        }
 
-        return programadosRows.filter((r) =>
-            [
-                String(r.codrad),
-                r.documento,
-                r.paciente,
-                r.especialidad,
-                r.medico,
-            ]
-                .join(' ')
-                .toLowerCase()
-                .includes(q),
-        );
-    }, [programadosRows, programadosFiltro]);
+        return programadosRows.filter((r) => {
+            if (programadosDesde !== '' || programadosHasta !== '') {
+                // 'AAAA-MM-DD HH:mm' → 'AAAA-MM-DD'. Una programación sin
+                // fecha no cae en ningún período.
+                const dia = r.fechaProgramacion?.slice(0, 10);
+                if (!dia) return false;
+                if (programadosDesde !== '' && dia < programadosDesde) {
+                    return false;
+                }
+                if (programadosHasta !== '' && dia > programadosHasta) {
+                    return false;
+                }
+            }
+
+            return (
+                q === '' ||
+                [
+                    String(r.codrad),
+                    r.documento,
+                    r.paciente,
+                    r.especialidad,
+                    r.medico,
+                ]
+                    .join(' ')
+                    .toLowerCase()
+                    .includes(q)
+            );
+        });
+    }, [
+        programadosRows,
+        programadosFiltro,
+        programadosDesde,
+        programadosHasta,
+    ]);
 
     // Descarga en Excel lo que muestra la grilla (ya filtrado). La librería se
     // carga solo al pulsar, para no engordar la vista.
@@ -2058,6 +2109,21 @@ export default function RadicarSolicitud({
 
     const generarInforme = (e: FormEvent) => {
         e.preventDefault();
+        setInfError(null);
+
+        // Un período invertido no da error en el servidor: solo devuelve un
+        // informe vacío, que se leería como "no hubo programados".
+        if (
+            inf.programadoInicial &&
+            inf.programadoFinal &&
+            inf.programadoInicial > inf.programadoFinal
+        ) {
+            setInfError(
+                'La fecha inicial programados no puede ser posterior a la fecha final programados.',
+            );
+            return;
+        }
+
         setInfLoading(true);
         // Las filas se reemplazan: un panel abierto quedaría apuntando a una
         // celda que ya no existe, y la página actual podría no existir en el
@@ -2073,7 +2139,16 @@ export default function RadicarSolicitud({
         })
             // Sin sesión no se vacía la grilla: un informe en blanco se lee
             // como "no hay movimientos en ese rango".
-            .then((r) => (sesionCaducada(r) ? null : r.json()))
+            .then(async (r) => {
+                if (sesionCaducada(r)) return null;
+
+                if (!r.ok) {
+                    setInfError(await mensajeDeError(r));
+                    return null;
+                }
+
+                return r.json();
+            })
             .then((d) => {
                 if (!d) return;
 
@@ -2136,6 +2211,7 @@ export default function RadicarSolicitud({
             'OB TFX': r.observacionTfx ?? '',
             'Observaciones CCX': r.observacionCcxCaso ?? '',
             'Estado QX': r.estadoQx,
+            'Fecha y Hora Prog.': r.fechasProgramacion.join(' / '),
             Usuario: r.usuario,
             Modificado: r.modificadoEn ?? '',
         }));
@@ -4611,7 +4687,48 @@ export default function RadicarSolicitud({
                                             </SelectContent>
                                         </Select>
                                     </Field>
+                                    {/* Período de la cirugía programada: deja
+                                        solo las radicaciones con alguna Fecha y
+                                        Hora Prog. dentro de él. */}
+                                    <Field label="Fecha Inicial Programados">
+                                        <Input
+                                            type="date"
+                                            value={inf.programadoInicial}
+                                            max={
+                                                inf.programadoFinal || undefined
+                                            }
+                                            onChange={(e) =>
+                                                setInfField(
+                                                    'programadoInicial',
+                                                    e.target.value,
+                                                )
+                                            }
+                                            title="Filtra por la Fecha y Hora Prog. de la cirugía"
+                                        />
+                                    </Field>
+                                    <Field label="Fecha Final Programados">
+                                        <Input
+                                            type="date"
+                                            value={inf.programadoFinal}
+                                            min={
+                                                inf.programadoInicial ||
+                                                undefined
+                                            }
+                                            onChange={(e) =>
+                                                setInfField(
+                                                    'programadoFinal',
+                                                    e.target.value,
+                                                )
+                                            }
+                                            title="Filtra por la Fecha y Hora Prog. de la cirugía"
+                                        />
+                                    </Field>
                                 </div>
+                                {infError && (
+                                    <p className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
+                                        {infError}
+                                    </p>
+                                )}
                                 <Button
                                     type="submit"
                                     disabled={infLoading}
@@ -4757,6 +4874,9 @@ export default function RadicarSolicitud({
                                                 </th>
                                                 <th className="px-3 py-2 font-medium">
                                                     Estado QX
+                                                </th>
+                                                <th className="px-3 py-2 font-medium whitespace-nowrap">
+                                                    Fecha y Hora Prog.
                                                 </th>
                                                 <th className="px-3 py-2 font-medium">
                                                     Usuario
@@ -5024,6 +5144,26 @@ export default function RadicarSolicitud({
                                                     )}
                                                     <td className="px-3 py-2">
                                                         {r.estadoQx}
+                                                    </td>
+                                                    {/* Una línea por cada vez
+                                                        que se programó; la
+                                                        primera es la más
+                                                        reciente. */}
+                                                    <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">
+                                                        {r.fechasProgramacion
+                                                            .length === 0
+                                                            ? '—'
+                                                            : r.fechasProgramacion.map(
+                                                                  (f) => (
+                                                                      <div
+                                                                          key={
+                                                                              f
+                                                                          }
+                                                                      >
+                                                                          {f}
+                                                                      </div>
+                                                                  ),
+                                                              )}
                                                     </td>
                                                     <td className="px-3 py-2">
                                                         {r.usuario}
@@ -5604,7 +5744,9 @@ export default function RadicarSolicitud({
                         </DialogDescription>
                     </DialogHeader>
 
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                    {/* Alineados por abajo: las fechas llevan etiqueta y el
+                        buscador no, que se explica con su texto de ayuda. */}
+                    <div className="flex flex-col gap-2 lg:flex-row lg:items-end">
                         <div className="relative flex-1">
                             <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
                             <Input
@@ -5616,6 +5758,34 @@ export default function RadicarSolicitud({
                                 className="pl-9"
                             />
                         </div>
+                        <Field
+                            label="Fecha Inicial Programados"
+                            className="lg:w-48"
+                        >
+                            <Input
+                                type="date"
+                                value={programadosDesde}
+                                max={programadosHasta || undefined}
+                                onChange={(e) =>
+                                    setProgramadosDesde(e.target.value)
+                                }
+                                title="Filtra por la Fecha y Hora Prog. de la cirugía"
+                            />
+                        </Field>
+                        <Field
+                            label="Fecha Final Programados"
+                            className="lg:w-48"
+                        >
+                            <Input
+                                type="date"
+                                value={programadosHasta}
+                                min={programadosDesde || undefined}
+                                onChange={(e) =>
+                                    setProgramadosHasta(e.target.value)
+                                }
+                                title="Filtra por la Fecha y Hora Prog. de la cirugía"
+                            />
+                        </Field>
                         <Button
                             type="button"
                             variant="outline"
@@ -5694,7 +5864,9 @@ export default function RadicarSolicitud({
                                             >
                                                 {programadosRows.length === 0
                                                     ? 'No hay radicaciones programadas.'
-                                                    : 'Ningún registro coincide con el filtro.'}
+                                                    : periodoProgramadosInvertido
+                                                      ? 'La fecha inicial programados es posterior a la fecha final programados.'
+                                                      : 'Ningún registro coincide con el filtro.'}
                                             </td>
                                         </tr>
                                     )}
@@ -5871,7 +6043,7 @@ export default function RadicarSolicitud({
                     <DialogFooter>
                         <span className="mr-auto self-center text-xs text-muted-foreground">
                             {programadosFiltrados.length}
-                            {programadosFiltro.trim() !== ''
+                            {hayFiltroProgramados
                                 ? ` de ${programadosRows.length}`
                                 : ''}{' '}
                             programación

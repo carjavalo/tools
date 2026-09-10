@@ -249,3 +249,65 @@ test('la subvista de programados llega apagada al gestor de permisos', function 
             ->where('permisos.radicar-solicitud-grilla.ver', true)
         );
 });
+
+// Filtros "Fecha Inicial Programados" / "Fecha Final Programados" de la
+// pestaña Informes: dejan solo las radicaciones con alguna cirugía programada
+// (Fecha y Hora Prog.) dentro del período.
+
+test('el informe filtra las radicaciones por el periodo de programacion', function () {
+    $admin = User::factory()->create();
+    $septiembre = RadicarCaso::create(['Ndocumento' => '4201', 'estRad' => '1']);
+    $finDeMes = RadicarCaso::create(['Ndocumento' => '4202', 'estRad' => '1']);
+    $octubre = RadicarCaso::create(['Ndocumento' => '4203', 'estRad' => '1']);
+    RadicarCaso::create(['Ndocumento' => '4204', 'estRad' => '1']);
+    ProgramacionCaso::create(['codrad' => $septiembre->codrad, 'fecha_programacion' => '2026-09-05 07:00']);
+    // La fecha final cuenta completa, aunque la cirugía sea tarde en la noche.
+    ProgramacionCaso::create(['codrad' => $finDeMes->codrad, 'fecha_programacion' => '2026-09-30 23:30']);
+    ProgramacionCaso::create(['codrad' => $octubre->codrad, 'fecha_programacion' => '2026-10-10 08:00']);
+
+    $rows = $this->actingAs($admin)
+        ->getJson('/tools/radicar-solicitud/informe?programadoInicial=2026-09-01&programadoFinal=2026-09-30')
+        ->assertOk()
+        ->json('rows');
+
+    expect(collect($rows)->pluck('codrad')->unique()->sort()->values()->all())
+        ->toBe([$septiembre->codrad, $finDeMes->codrad]);
+
+    // Solo con la fecha inicial queda abierto hacia adelante.
+    $rows = $this->getJson('/tools/radicar-solicitud/informe?programadoInicial=2026-10-01')
+        ->assertOk()
+        ->json('rows');
+
+    expect(collect($rows)->pluck('codrad')->unique()->values()->all())->toBe([$octubre->codrad]);
+});
+
+test('el informe muestra todas las fechas de programacion del caso', function () {
+    // Un caso reprogramado entra por la programación que cae en el período,
+    // y la columna muestra también la posterior: la reprogramación es justo
+    // lo que interesa ver.
+    $admin = User::factory()->create();
+    $caso = RadicarCaso::create(['Ndocumento' => '4211', 'estRad' => '1']);
+    ProgramacionCaso::create(['codrad' => $caso->codrad, 'fecha_programacion' => '2026-09-20 09:00']);
+    ProgramacionCaso::create(['codrad' => $caso->codrad, 'fecha_programacion' => '2026-11-02 08:00']);
+
+    $rows = $this->actingAs($admin)
+        ->getJson('/tools/radicar-solicitud/informe?programadoInicial=2026-09-01&programadoFinal=2026-09-30')
+        ->assertOk()
+        ->json('rows');
+
+    expect($rows)->toHaveCount(1)
+        ->and($rows[0]['fechasProgramacion'])->toBe(['2026-11-02 08:00', '2026-09-20 09:00']);
+
+    // Sin período, el informe sigue trayendo todo y la columna llega igual.
+    $sinProgramar = RadicarCaso::create(['Ndocumento' => '4212', 'estRad' => '1']);
+    $rows = $this->getJson('/tools/radicar-solicitud/informe')->assertOk()->json('rows');
+
+    expect(collect($rows)->firstWhere('codrad', $sinProgramar->codrad)['fechasProgramacion'])->toBe([]);
+});
+
+test('el informe rechaza una fecha de programacion invalida', function () {
+    $this->actingAs(User::factory()->create())
+        ->getJson('/tools/radicar-solicitud/informe?programadoInicial=no-es-fecha')
+        ->assertStatus(422)
+        ->assertJsonValidationErrors(['programadoInicial']);
+});
