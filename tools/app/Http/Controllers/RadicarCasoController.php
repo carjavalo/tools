@@ -21,6 +21,7 @@ use App\Models\TipoDocumento;
 use App\Models\TrazabilidadCaso;
 use App\Models\User;
 use App\Support\Almacenamiento;
+use App\Support\Sede;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -784,6 +785,8 @@ class RadicarCasoController extends Controller
         // una radicación sin su registro de creación quedaría fuera del informe.
         try {
             $caso = DB::transaction(function () use ($data, $request) {
+                // La sede no viaja en la petición: el modelo pone la sede
+                // activa de la sesión, la de la opción por la que se ingresó.
                 $caso = RadicarCaso::create(Arr::except($data, ['procedimientos']));
 
                 foreach ($request->input('procedimientos', []) as $proc) {
@@ -822,7 +825,7 @@ class RadicarCasoController extends Controller
         $this->completarNombrePaquete($caso);
 
         return to_route('tools.radicar-solicitud')
-            ->with('success', "Caso radicado correctamente. Caso N° {$caso->codrad}.")
+            ->with('success', 'Caso radicado correctamente en la '.Sede::nombre($caso->sede).". Caso N° {$caso->codrad}.")
             ->with('casoRadicado', $caso->codrad);
     }
 

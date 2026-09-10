@@ -7,6 +7,13 @@ export interface Auth {
         string,
         { ver: boolean; crear: boolean; editar: boolean; borrar: boolean }
     >;
+    // Sede en la que trabaja la sesión (la de la opción por la que ingresó)
+    // y las que el rol tiene habilitadas. Null sin sesión.
+    sede?: {
+        clave: 'cali' | 'cartago';
+        nombre: string;
+        permitidas: string[];
+    } | null;
 }
 
 export interface BreadcrumbItem {

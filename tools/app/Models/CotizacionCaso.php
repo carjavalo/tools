@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Support\Sede;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 
 class CotizacionCaso extends Model
@@ -40,5 +42,22 @@ class CotizacionCaso extends Model
             'fecha_cotizacion' => 'date:Y-m-d',
             'valor' => 'decimal:2',
         ];
+    }
+
+    /**
+     * Una cotización es de la sede de su radicación. Su PDF se abre por id
+     * (/cotizacion/{id}/adjunto), así que sin este filtro se podría leer el
+     * de una radicación de la otra sede.
+     */
+    protected static function booted(): void
+    {
+        static::addGlobalScope('sede', function (Builder $query) {
+            if ($sede = Sede::activa()) {
+                $query->whereIn(
+                    $query->qualifyColumn('codrad'),
+                    RadicarCaso::withoutGlobalScope('sede')->where('sede', $sede)->select('codrad'),
+                );
+            }
+        });
     }
 }

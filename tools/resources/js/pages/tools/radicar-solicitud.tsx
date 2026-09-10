@@ -37,6 +37,7 @@ import {
     FileText,
     LoaderCircle,
     Lock,
+    MapPin,
     Pencil,
     Plus,
     Save,
@@ -2348,6 +2349,18 @@ export default function RadicarSolicitud({
                                 </button>
                             );
                         })}
+                        {/* Todo lo de esta vista es de la sede activa: lo
+                            radicado queda en ella y las grillas solo la
+                            muestran a ella. */}
+                        {auth.sede && (
+                            <span
+                                title="Lo que se radique quedará en esta sede y solo se muestran sus radicaciones. Para trabajar en la otra, ingresa por su opción en el inicio."
+                                className="my-auto ml-auto inline-flex items-center gap-1.5 rounded-full bg-[#2d3e83]/10 px-3 py-1 text-xs font-semibold text-[#2d3e83] dark:bg-white/10 dark:text-white"
+                            >
+                                <MapPin className="size-3.5" />
+                                {auth.sede.nombre}
+                            </span>
+                        )}
                     </div>
 
                     {tabs.length === 0 && (

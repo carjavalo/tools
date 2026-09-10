@@ -21,7 +21,9 @@ class Permiso extends Model
      * @var array<int, array{key: string, titulo: string, grupo: string, acciones: array<int, string>}>
      */
     public const VISTAS = [
-        ['key' => 'programacion-cirugia', 'titulo' => 'Programación de Cirugía Sede Cali', 'grupo' => 'Principal', 'acciones' => ['ver']],
+        // Página de inicio del módulo. A qué sede entra cada rol no se decide
+        // aquí sino en la sección Sedes del Gestor de Permisos.
+        ['key' => 'programacion-cirugia', 'titulo' => 'Programación de Cirugía', 'grupo' => 'Principal', 'acciones' => ['ver']],
         ['key' => 'radicar-solicitud', 'titulo' => 'Radicar Solicitud', 'grupo' => 'Principal', 'acciones' => ['ver', 'crear', 'editar', 'borrar']],
         ['key' => 'radicar-solicitud-nueva', 'titulo' => 'Pestaña Nueva Radicación', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver']],
         ['key' => 'radicar-solicitud-historial', 'titulo' => 'Pestaña Historial / Búsqueda', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver']],

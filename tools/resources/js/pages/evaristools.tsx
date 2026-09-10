@@ -321,7 +321,9 @@ export default function Evaristools({ shared }: { shared: SharedData }) {
             'protect-pdf': '/tools/protect-pdf',
             'cups': '/tools/cups',
             'evarisdrop': '/tools/evarisdrop',
-            'programacion-cirugia': '/tools/programacion-cirugia',
+            // Cada sede entra por su propia ruta: la opción escogida define
+            // la sede en la que se trabaja durante la sesión.
+            'programacion-cirugia': '/tools/programacion-cirugia-cali',
             'programacion-cirugia-cartago': '/tools/programacion-cirugia-cartago',
         // Add more routes as tools are implemented
     };

@@ -5,29 +5,31 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import AuthLayout from '@/layouts/auth-layout';
-import { register } from '@/routes';
+import { login, register } from '@/routes';
 import { request } from '@/routes/password';
 import { Form, Head, router } from '@inertiajs/react';
 import { LoaderCircle } from 'lucide-react';
 
 interface CartagoLoginProps {
+    status?: string;
     canResetPassword: boolean;
 }
 
 /**
  * Pantalla de inicio de sesión de Programación de Cirugía Sede Cartago.
  *
- * Es idéntica a la de Sede Cali, pero el módulo todavía no está habilitado:
- * el formulario apunta a una ruta que siempre rechaza el intento, así que
- * nadie puede ingresar por ahora.
+ * Es igual a la de Sede Cali, pero quien entra por aquí trabaja en Cartago:
+ * lo que radique queda en esa sede y solo ve sus radicaciones. Solo entran
+ * los roles que tengan Cartago habilitada en el Gestor de Permisos.
  */
 export default function ProgramacionCirugiaCartagoLogin({
+    status,
     canResetPassword,
 }: CartagoLoginProps) {
     return (
         <AuthLayout
             title="Inicia sesión en tu cuenta"
-            description="Ingresa tu correo electrónico y contraseña para acceder"
+            description="Programación de Cirugía Sede Cartago. Ingresa tu correo electrónico y contraseña para acceder"
         >
             <Head title="Programación de Cirugía Sede Cartago" />
 
@@ -117,9 +119,22 @@ export default function ProgramacionCirugiaCartagoLogin({
                                 Regístrate
                             </TextLink>
                         </div>
+
+                        <div className="text-center text-sm text-muted-foreground">
+                            ¿Trabajas en la Sede Cali?{' '}
+                            <TextLink href={login()} tabIndex={6}>
+                                Ingresa por su opción
+                            </TextLink>
+                        </div>
                     </>
                 )}
             </Form>
+
+            {status && (
+                <div className="mb-4 text-center text-sm font-medium text-green-600">
+                    {status}
+                </div>
+            )}
         </AuthLayout>
     );
 }

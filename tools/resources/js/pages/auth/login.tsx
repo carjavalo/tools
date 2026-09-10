@@ -16,11 +16,15 @@ interface LoginProps {
     canResetPassword: boolean;
 }
 
+/**
+ * Inicio de sesión general, que es el de Programación de Cirugía Sede Cali:
+ * quien entra por aquí trabaja en Cali. Cartago tiene su propia pantalla.
+ */
 export default function Login({ status, canResetPassword }: LoginProps) {
     return (
         <AuthLayout
             title="Inicia sesión en tu cuenta"
-            description="Ingresa tu correo electrónico y contraseña para acceder"
+            description="Programación de Cirugía Sede Cali. Ingresa tu correo electrónico y contraseña para acceder"
         >
             <Head title="Iniciar sesión" />
 
@@ -108,6 +112,16 @@ export default function Login({ status, canResetPassword }: LoginProps) {
                             ¿No tienes una cuenta?{' '}
                             <TextLink href={register()} tabIndex={5}>
                                 Regístrate
+                            </TextLink>
+                        </div>
+
+                        <div className="text-center text-sm text-muted-foreground">
+                            ¿Trabajas en la Sede Cartago?{' '}
+                            <TextLink
+                                href="/tools/programacion-cirugia-cartago"
+                                tabIndex={6}
+                            >
+                                Ingresa por su opción
                             </TextLink>
                         </div>
                     </>

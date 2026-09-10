@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Support\Sede;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 
 class RadicarCaso extends Model
@@ -64,5 +66,31 @@ class RadicarCaso extends Model
             'fechavenautorizacion' => 'date:Y-m-d',
             'venc_anestesia' => 'date:Y-m-d',
         ];
+    }
+
+    /**
+     * Cada radicación es de una sede y solo se ve desde ella (ver App\Support\Sede).
+     *
+     * El filtro va como alcance global y no consulta por consulta: así cubre
+     * también la búsqueda por URL de un caso ({caso} en las rutas), y una
+     * consulta nueva no puede olvidarlo y mostrar radicaciones de la otra
+     * sede. Sin usuario con sesión (consola, colas) no filtra. Lo que debe
+     * cruzar sedes —un paciente es de ambas— lo quita expresamente con
+     * withoutGlobalScope('sede').
+     *
+     * La sede no es asignable desde la petición: la radicación nace en la sede
+     * activa de quien la crea.
+     */
+    protected static function booted(): void
+    {
+        static::addGlobalScope('sede', function (Builder $query) {
+            if ($sede = Sede::activa()) {
+                $query->where($query->qualifyColumn('sede'), $sede);
+            }
+        });
+
+        static::creating(function (RadicarCaso $caso) {
+            $caso->sede ??= Sede::activa() ?? Sede::CALI;
+        });
     }
 }

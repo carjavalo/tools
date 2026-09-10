@@ -75,6 +75,7 @@ class DescriptorAuditoria
         'paquete' => 'Paquete (PDF)',
         'maos' => 'MAOS',
         'estcod' => 'Motivo',
+        'sede' => 'Sede',
         'rol' => 'Rol',
         'Estado' => 'Estado',
         'Nombre' => 'Nombre',
@@ -191,6 +192,7 @@ class DescriptorAuditoria
             'codMed' => optional(User::find($plano), fn (User $u) => RegistroAuditoria::nombreCompleto($u)),
             'paquete' => basename($plano),
             'valor_copago' => '$'.number_format((float) $plano, 2, ',', '.'),
+            'sede' => Sede::NOMBRES[$plano] ?? null,
             default => null,
         };
 

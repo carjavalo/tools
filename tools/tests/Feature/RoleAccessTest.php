@@ -62,28 +62,22 @@ test('a super admin can access management routes', function () use ($managementR
     }
 });
 
-test('the cartago module shows its login screen to everyone', function () {
-    // Sin autenticar y autenticado como Super Admin: siempre la pantalla de login.
-    $this->get('/tools/programacion-cirugia-cartago')->assertOk();
-
-    $admin = User::factory()->create(['rol' => 'Super Admin']);
-    $this->actingAs($admin)
-        ->get('/tools/programacion-cirugia-cartago')
-        ->assertOk();
+test('the cartago module shows its login screen to guests', function () {
+    // Con sesión ya no muestra el login: cambia de sede (ver SedeTest).
+    $this->get('/tools/programacion-cirugia-cartago')
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->component('tools/programacion-cirugia-cartago-login'));
 });
 
-test('nobody can log into the cartago module yet', function () {
+test('a super admin can log into the cartago module', function () {
     $admin = User::factory()->create(['rol' => 'Super Admin']);
 
-    $this->from('/tools/programacion-cirugia-cartago')
-        ->post('/tools/programacion-cirugia-cartago', [
-            'email' => $admin->email,
-            'password' => 'password',
-        ])
-        ->assertRedirect('/tools/programacion-cirugia-cartago')
-        ->assertSessionHasErrors(['email']);
+    $this->post('/tools/programacion-cirugia-cartago', [
+        'email' => $admin->email,
+        'password' => 'password',
+    ])->assertRedirect(route('dashboard', absolute: false));
 
-    $this->assertGuest();
+    $this->assertAuthenticatedAs($admin);
 });
 
 test('a paciente cannot create users via the management endpoint', function () {

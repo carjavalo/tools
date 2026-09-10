@@ -5,6 +5,7 @@ namespace App\Http\Middleware;
 use App\Models\Permiso;
 use App\Models\Role;
 use App\Models\User;
+use App\Support\Sede;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Http\Request;
 use Inertia\Middleware;
@@ -48,6 +49,9 @@ class HandleInertiaRequests extends Middleware
             'auth' => [
                 'user' => $request->user(),
                 'permisos' => $this->permisosDelUsuario($request),
+                // Diferida: solo se calcula cuando la respuesta es una página,
+                // no en cada consulta JSON de las grillas.
+                'sede' => fn () => $this->sedeDelUsuario($request),
             ],
             'flash' => [
                 'success' => $request->session()->get('success'),
@@ -56,6 +60,26 @@ class HandleInertiaRequests extends Middleware
                 'casoRadicado' => $request->session()->get('casoRadicado'),
             ],
             'sidebarOpen' => ! $request->hasCookie('sidebar_state') || $request->cookie('sidebar_state') === 'true',
+        ];
+    }
+
+    /**
+     * Sede en la que trabaja el usuario y las que su rol tiene habilitadas.
+     *
+     * @return array{clave: string, nombre: string, permitidas: list<string>}|null
+     */
+    private function sedeDelUsuario(Request $request): ?array
+    {
+        $sede = Sede::activa();
+
+        if ($sede === null) {
+            return null;
+        }
+
+        return [
+            'clave' => $sede,
+            'nombre' => Sede::nombre($sede),
+            'permitidas' => Sede::permitidasPara($request->user()),
         ];
     }
 

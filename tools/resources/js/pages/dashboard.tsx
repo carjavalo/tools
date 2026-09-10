@@ -14,10 +14,13 @@ import { Head, Link, usePage } from '@inertiajs/react';
 import {
     ArrowRight,
     CalendarClock,
+    CheckCircle2,
     KeyRound,
+    MapPin,
     Stethoscope,
     UserCog,
     Wrench,
+    XCircle,
 } from 'lucide-react';
 
 const breadcrumbs: BreadcrumbItem[] = [
@@ -75,7 +78,7 @@ function capitalize(text: string) {
 }
 
 export default function Dashboard() {
-    const { auth } = usePage<SharedData>().props;
+    const { auth, flash } = usePage<SharedData>().props;
 
     const now = new Date();
     const hour = now.getHours();
@@ -139,9 +142,34 @@ export default function Dashboard() {
                             Selecciona una opción del menú lateral o usa los
                             accesos rápidos para comenzar.
                         </p>
+                        {auth.sede && (
+                            <span className="mt-1 inline-flex w-fit items-center gap-1.5 rounded-full bg-white/15 px-3 py-1 text-sm font-semibold text-white">
+                                <MapPin className="size-4" />
+                                Estás trabajando en la {auth.sede.nombre}
+                            </span>
+                        )}
                     </div>
                     <Stethoscope className="pointer-events-none absolute -right-6 -bottom-6 size-40 text-white/10" />
                 </section>
+
+                {/* Resultado de entrar por la opción de una sede, o de un
+                    acceso que se negó y trajo al usuario de vuelta aquí. */}
+                {(flash?.success || flash?.error) && (
+                    <div
+                        className={`flex items-center gap-2 rounded-lg border px-4 py-3 text-sm shadow-sm ${
+                            flash?.error
+                                ? 'border-red-200 bg-red-50 text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-200'
+                                : 'border-green-200 bg-green-50 text-green-800 dark:border-green-900 dark:bg-green-950 dark:text-green-200'
+                        }`}
+                    >
+                        {flash?.error ? (
+                            <XCircle className="size-5 shrink-0" />
+                        ) : (
+                            <CheckCircle2 className="size-5 shrink-0" />
+                        )}
+                        {flash?.error ?? flash?.success}
+                    </div>
+                )}
 
                 {/* Accesos rápidos */}
                 <section className="flex flex-col gap-3">

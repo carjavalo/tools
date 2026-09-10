@@ -8,7 +8,7 @@ Documento explicativo del módulo tal como está implementado hoy en la aplicaci
 
 Conviene separarlas desde el principio, porque en la aplicación conviven:
 
-1. **La opción de menú "Programación de Cirugía"** (`/tools/programacion-cirugia`, Sede Cali).
+1. **La opción de menú "Programación de Cirugía"** (`/tools/programacion-cirugia`).
    Es la pantalla propia del módulo. Hoy es un **marcador de posición**: muestra el
    encabezado, el ícono y una tarjeta que dice "Módulo en construcción". No tiene todavía
    consultas ni formularios.
@@ -129,9 +129,10 @@ algo distinto de lo que ve la grilla.
 
 El acceso lo gobierna el **Gestor de Permisos** (middleware `permiso.auto`):
 
-- **Opción de menú** `programacion-cirugia` — "Programación de Cirugía Sede Cali", acción
-  `ver`. Operador y Super Admin pasan por defecto; los demás roles requieren permiso
-  explícito.
+- **Opción de menú** `programacion-cirugia` — "Programación de Cirugía", acción `ver`.
+  Operador y Super Admin pasan por defecto; los demás roles requieren permiso explícito.
+  A qué **sede** entra cada rol no se decide aquí, sino en la sección **Sedes** del
+  mismo Gestor (ver sección 8).
 - **Sub-vista** `radicar-solicitud-programados` — "Grilla ver programados", con acciones
   `ver`, `editar` y `borrar`. Rige los botones de cada fila del modal.
   - `ver` habilita el botón "Ver radicado" y es la **llave** de los otros dos: sin `ver`,
@@ -178,13 +179,56 @@ una vez.
 
 ---
 
-## 8. Sede Cartago
+## 8. Sedes: Cali y Cartago
 
-Existe la entrada **"Programación de Cirugía Sede Cartago"** con su propia pantalla de
-inicio de sesión, visualmente idéntica a la de Cali. **El módulo aún no está habilitado**:
-el formulario apunta a una ruta que siempre rechaza el intento con el mensaje "El módulo de
-Programación de Cirugía Sede Cartago aún no está habilitado", de modo que por ahora nadie
-puede ingresar por ahí.
+Las radicaciones se crean y se trabajan **por sede**. En el inicio hay dos opciones:
+**"Programación de Cirugía Sede Cali"** y **"Programación de Cirugía Sede Cartago"**.
+La opción por la que se entra define la **sede activa** de la sesión:
+
+- **Lo que se radica queda en esa sede** (columna `RadicarCaso.sede`). La sede no viaja
+  en la petición: la pone el modelo con la sede activa, así que nadie puede radicar en
+  una sede a la que su rol no entra.
+- **Solo se ven y se operan las radicaciones de esa sede**: grilla del Historial,
+  búsqueda por caso o cédula, Informes, "Ver programados", sus botones, y los PDF del
+  paquete y de las cotizaciones. Una radicación de la otra sede responde 404 aunque se
+  pida por su URL.
+- El seguimiento, la bitácora, las cotizaciones y las programaciones **no llevan sede
+  propia**: la heredan de su radicación por el `codrad`.
+- Los catálogos (especialidades, CUPS, EPS, convenios, estados), los pacientes y los
+  médicos **son comunes a las dos sedes**. Si a un paciente le cambian la cédula, se
+  repuntan sus radicaciones de ambas sedes.
+
+**Cómo se entra:**
+
+| Opción | Sin sesión | Con sesión abierta |
+|---|---|---|
+| Sede Cali (`/tools/programacion-cirugia-cali`) | Lleva al login general (`/login`), que es el de Cali | Pasa a trabajar en Cali si el rol la tiene |
+| Sede Cartago (`/tools/programacion-cirugia-cartago`) | Muestra el login propio de Cartago | Pasa a trabajar en Cartago si el rol la tiene |
+
+Si el rol no tiene la sede de la opción, el login se rechaza con un mensaje que indica
+por qué opción sí puede entrar; con sesión abierta, sigue en su sede y se le avisa en el
+Inicio. La sede activa se ve en el menú lateral (bajo "Programación de Cirugía"), en el
+banner del Inicio y en la barra de pestañas de Radicar Solicitud.
+
+**Qué sedes tiene cada rol** (Gestor de Permisos → sección **Sedes**, tabla `role_sedes`):
+
+- Se marca Sede Cali, Sede Cartago o ambas. Al menos una es obligatoria.
+- **Sin configurar, el rol solo entra a Cali**, que es donde operaban todos antes de
+  existir Cartago.
+- **Super Admin** entra siempre a las dos, con todas las opciones.
+- **Paciente y Médico** no se configuran: son el banco de personas común a las dos
+  sedes y no se restringen por sede.
+
+Una sesión sin sede (abierta antes de este cambio o restaurada por "Recordarme") toma la
+primera sede que el rol tenga. La lógica vive en `App\Support\Sede`, y el filtro es un
+alcance global (`sede`) de los modelos `RadicarCaso`, `ProgramacionCaso` y
+`CotizacionCaso`; lo que deba cruzar sedes lo quita con `withoutGlobalScope('sede')`.
+
+Todo lo radicado antes de este cambio quedó en **Sede Cali**. Para servidores donde no se
+puede ejecutar `php artisan migrate`, existe `crear_sedes_servidor.sql`, equivalente a las
+migraciones `2026_09_10_000001_add_sede_to_radicar_caso_table` y
+`2026_09_10_000002_create_role_sedes_table`. Debe aplicarse antes de subir el código (o
+junto): sin la columna `sede`, Radicar Solicitud falla.
 
 ---
 
@@ -196,13 +240,16 @@ puede ingresar por ahí.
 - Grilla "Ver programados" con filtro, exportación a Excel y enlaces a PDFs.
 - Edición y borrado de programaciones con trazabilidad completa.
 - Control de acceso por rol vía Gestor de Permisos.
-- Pruebas automatizadas en `tests/Feature/ProgramacionCasoTest.php`.
+- Radicaciones por sede (Cali y Cartago), con las sedes de cada rol configurables.
+- Pruebas automatizadas en `tests/Feature/ProgramacionCasoTest.php` y
+  `tests/Feature/SedeTest.php`.
 
 **Pendiente:**
 
-- La pantalla propia `/tools/programacion-cirugia` (Sede Cali) sigue "en construcción": el
-  contenido y las funcionalidades se irán incorporando.
-- Sede Cartago no está habilitada.
+- La pantalla propia `/tools/programacion-cirugia` sigue "en construcción": el contenido
+  y las funcionalidades se irán incorporando.
+- Herramientas - Seguimiento (bitácora general) todavía muestra la actividad de las dos
+  sedes juntas.
 
 ---
 
@@ -211,7 +258,8 @@ puede ingresar por ahí.
 | Método | Ruta | Propósito |
 |---|---|---|
 | `GET` | `/tools/programacion-cirugia` | Pantalla del módulo (en construcción) |
-| `GET` / `POST` | `/tools/programacion-cirugia-cartago` | Login Sede Cartago (siempre rechaza) |
+| `GET` | `/tools/programacion-cirugia-cali` | Entrada Sede Cali: login general o cambio de sede |
+| `GET` / `POST` | `/tools/programacion-cirugia-cartago` | Login Sede Cartago o cambio de sede |
 | `POST` | `/tools/radicar-solicitud/{caso}/seguimiento` | Aplica modificaciones; crea la programación si el Estado QX es "Programados" |
 | `GET` | `/tools/radicar-solicitud/programados` | Datos de la grilla "Ver programados" |
 | `PUT` | `/tools/radicar-solicitud/programacion/{id}` | Editar una programación |
@@ -227,3 +275,6 @@ puede ingresar por ahí.
 - `tools/resources/js/pages/tools/programacion-cirugia.tsx` (pantalla en construcción)
 - `tools/database/migrations/2026_09_04_000001_create_programacion_caso_table.php`
 - `crear_tabla_programacion_servidor.sql`
+- Sedes: `tools/app/Support/Sede.php`, `tools/app/Http/Controllers/Auth/AuthenticatedSessionController.php`
+  (entradas y login por sede), `tools/database/migrations/2026_09_10_00000{1,2}_*.php`,
+  `crear_sedes_servidor.sql`

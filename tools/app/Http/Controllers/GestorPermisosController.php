@@ -7,6 +7,7 @@ use App\Models\EstRadisecundario;
 use App\Models\Permiso;
 use App\Models\Role;
 use App\Models\User;
+use App\Support\Sede;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -32,6 +33,7 @@ class GestorPermisosController extends Controller
         if (! $roles->contains('id', $roleId)) {
             $roleId = (int) ($roles->first()->id ?? 0);
         }
+        $rolActivo = $roles->firstWhere('id', $roleId);
 
         // Permisos configurados del rol; las vistas sin fila quedan con todo
         // permitido (el comportamiento por defecto del sistema).
@@ -85,6 +87,13 @@ class GestorPermisosController extends Controller
             'auditoriaModulos' => $roleId
                 ? DB::table('role_auditoria_modulos')->where('role_id', $roleId)->pluck('modulo')->all()
                 : [],
+            // Sedes por las que puede ingresar el rol. Sin configurar, solo
+            // Cali. Pacientes y médicos no se configuran: son de las dos.
+            'sedesList' => collect(Sede::NOMBRES)
+                ->map(fn (string $nombre, string $clave) => ['clave' => $clave, 'nombre' => $nombre])
+                ->values(),
+            'sedesRol' => $rolActivo ? Sede::delRol($rolActivo) : [Sede::CALI],
+            'sedesFijas' => $rolActivo && Sede::rolSinRestriccion($rolActivo->Nombre),
         ]);
     }
 
@@ -112,7 +121,26 @@ class GestorPermisosController extends Controller
             'auditoria_roles.*' => ['integer', 'exists:roles,id'],
             'auditoria_modulos' => ['nullable', 'array'],
             'auditoria_modulos.*' => ['string', Rule::in(AuditoriaController::MODULOS)],
+            // Sin ninguna sede el rol no podría ingresar por ninguna opción.
+            'sedes' => ['sometimes', 'array', 'min:1'],
+            'sedes.*' => ['string', Rule::in(Sede::claves())],
+        ], [
+            'sedes.min' => 'Marca al menos una sede: sin ninguna, el rol no podría ingresar al sistema.',
         ]);
+
+        // Como los módulos de auditoría, las sedes no tienen catálogo propio:
+        // se reemplaza el conjunto. Los roles de las dos sedes no se guardan.
+        if (array_key_exists('sedes', $data) && ! Sede::rolSinRestriccion($role->Nombre)) {
+            DB::table('role_sedes')->where('role_id', $role->id)->delete();
+            foreach (array_unique($data['sedes']) as $sede) {
+                DB::table('role_sedes')->insert([
+                    'role_id' => $role->id,
+                    'sede' => $sede,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+            }
+        }
 
         $role->rolesAsignables()->sync($data['roles_asignables'] ?? []);
         $role->estadosGrilla()->sync($data['estados_grilla'] ?? []);

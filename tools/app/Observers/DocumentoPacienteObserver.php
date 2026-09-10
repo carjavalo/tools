@@ -50,7 +50,9 @@ class DocumentoPacienteObserver
             return;
         }
 
-        $casos = RadicarCaso::where('Ndocumento', $anterior)->get();
+        // El paciente es de ambas sedes: se repuntan también sus radicaciones
+        // de la sede en la que no está quien edita, o allá quedarían huérfanas.
+        $casos = RadicarCaso::withoutGlobalScope('sede')->where('Ndocumento', $anterior)->get();
 
         if ($casos->isEmpty()) {
             return;

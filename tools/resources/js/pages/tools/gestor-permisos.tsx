@@ -15,6 +15,7 @@ import {
     Flag,
     KeyRound,
     LoaderCircle,
+    MapPin,
     Pencil,
     Plus,
     Save,
@@ -54,6 +55,10 @@ interface PageProps {
     modulosAuditoria: string[];
     auditoriaRoles: number[];
     auditoriaModulos: string[];
+    sedesList: { clave: string; nombre: string }[];
+    sedesRol: string[];
+    // Pacientes y médicos: son de las dos sedes y no se configuran.
+    sedesFijas: boolean;
 }
 
 const breadcrumbs: BreadcrumbItem[] = [
@@ -86,6 +91,9 @@ export default function GestorPermisos({
     modulosAuditoria,
     auditoriaRoles,
     auditoriaModulos,
+    sedesList,
+    sedesRol,
+    sedesFijas,
 }: PageProps) {
     const { flash } = usePage<SharedData>().props;
     const [matriz, setMatriz] = useState<Record<string, Flags>>(permisos);
@@ -96,6 +104,8 @@ export default function GestorPermisos({
     // Herramientas - Seguimiento: de qué roles y módulos ve actividad.
     const [audRoles, setAudRoles] = useState<number[]>(auditoriaRoles);
     const [audModulos, setAudModulos] = useState<string[]>(auditoriaModulos);
+    // Sedes por las que puede ingresar el rol.
+    const [sedes, setSedes] = useState<string[]>(sedesRol);
     const [saving, setSaving] = useState(false);
     const [notice, setNotice] = useState<{
         type: 'success' | 'error';
@@ -110,6 +120,7 @@ export default function GestorPermisos({
         setGrillaEstadosSec(estadosSecGrilla);
         setAudRoles(auditoriaRoles);
         setAudModulos(auditoriaModulos);
+        setSedes(sedesRol);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [roleId]);
 
@@ -179,6 +190,17 @@ export default function GestorPermisos({
             prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
         );
 
+    // La última sede no se deja quitar: sin ninguna, el rol no podría
+    // ingresar por ninguna opción.
+    const toggleSede = (clave: string) =>
+        setSedes((prev) =>
+            prev.includes(clave)
+                ? prev.length > 1
+                    ? prev.filter((x) => x !== clave)
+                    : prev
+                : [...prev, clave],
+        );
+
     // Blanquear toda la configuración del rol (matriz y roles asignables)
     // para armarla desde cero. Solo aplica al guardar.
     const limpiarTodo = () => {
@@ -197,6 +219,8 @@ export default function GestorPermisos({
         setGrillaEstadosSec([]);
         setAudRoles([]);
         setAudModulos([]);
+        // Las sedes no pueden quedar vacías: vuelven a su valor por defecto.
+        setSedes(['cali']);
     };
 
     const marcarTodo = () => {
@@ -223,9 +247,19 @@ export default function GestorPermisos({
                 estados_sec_grilla: grillaEstadosSec,
                 auditoria_roles: audRoles,
                 auditoria_modulos: audModulos,
+                sedes,
             },
             {
                 preserveScroll: true,
+                // Sin esto, una validación rechazada (p. ej. un rol sin
+                // sedes) no guardaba y tampoco decía nada.
+                onError: (errors) =>
+                    setNotice({
+                        type: 'error',
+                        msg:
+                            Object.values(errors)[0] ??
+                            'No fue posible guardar los permisos.',
+                    }),
                 onFinish: () => setSaving(false),
             },
         );
@@ -367,9 +401,68 @@ export default function GestorPermisos({
                         )}
                     </div>
                     <p className="mt-2 text-xs text-muted-foreground">
-                        El rol Super Admin siempre tiene acceso total y no se
-                        configura aquí. Las vistas sin configuración guardada se
-                        permiten por defecto.
+                        El rol Super Admin siempre tiene acceso total, entra a
+                        las dos sedes y no se configura aquí. Las vistas sin
+                        configuración guardada se permiten por defecto.
+                    </p>
+                </div>
+
+                {/* Sedes por las que puede ingresar el rol */}
+                <div className="rounded-xl border bg-card p-4 shadow-sm">
+                    <div className="mb-1 flex items-center gap-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+                        <MapPin className="size-4" />
+                        Sedes a las que {rolActivo?.Nombre ?? 'el rol'} puede
+                        ingresar
+                    </div>
+                    <p className="mb-3 text-xs text-muted-foreground">
+                        Cada sede se ingresa por su opción en el inicio:
+                        Programación de Cirugía Sede Cali o Sede Cartago. El
+                        usuario solo ve y trabaja las radicaciones de la sede
+                        por la que ingresó, y lo que radique queda en esa sede.
+                        Sin configurar, el rol solo ingresa a la Sede Cali.
+                    </p>
+                    <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-4">
+                        {sedesList.map((s) => {
+                            const marcada = sedes.includes(s.clave);
+                            const bloqueada =
+                                sedesFijas || (marcada && sedes.length === 1);
+                            return (
+                                <label
+                                    key={s.clave}
+                                    title={
+                                        !sedesFijas && bloqueada
+                                            ? 'El rol debe tener al menos una sede'
+                                            : undefined
+                                    }
+                                    className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${
+                                        bloqueada
+                                            ? 'cursor-not-allowed opacity-70'
+                                            : 'cursor-pointer hover:bg-muted/60'
+                                    }`}
+                                >
+                                    <Checkbox
+                                        checked={marcada}
+                                        disabled={bloqueada}
+                                        onCheckedChange={() =>
+                                            toggleSede(s.clave)
+                                        }
+                                    />
+                                    <span className="truncate text-foreground">
+                                        {s.nombre}
+                                    </span>
+                                </label>
+                            );
+                        })}
+                    </div>
+                    <p className="mt-2 text-xs text-muted-foreground">
+                        {sedesFijas
+                            ? 'Pacientes y médicos son comunes a las dos sedes: no se configuran.'
+                            : sedes.length === sedesList.length
+                              ? 'Puede ingresar por las dos sedes.'
+                              : `Solo puede ingresar por la ${
+                                    sedesList.find((s) => s.clave === sedes[0])
+                                        ?.nombre ?? '—'
+                                }.`}
                     </p>
                 </div>
 

@@ -49,19 +49,18 @@ Route::prefix('tools')->name('tools.')->group(function () {
         return Inertia::render('tools/rotate-pdf');
     })->name('rotate-pdf');
 
-    // Sede Cartago: el módulo aún no está habilitado. Muestra la pantalla de
-    // inicio de sesión, pero el intento siempre se rechaza y nadie entra.
-    Route::get('programacion-cirugia-cartago', function () {
-        return Inertia::render('tools/programacion-cirugia-cartago-login', [
-            'canResetPassword' => Route::has('password.request'),
-        ]);
-    })->name('programacion-cirugia-cartago');
-
-    Route::post('programacion-cirugia-cartago', function () {
-        throw \Illuminate\Validation\ValidationException::withMessages([
-            'email' => 'El módulo de Programación de Cirugía Sede Cartago aún no está habilitado.',
-        ]);
-    })->name('programacion-cirugia-cartago.store');
+    // Entradas del módulo por sede (opciones del inicio). La opción por la que
+    // se entra define la sede activa: lo que se radique queda en esa sede y
+    // solo se ven sus radicaciones. Cali usa el login general; Cartago tiene
+    // el suyo. Con sesión abierta, entrar por la otra opción cambia de sede si
+    // el rol la tiene habilitada en el Gestor de Permisos.
+    Route::get('programacion-cirugia-cali', [App\Http\Controllers\Auth\AuthenticatedSessionController::class, 'ingresarCali'])
+        ->name('programacion-cirugia-cali');
+    Route::get('programacion-cirugia-cartago', [App\Http\Controllers\Auth\AuthenticatedSessionController::class, 'createCartago'])
+        ->name('programacion-cirugia-cartago');
+    Route::post('programacion-cirugia-cartago', [App\Http\Controllers\Auth\AuthenticatedSessionController::class, 'storeCartago'])
+        ->middleware('guest')
+        ->name('programacion-cirugia-cartago.store');
 
     // El acceso por rol a cada opción lo gobierna el Gestor de Permisos
     // (middleware permiso.auto): Operador y Super Admin pasan por defecto;

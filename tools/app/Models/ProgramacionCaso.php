@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Support\Sede;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -38,6 +40,23 @@ class ProgramacionCaso extends Model
             // Lleva hora además de la fecha (input datetime-local del formulario).
             'fecha_programacion' => 'datetime:Y-m-d H:i',
         ];
+    }
+
+    /**
+     * Una programación es de la sede de su radicación. Se filtra igual que
+     * RadicarCaso para que la grilla "Ver programados" y los botones que la
+     * editan o borran por id no alcancen las cirugías de la otra sede.
+     */
+    protected static function booted(): void
+    {
+        static::addGlobalScope('sede', function (Builder $query) {
+            if ($sede = Sede::activa()) {
+                $query->whereIn(
+                    $query->qualifyColumn('codrad'),
+                    RadicarCaso::withoutGlobalScope('sede')->where('sede', $sede)->select('codrad'),
+                );
+            }
+        });
     }
 
     /**
