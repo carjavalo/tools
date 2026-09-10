@@ -766,6 +766,14 @@ export default function RadicarSolicitud({
     // aparte del error para que un guardado bueno no borre un mensaje de fallo
     // anterior ni al revés.
     const [programadosOk, setProgramadosOk] = useState<string | null>(null);
+    // Observaciones Prg desplegadas en la grilla (por id de fila). Se recortan
+    // a una línea para que una nota larga no estire la fila; el chevron abre
+    // el texto completo dentro de la misma celda. Es en la celda y no en un
+    // panel flotante como en Informes: dentro del modal, un panel fijo quedaría
+    // debajo del overlay y el clic sobre él cerraría el modal.
+    const [progObsAbiertas, setProgObsAbiertas] = useState<Set<number>>(
+        () => new Set(),
+    );
     // Editar una programación desde la grilla: el formulario trabaja sobre una
     // copia de la fila, así cancelar no deja la grilla a medio cambiar.
     const [progEditOpen, setProgEditOpen] = useState(false);
@@ -1428,8 +1436,20 @@ export default function RadicarSolicitud({
         setProgramadosOpen(true);
         setProgramadosFiltro('');
         setProgramadosOk(null);
+        setProgObsAbiertas(new Set());
         cargarProgramados();
     };
+
+    const alternarProgObs = (id: number) =>
+        setProgObsAbiertas((prev) => {
+            const sig = new Set(prev);
+            if (sig.has(id)) {
+                sig.delete(id);
+            } else {
+                sig.add(id);
+            }
+            return sig;
+        });
 
     // Botón "Ver radicado" de la fila: cierra el modal y deja el caso abierto
     // en el Historial, que es donde se consulta y se modifica.
@@ -5727,8 +5747,45 @@ export default function RadicarSolicitud({
                                                           </a>
                                                       ))}
                                             </td>
-                                            <td className="max-w-xs px-3 py-2 whitespace-pre-wrap text-muted-foreground">
-                                                {r.observaciones || '—'}
+                                            <td className="px-3 py-2 text-muted-foreground">
+                                                {r.observaciones ? (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() =>
+                                                            alternarProgObs(
+                                                                r.id,
+                                                            )
+                                                        }
+                                                        aria-expanded={progObsAbiertas.has(
+                                                            r.id,
+                                                        )}
+                                                        title={
+                                                            progObsAbiertas.has(
+                                                                r.id,
+                                                            )
+                                                                ? 'Clic para recoger las observaciones'
+                                                                : 'Clic para ver las observaciones completas'
+                                                        }
+                                                        className="flex w-48 items-start gap-1 text-left hover:text-foreground"
+                                                    >
+                                                        <span
+                                                            className={
+                                                                progObsAbiertas.has(
+                                                                    r.id,
+                                                                )
+                                                                    ? 'min-w-0 break-words whitespace-pre-wrap text-foreground'
+                                                                    : 'line-clamp-1 min-w-0 break-words'
+                                                            }
+                                                        >
+                                                            {r.observaciones}
+                                                        </span>
+                                                        <ChevronDown
+                                                            className={`mt-0.5 size-3.5 shrink-0 transition-transform ${progObsAbiertas.has(r.id) ? 'rotate-180' : ''}`}
+                                                        />
+                                                    </button>
+                                                ) : (
+                                                    '—'
+                                                )}
                                             </td>
                                             {hayAccionesProgramados && (
                                                 <td className="px-3 py-2">
