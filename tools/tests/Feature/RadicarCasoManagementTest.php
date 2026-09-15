@@ -821,6 +821,46 @@ test('marcar copago sin valor es rechazado', function () {
         ->assertJsonValidationErrors(['valor_copago']);
 });
 
+test('radicar con un año de mas de 4 digitos se rechaza en el campo', function () {
+    // El calendario del navegador deja digitar años como 20226: la regla date
+    // los aceptaba y MySQL rechazaba el insert con un error SQL.
+    $this->actingAs(User::factory()->create())
+        ->from('/tools/radicar-solicitud')
+        ->post('/tools/radicar-solicitud', [
+            'fentregapro' => '2026-09-15',
+            'fecAutorizacion' => '20226-06-25',
+            'fechavenautorizacion' => '2026-12-20',
+        ])
+        ->assertRedirect('/tools/radicar-solicitud')
+        ->assertSessionHasErrors([
+            'fecAutorizacion' => 'La fecha autorización no es válida: revise el año, debe tener 4 dígitos.',
+        ])
+        ->assertSessionDoesntHaveErrors(['fentregapro', 'fechavenautorizacion']);
+});
+
+test('modificar un radicado con un año de mas de 4 digitos se rechaza', function () {
+    $admin = User::factory()->create();
+    $cups = Cups::create(['Nombre' => 'Proc', 'Estado' => true]);
+    $caso = RadicarCaso::create(['Ndocumento' => '9250', 'estRad' => '1', 'fechavenautorizacion' => '2026-08-29']);
+
+    $this->actingAs($admin)
+        ->putJson("/tools/radicar-solicitud/{$caso->codrad}", [
+            'codMed' => (string) $admin->id,
+            'estRad' => '1',
+            'copago' => false,
+            'fentregapro' => '2026-07-31',
+            'fecAutorizacion' => '2026-07-29',
+            'fechavenautorizacion' => '20226-08-29',
+            'procedimientos' => [['cusv_id' => $cups->id, 'N_Autorizacion' => 'A1']],
+        ])
+        ->assertStatus(422)
+        ->assertJsonValidationErrors([
+            'fechavenautorizacion' => 'La fecha vencimiento autorización no es válida: revise el año, debe tener 4 dígitos.',
+        ]);
+
+    expect($caso->fresh()->fechavenautorizacion->format('Y-m-d'))->toBe('2026-08-29');
+});
+
 test('desmarcar el copago borra el valor guardado', function () {
     $admin = User::factory()->create();
     $cups = Cups::create(['Nombre' => 'Proc', 'Estado' => true]);

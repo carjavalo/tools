@@ -725,14 +725,19 @@ class RadicarCasoController extends Controller
             // Paquete: documento PDF opcional adjunto a la radicación.
             'paquete' => $this->reglasPaquete(),
             'estRad' => ['required', 'string', 'max:5'],
-            'fentregapro' => ['required', 'date'],
+            // Las fechas llegan del calendario del navegador (aaaa-mm-dd), que
+            // deja digitar años de más de 4 dígitos (p. ej. 20226). La regla
+            // date los acepta pero MySQL no, y el guardado terminaba en un
+            // error SQL: date_format:Y-m-d exige el año de 4 dígitos y lo
+            // reporta en el campo.
+            'fentregapro' => ['required', 'date', 'date_format:Y-m-d'],
             // Estado secundario se retiró de la vista de Nueva Radicación: lo
             // diligencia otro rol desde el seguimiento del caso.
             'codestsecundario' => ['nullable', 'string', 'max:5'],
             // Fecha Recibido tampoco está en la vista.
-            'fecreci' => ['nullable', 'date'],
-            'fecAutorizacion' => ['required', 'date'],
-            'fechavenautorizacion' => ['required', 'date'],
+            'fecreci' => ['nullable', 'date', 'date_format:Y-m-d'],
+            'fecAutorizacion' => ['required', 'date', 'date_format:Y-m-d'],
+            'fechavenautorizacion' => ['required', 'date', 'date_format:Y-m-d'],
             // Subespecialidad y Motivo se excluyeron de la vista: quedan opcionales.
             'codsubesp' => ['nullable', 'string', 'max:10'],
             'estcod' => ['nullable', 'string', 'max:5'],
@@ -747,6 +752,7 @@ class RadicarCasoController extends Controller
             'procedimientos.*.N_Autorizacion' => ['required', 'string', 'max:20'],
         ], [
             'Ndocumento.exists' => 'El paciente no está registrado. Créelo con el botón + antes de radicar.',
+            'date_format' => 'La :attribute no es válida: revise el año, debe tener 4 dígitos.',
             'procedimientos.required' => 'Debe agregar al menos un procedimiento (CUPS).',
             'procedimientos.min' => 'Debe agregar al menos un procedimiento (CUPS).',
             'procedimientos.*.cusv_id.required' => 'Seleccione el código CUPS.',
@@ -852,19 +858,21 @@ class RadicarCasoController extends Controller
             ],
             // Paquete: si no se sube uno nuevo, se conserva el que ya tenía.
             'paquete' => $this->reglasPaquete(),
-            'fentregapro' => ['required', 'date'],
+            // Año de 4 dígitos, igual que al radicar (ver store()).
+            'fentregapro' => ['required', 'date', 'date_format:Y-m-d'],
             // Fecha Recibido Serv NO se exige aquí: la diligencia el servicio
             // desde Aplicar Modificaciones, no quien edita la radicación.
             // Exigirla dejaba sin poder guardar (ni subir el PDF) cualquier
             // caso que el servicio todavía no hubiera recibido.
-            'fecreci' => ['nullable', 'date'],
-            'fecAutorizacion' => ['required', 'date'],
-            'fechavenautorizacion' => ['required', 'date'],
+            'fecreci' => ['nullable', 'date', 'date_format:Y-m-d'],
+            'fecAutorizacion' => ['required', 'date', 'date_format:Y-m-d'],
+            'fechavenautorizacion' => ['required', 'date', 'date_format:Y-m-d'],
             'ObservacionTFX' => ['nullable', 'string', 'max:65535'],
             'procedimientos' => ['required', 'array', 'min:1'],
             'procedimientos.*.cusv_id' => ['required', 'integer', 'exists:cups,id'],
             'procedimientos.*.N_Autorizacion' => ['nullable', 'string', 'max:20'],
         ], [
+            'date_format' => 'La :attribute no es válida: revise el año, debe tener 4 dígitos.',
             'procedimientos.required' => 'Debe conservar al menos un procedimiento (CUPS).',
             'procedimientos.min' => 'Debe conservar al menos un procedimiento (CUPS).',
             'procedimientos.*.cusv_id.required' => 'Seleccione el código CUPS.',
