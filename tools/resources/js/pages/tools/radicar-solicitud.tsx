@@ -141,6 +141,22 @@ interface ProgramadoRow {
     observaciones: string;
 }
 
+interface SubEspecialidadFiltroOpt {
+    cod_SubEspecialidad: string | null;
+    Nombre: string;
+    // Especialidades (espcodser) con las que la subespecialidad aparece en los
+    // casos. Encadena el filtro de INFORMES; codespcodser del catálogo no
+    // sirve para eso porque no coincide con ninguna especialidad.
+    especialidades: string[];
+}
+
+// ¿La subespecialidad aparece en casos de esa especialidad? Sin distinguir
+// mayúsculas, igual que la base al filtrar.
+const subDeEspecialidad = (s: SubEspecialidadFiltroOpt, especialidad: string) =>
+    s.especialidades.some(
+        (e) => e.toLowerCase() === especialidad.toLowerCase(),
+    );
+
 interface PageProps {
     especialidades: EspecialidadOpt[];
     subespecialidades: SubEspecialidadOpt[];
@@ -151,11 +167,7 @@ interface PageProps {
     epsList: Option[];
     rolesList: Option[];
     especialidadesFiltro: { espcodser: string | null; Nombre: string }[];
-    subespecialidadesFiltro: {
-        cod_SubEspecialidad: string | null;
-        Nombre: string;
-        codespcodser: string;
-    }[];
+    subespecialidadesFiltro: SubEspecialidadFiltroOpt[];
     // Catálogo completo de estados, solo para el filtro de INFORMES: esa
     // grilla muestra todas las radicaciones sin importar el estado, así que su
     // filtro no puede quedar recortado a los estados del rol.
@@ -2100,8 +2112,8 @@ export default function RadicarSolicitud({
     const subOptionsInforme = useMemo(
         () =>
             inf.especialidad
-                ? subespecialidadesFiltro.filter(
-                      (s) => String(s.codespcodser) === inf.especialidad,
+                ? subespecialidadesFiltro.filter((s) =>
+                      subDeEspecialidad(s, inf.especialidad),
                   )
                 : subespecialidadesFiltro,
         [subespecialidadesFiltro, inf.especialidad],
@@ -2112,7 +2124,19 @@ export default function RadicarSolicitud({
         setInfError(null);
 
         // Un período invertido no da error en el servidor: solo devuelve un
-        // informe vacío, que se leería como "no hubo programados".
+        // informe vacío, que se leería como "no hubo movimientos" o "no hubo
+        // programados".
+        if (
+            inf.fechaInicial &&
+            inf.fechaFinal &&
+            inf.fechaInicial > inf.fechaFinal
+        ) {
+            setInfError(
+                'La fecha inicial no puede ser posterior a la fecha final.',
+            );
+            return;
+        }
+
         if (
             inf.programadoInicial &&
             inf.programadoFinal &&
@@ -4534,6 +4558,7 @@ export default function RadicarSolicitud({
                                         <Input
                                             type="date"
                                             value={inf.fechaInicial}
+                                            max={inf.fechaFinal || undefined}
                                             onChange={(e) =>
                                                 setInfField(
                                                     'fechaInicial',
@@ -4546,6 +4571,7 @@ export default function RadicarSolicitud({
                                         <Input
                                             type="date"
                                             value={inf.fechaFinal}
+                                            min={inf.fechaInicial || undefined}
                                             onChange={(e) =>
                                                 setInfField(
                                                     'fechaFinal',
@@ -4595,12 +4621,39 @@ export default function RadicarSolicitud({
                                         <Select
                                             value={inf.especialidad || 'todas'}
                                             onValueChange={(v) =>
-                                                setInf((p) => ({
-                                                    ...p,
-                                                    especialidad:
-                                                        v === 'todas' ? '' : v,
-                                                    subespecialidad: '',
-                                                }))
+                                                setInf((p) => {
+                                                    const especialidad =
+                                                        v === 'todas' ? '' : v;
+                                                    // La subespecialidad ya
+                                                    // elegida se conserva si
+                                                    // tiene casos de la nueva
+                                                    // especialidad; si no, no
+                                                    // estaría en la lista.
+                                                    const sub =
+                                                        subespecialidadesFiltro.find(
+                                                            (s) =>
+                                                                String(
+                                                                    s.cod_SubEspecialidad,
+                                                                ) ===
+                                                                p.subespecialidad,
+                                                        );
+                                                    const conservar =
+                                                        !especialidad ||
+                                                        (sub !== undefined &&
+                                                            subDeEspecialidad(
+                                                                sub,
+                                                                especialidad,
+                                                            ));
+
+                                                    return {
+                                                        ...p,
+                                                        especialidad,
+                                                        subespecialidad:
+                                                            conservar
+                                                                ? p.subespecialidad
+                                                                : '',
+                                                    };
+                                                })
                                             }
                                         >
                                             <SelectTrigger>

@@ -1354,6 +1354,97 @@ test('index shares the filter catalogs from existing cases', function () {
         );
 });
 
+test('la subespecialidad del filtro de informes se encadena a las especialidades de sus casos', function () {
+    $user = User::factory()->create();
+    Especialidad::create(['espcodser' => '154', 'Nombre' => 'Neurotologia', 'Estado' => true]);
+    Especialidad::create(['espcodser' => '137', 'Nombre' => 'Cirugia General', 'Estado' => true]);
+    // El codespcodser del catálogo no coincide con ninguna especialidad: la
+    // cascada no puede depender de él.
+    SubEspecialidad::create(['cod_SubEspecialidad' => 'sb40', 'Nombre' => 'Abdominoplastia', 'Estado' => true, 'codespcodser' => 'serv40']);
+    RadicarCaso::create(['Ndocumento' => '1', 'Codesp' => '154', 'codsubesp' => 'sb40']);
+    RadicarCaso::create(['Ndocumento' => '2', 'Codesp' => '137', 'codsubesp' => 'SB40']);
+
+    $this->actingAs($user)
+        ->get('/tools/radicar-solicitud')
+        ->assertInertia(fn (Assert $page) => $page
+            ->has('subespecialidadesFiltro', 1)
+            ->where('subespecialidadesFiltro.0.cod_SubEspecialidad', 'sb40')
+            ->where('subespecialidadesFiltro.0.especialidades', fn ($esp) => collect($esp)->sort()->values()->all() === ['137', '154'])
+        );
+});
+
+test('cada filtro del informe deja solo las radicaciones que le corresponden', function () {
+    $user = User::factory()->create();
+    $recibido = EstRadicado::create(['Nombre' => 'Recibido', 'Estado' => true]);
+    $programado = EstRadicado::create(['Nombre' => 'Programado', 'Estado' => true]);
+    Especialidad::create(['espcodser' => 'E1', 'Nombre' => 'Esp Uno', 'Estado' => true]);
+    Especialidad::create(['espcodser' => 'E2', 'Nombre' => 'Esp Dos', 'Estado' => true]);
+    SubEspecialidad::create(['cod_SubEspecialidad' => 'S1', 'Nombre' => 'Sub Uno', 'Estado' => true]);
+    $medicoA = User::factory()->create(['rol' => 'Medico', 'name' => 'ALEXANDER', 'Apellido1' => 'OBANDO', 'apellido2' => 'RODALLEGA']);
+    $medicoB = User::factory()->create(['rol' => 'Medico', 'name' => 'ALEXANDER', 'Apellido1' => 'PEREZ', 'apellido2' => '']);
+
+    $a = RadicarCaso::create([
+        'Ndocumento' => '1001', 'estRad' => (string) $recibido->id, 'Codesp' => 'E1',
+        'codsubesp' => 'S1', 'codMed' => (string) $medicoA->id,
+    ]);
+    $b = RadicarCaso::create([
+        'Ndocumento' => '1002', 'estRad' => (string) $programado->id, 'Codesp' => 'E2',
+        'codMed' => (string) $medicoB->id,
+    ]);
+
+    $casos = fn (string $query) => collect(
+        $this->actingAs($user)->getJson('/tools/radicar-solicitud/informe?'.$query)->assertOk()->json('rows')
+    )->pluck('codrad')->unique()->sort()->values()->all();
+
+    expect($casos(''))->toBe([$a->codrad, $b->codrad])
+        ->and($casos('estado='.$programado->id))->toBe([$b->codrad])
+        ->and($casos('especialidad=E1'))->toBe([$a->codrad])
+        ->and($casos('subespecialidad=S1'))->toBe([$a->codrad])
+        ->and($casos('especialidad=E2&subespecialidad=S1'))->toBe([])
+        ->and($casos('documento=1002'))->toBe([$b->codrad])
+        ->and($casos('consecutivo='.$a->codrad))->toBe([$a->codrad])
+        // El médico se encuentra por nombre completo, en cualquier orden, y
+        // no solo por una palabra suelta.
+        ->and($casos('medico=ALEXANDER'))->toBe([$a->codrad, $b->codrad])
+        ->and($casos('medico='.urlencode('ALEXANDER OBANDO')))->toBe([$a->codrad])
+        ->and($casos('medico='.urlencode('obando alexander rodallega')))->toBe([$a->codrad])
+        ->and($casos('medico='.urlencode('ALEXANDER GOMEZ')))->toBe([]);
+});
+
+test('Fecha Inicial y Final del informe filtran por el momento de los movimientos', function () {
+    $user = User::factory()->create();
+
+    // Radicado antes del período, pero con un cambio dentro de él.
+    $conCambio = RadicarCaso::create(['Ndocumento' => '2001']);
+    $conCambio->created_at = '2026-01-10 10:00:00';
+    $conCambio->save();
+    $traza = TrazabilidadCaso::create([
+        'codrad' => $conCambio->codrad, 'user_id' => $user->id, 'evento' => 'modificacion',
+        'campo' => 'estRad', 'etiqueta' => 'Estado Actual', 'anterior' => 'A', 'nuevo' => 'B',
+    ]);
+    $traza->created_at = '2026-03-15 09:00:00';
+    $traza->save();
+
+    // Radicado y modificado fuera del período.
+    $fuera = RadicarCaso::create(['Ndocumento' => '2002']);
+    $fuera->created_at = '2026-01-11 10:00:00';
+    $fuera->save();
+
+    $rows = collect($this->actingAs($user)
+        ->getJson('/tools/radicar-solicitud/informe?fechaInicial=2026-03-01&fechaFinal=2026-03-31')
+        ->assertOk()
+        ->json('rows'));
+
+    expect($rows->pluck('codrad')->unique()->values()->all())->toBe([$conCambio->codrad])
+        ->and($rows->first()['campo'])->toBe('Estado Actual');
+
+    // Una fecha mal formada se rechaza en lugar de dar un informe incoherente.
+    $this->actingAs($user)
+        ->getJson('/tools/radicar-solicitud/informe?fechaInicial=no-es-fecha')
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors('fechaInicial');
+});
+
 test('super admin can delete a case with its procedures and trazabilidad', function () {
     $admin = User::factory()->create(); // el factory crea Super Admin por defecto
     $caso = RadicarCaso::create(['Ndocumento' => '4321']);

@@ -84,6 +84,17 @@ class RadicarCasoController extends Controller
             $estados->first(fn ($estado) => strtolower($estado->Nombre) === 'recibido')
         )->id;
 
+        // Especialidades con las que aparece cada subespecialidad en los casos.
+        // El filtro de INFORMES encadena Subespecialidad a Especialidad con
+        // estos pares reales y no con subespecialidad.codespcodser: ese código
+        // del catálogo no coincide con ningún espcodser, así que al elegir una
+        // especialidad la lista de subespecialidades quedaba vacía. Se agrupa
+        // en minúsculas porque MySQL compara los códigos sin distinguirlas.
+        $espPorSubespecialidad = RadicarCaso::query()
+            ->whereNotNull('codsubesp')->where('codsubesp', '!=', '')
+            ->distinct()->get(['Codesp', 'codsubesp'])
+            ->groupBy(fn ($c) => mb_strtolower($c->codsubesp));
+
         return Inertia::render('tools/radicar-solicitud', [
             'especialidades' => Especialidad::orderBy('Nombre')->get(['id', 'espcodser', 'Nombre']),
             'subespecialidades' => SubEspecialidad::orderBy('Nombre')
@@ -114,9 +125,14 @@ class RadicarCasoController extends Controller
             )->orderBy('Nombre')->get(['espcodser', 'Nombre']),
             'subespecialidadesFiltro' => SubEspecialidad::whereIn(
                 'cod_SubEspecialidad',
-                RadicarCaso::query()->whereNotNull('codsubesp')
-                    ->where('codsubesp', '!=', '')->distinct()->pluck('codsubesp')
-            )->orderBy('Nombre')->get(['cod_SubEspecialidad', 'Nombre', 'codespcodser']),
+                $espPorSubespecialidad->flatten(1)->pluck('codsubesp')->unique()->values()
+            )->orderBy('Nombre')->get(['cod_SubEspecialidad', 'Nombre'])
+                ->map(fn (SubEspecialidad $s) => [
+                    'cod_SubEspecialidad' => $s->cod_SubEspecialidad,
+                    'Nombre' => $s->Nombre,
+                    'especialidades' => ($espPorSubespecialidad->get(mb_strtolower((string) $s->cod_SubEspecialidad)) ?? collect())
+                        ->pluck('Codesp')->filter(fn ($c) => $c !== null && $c !== '')->unique()->values()->all(),
+                ])->values(),
             // Filtro de estado de INFORMES: catálogo completo, no el recortado
             // al rol. Esa grilla muestra todas las radicaciones sin importar
             // el estado, así que ofrecer solo los estados del rol dejaría
@@ -1357,18 +1373,34 @@ class RadicarCasoController extends Controller
         $documentoF = trim((string) $request->query('documento', ''));
         $consecutivoF = trim((string) $request->query('consecutivo', ''));
 
-        // Período de programación: la Fecha y Hora Prog. de la cirugía, la
-        // misma de la grilla "Ver programados". Se valida porque, a
-        // diferencia de los demás filtros, se compara como fecha en SQL.
+        // Los dos períodos se validan porque se comparan como fecha en SQL: una
+        // fecha mal formada no daba error, solo un informe incoherente.
+        // - Fecha Inicial / Final: el momento de cada movimiento.
+        // - Programados: la Fecha y Hora Prog. de la cirugía, la misma de la
+        //   grilla "Ver programados".
         $periodo = $request->validate([
+            'fechaInicial' => ['nullable', 'date'],
+            'fechaFinal' => ['nullable', 'date'],
             'programadoInicial' => ['nullable', 'date'],
             'programadoFinal' => ['nullable', 'date'],
         ], [], [
+            'fechaInicial' => 'fecha inicial',
+            'fechaFinal' => 'fecha final',
             'programadoInicial' => 'fecha inicial programados',
             'programadoFinal' => 'fecha final programados',
         ]);
+        // Normalizadas a Y-m-d: más abajo se comparan como texto contra la
+        // fecha de radicación.
+        $desde = isset($periodo['fechaInicial']) ? \Illuminate\Support\Carbon::parse($periodo['fechaInicial'])->toDateString() : null;
+        $hasta = isset($periodo['fechaFinal']) ? \Illuminate\Support\Carbon::parse($periodo['fechaFinal'])->toDateString() : null;
         $progInicialF = $periodo['programadoInicial'] ?? null;
         $progFinalF = $periodo['programadoFinal'] ?? null;
+
+        // El médico se busca palabra por palabra: cada una debe estar en el
+        // nombre o en alguno de los apellidos. Comparando el texto completo
+        // contra cada columna por separado, "ALEXANDER OBANDO" no encontraba
+        // al médico que sí aparecía buscando solo "OBANDO".
+        $palabrasMedico = preg_split('/\s+/u', $medicoF, -1, PREG_SPLIT_NO_EMPTY);
 
         // 1) Radicaciones que entran al informe. El filtrado por atributos del
         //    caso (estado, especialidad, subespecialidad, médico, documento)
@@ -1390,13 +1422,36 @@ class RadicarCasoController extends Controller
             ->when($estadoF !== '', fn ($q) => $q->where('estRad', $estadoF))
             ->when($espF !== '', fn ($q) => $q->where('Codesp', $espF))
             ->when($subF !== '', fn ($q) => $q->where('codsubesp', $subF))
-            ->when($medicoF !== '', fn ($q) => $q->whereIn(
+            ->when($palabrasMedico !== [], fn ($q) => $q->whereIn(
                 'codMed',
-                User::where(fn ($u) => $u->where('name', 'like', "%{$medicoF}%")
-                    ->orWhere('Apellido1', 'like', "%{$medicoF}%")
-                    ->orWhere('apellido2', 'like', "%{$medicoF}%")
-                )->pluck('id'),
+                User::query()
+                    ->where(function ($u) use ($palabrasMedico) {
+                        foreach ($palabrasMedico as $palabra) {
+                            $u->where(fn ($w) => $w->where('name', 'like', "%{$palabra}%")
+                                ->orWhere('Apellido1', 'like', "%{$palabra}%")
+                                ->orWhere('apellido2', 'like', "%{$palabra}%")
+                            );
+                        }
+                    })
+                    ->pluck('id')
+                    ->map(fn ($id) => (string) $id),
             ))
+            // Con Fecha Inicial / Final solo entran las radicaciones que pueden
+            // aportar filas en ese período: creadas dentro de él o con algún
+            // movimiento dentro de él. Sin este filtro en SQL, el tope de casos
+            // se llenaba con las radicaciones más recientes y las más antiguas
+            // con movimientos en el período quedaban fuera del informe.
+            ->when($desde !== null || $hasta !== null, function ($q) use ($desde, $hasta) {
+                $enPeriodo = fn ($m) => $m
+                    ->when($desde !== null, fn ($f) => $f->whereDate('created_at', '>=', $desde))
+                    ->when($hasta !== null, fn ($f) => $f->whereDate('created_at', '<=', $hasta));
+
+                $q->where(fn ($w) => $w
+                    ->where(fn ($c) => $enPeriodo($c))
+                    ->orWhereIn('codrad', TrazabilidadCaso::query()->tap($enPeriodo)->select('codrad'))
+                    ->orWhereIn('codrad', SeguimientoCaso::query()->tap($enPeriodo)->select('codrad'))
+                );
+            })
             ->orderByDesc('codrad');
 
         // A diferencia de la grilla del Historial, el informe NO se recorta
@@ -1462,10 +1517,10 @@ class RadicarCasoController extends Controller
             ->get(['codrad', 'fecha_programacion'])
             ->groupBy('codrad');
 
-        $rangoFecha = function ($query) use ($request) {
+        $rangoFecha = function ($query) use ($desde, $hasta) {
             return $query
-                ->when($request->filled('fechaInicial'), fn ($q) => $q->whereDate('created_at', '>=', $request->query('fechaInicial')))
-                ->when($request->filled('fechaFinal'), fn ($q) => $q->whereDate('created_at', '<=', $request->query('fechaFinal')));
+                ->when($desde !== null, fn ($q) => $q->whereDate('created_at', '>=', $desde))
+                ->when($hasta !== null, fn ($q) => $q->whereDate('created_at', '<=', $hasta));
         };
 
         // Lo que hizo un Super Admin es invisible para los demás roles. Se
@@ -1662,9 +1717,6 @@ class RadicarCasoController extends Controller
 
         // 3.c) Toda radicación aparece aunque no tenga ni un solo movimiento:
         //      sin esto, una radicación recién creada sería invisible.
-        $desde = $request->filled('fechaInicial') ? $request->query('fechaInicial') : null;
-        $hasta = $request->filled('fechaFinal') ? $request->query('fechaFinal') : null;
-
         foreach ($casos as $caso) {
             // Se usa el conteo real, no las filas que alcanzaron a traerse.
             if ($conMovimiento->has($caso->codrad) || isset($conFilas[$caso->codrad])) {
