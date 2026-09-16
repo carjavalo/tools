@@ -855,6 +855,13 @@ export default function RadicarSolicitud({
     // De paso, la grilla deja de pintar miles de filas de golpe.
     const [infPorPagina, setInfPorPagina] = useState(12);
     const [infPagina, setInfPagina] = useState(1);
+    // Período de programados con el que se generó el informe que se está
+    // viendo. Se guarda aparte de los inputs: si el usuario los cambia sin
+    // volver a generar, la grilla debe seguir resaltando según lo aplicado.
+    const [infPeriodoProg, setInfPeriodoProg] = useState({
+        inicial: '',
+        final: '',
+    });
 
     // Texto largo del informe (Cambio y Observación) mostrado en un panel
     // flotante. Antes se expandía dentro de la celda y estiraba la fila, que
@@ -2108,6 +2115,22 @@ export default function RadicarSolicitud({
         [infRows, infDesde, infPorPagina],
     );
 
+    // ¿El informe se generó con período de programados?
+    const hayPeriodoProg = Boolean(
+        infPeriodoProg.inicial || infPeriodoProg.final,
+    );
+
+    // ¿Una Fecha y Hora de Programación ("Y-m-d H:i") cae en ese período? Se
+    // compara solo el día, con ambos extremos incluidos, igual que el servidor.
+    const enPeriodoProg = (fecha: string) => {
+        const dia = fecha.slice(0, 10);
+
+        return (
+            (!infPeriodoProg.inicial || dia >= infPeriodoProg.inicial) &&
+            (!infPeriodoProg.final || dia <= infPeriodoProg.final)
+        );
+    };
+
     // Subespecialidades del filtro, dependientes de la especialidad elegida.
     const subOptionsInforme = useMemo(
         () =>
@@ -2178,6 +2201,10 @@ export default function RadicarSolicitud({
 
                 setInfRows(d.rows ?? []);
                 setInfTruncado(Boolean(d.truncado));
+                setInfPeriodoProg({
+                    inicial: params.get('programadoInicial') ?? '',
+                    final: params.get('programadoFinal') ?? '',
+                });
             })
             .catch(() => setInfRows([]))
             .finally(() => setInfLoading(false));
@@ -2198,6 +2225,7 @@ export default function RadicarSolicitud({
         const filas = infRows.map((r) => ({
             'N° Caso': r.codrad,
             'Fecha Recibido': r.fechaRecibido ?? '',
+            'Fecha y Hora de Programación': r.fechasProgramacion.join(' / '),
             Documento: r.documento,
             Paciente: r.paciente,
             Teléfonos: r.telefonos,
@@ -2235,7 +2263,6 @@ export default function RadicarSolicitud({
             'OB TFX': r.observacionTfx ?? '',
             'Observaciones CCX': r.observacionCcxCaso ?? '',
             'Estado QX': r.estadoQx,
-            'Fecha y Hora Prog.': r.fechasProgramacion.join(' / '),
             Usuario: r.usuario,
             Modificado: r.modificadoEn ?? '',
         }));
@@ -4756,7 +4783,7 @@ export default function RadicarSolicitud({
                                                     e.target.value,
                                                 )
                                             }
-                                            title="Filtra por la Fecha y Hora Prog. de la cirugía"
+                                            title="Filtra por la Fecha y Hora de Programación de la cirugía"
                                         />
                                     </Field>
                                     <Field label="Fecha Final Programados">
@@ -4773,7 +4800,7 @@ export default function RadicarSolicitud({
                                                     e.target.value,
                                                 )
                                             }
-                                            title="Filtra por la Fecha y Hora Prog. de la cirugía"
+                                            title="Filtra por la Fecha y Hora de Programación de la cirugía"
                                         />
                                     </Field>
                                 </div>
@@ -4843,6 +4870,13 @@ export default function RadicarSolicitud({
                                                 </th>
                                                 <th className="px-3 py-2 font-medium">
                                                     Fecha Recibido
+                                                </th>
+                                                {/* Va junto a Fecha Recibido y
+                                                    no al final: es la columna
+                                                    que filtran Fecha Inicial y
+                                                    Final Programados. */}
+                                                <th className="px-3 py-2 font-medium whitespace-nowrap">
+                                                    Fecha y Hora de Programación
                                                 </th>
                                                 <th className="px-3 py-2 font-medium">
                                                     Documento
@@ -4928,9 +4962,6 @@ export default function RadicarSolicitud({
                                                 <th className="px-3 py-2 font-medium">
                                                     Estado QX
                                                 </th>
-                                                <th className="px-3 py-2 font-medium whitespace-nowrap">
-                                                    Fecha y Hora Prog.
-                                                </th>
                                                 <th className="px-3 py-2 font-medium">
                                                     Usuario
                                                 </th>
@@ -4950,6 +4981,60 @@ export default function RadicarSolicitud({
                                                     </td>
                                                     <td className="px-3 py-2 text-muted-foreground">
                                                         {r.fechaRecibido || '—'}
+                                                    </td>
+                                                    {/* Una línea por cada vez
+                                                        que se programó; la
+                                                        primera es la más
+                                                        reciente. Con período de
+                                                        programados se resaltan
+                                                        las que caen en él (las
+                                                        que hicieron entrar el
+                                                        caso) y las demás, como
+                                                        una reprogramación
+                                                        posterior, se atenúan
+                                                        sin ocultarse. */}
+                                                    <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">
+                                                        {r.fechasProgramacion
+                                                            .length === 0
+                                                            ? '—'
+                                                            : r.fechasProgramacion.map(
+                                                                  (f) => {
+                                                                      const resaltar =
+                                                                          hayPeriodoProg &&
+                                                                          enPeriodoProg(
+                                                                              f,
+                                                                          );
+                                                                      const atenuar =
+                                                                          hayPeriodoProg &&
+                                                                          !resaltar;
+
+                                                                      return (
+                                                                          <div
+                                                                              key={
+                                                                                  f
+                                                                              }
+                                                                              title={
+                                                                                  resaltar
+                                                                                      ? 'Dentro del período programados filtrado'
+                                                                                      : atenuar
+                                                                                        ? 'Fuera del período programados filtrado'
+                                                                                        : undefined
+                                                                              }
+                                                                              className={
+                                                                                  resaltar
+                                                                                      ? 'font-semibold text-[#2d3e83] dark:text-white'
+                                                                                      : atenuar
+                                                                                        ? 'opacity-50'
+                                                                                        : undefined
+                                                                              }
+                                                                          >
+                                                                              {
+                                                                                  f
+                                                                              }
+                                                                          </div>
+                                                                      );
+                                                                  },
+                                                              )}
                                                     </td>
                                                     <td className="px-3 py-2 text-muted-foreground">
                                                         {r.documento}
@@ -5197,26 +5282,6 @@ export default function RadicarSolicitud({
                                                     )}
                                                     <td className="px-3 py-2">
                                                         {r.estadoQx}
-                                                    </td>
-                                                    {/* Una línea por cada vez
-                                                        que se programó; la
-                                                        primera es la más
-                                                        reciente. */}
-                                                    <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">
-                                                        {r.fechasProgramacion
-                                                            .length === 0
-                                                            ? '—'
-                                                            : r.fechasProgramacion.map(
-                                                                  (f) => (
-                                                                      <div
-                                                                          key={
-                                                                              f
-                                                                          }
-                                                                      >
-                                                                          {f}
-                                                                      </div>
-                                                                  ),
-                                                              )}
                                                     </td>
                                                     <td className="px-3 py-2">
                                                         {r.usuario}
@@ -5822,7 +5887,7 @@ export default function RadicarSolicitud({
                                 onChange={(e) =>
                                     setProgramadosDesde(e.target.value)
                                 }
-                                title="Filtra por la Fecha y Hora Prog. de la cirugía"
+                                title="Filtra por la Fecha y Hora de Programación de la cirugía"
                             />
                         </Field>
                         <Field
@@ -5836,7 +5901,7 @@ export default function RadicarSolicitud({
                                 onChange={(e) =>
                                     setProgramadosHasta(e.target.value)
                                 }
-                                title="Filtra por la Fecha y Hora Prog. de la cirugía"
+                                title="Filtra por la Fecha y Hora de Programación de la cirugía"
                             />
                         </Field>
                         <Button
