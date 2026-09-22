@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\EstRadisecundario;
 use App\Models\Permiso;
 use App\Models\ProgramacionCaso;
 use App\Models\RadicarCaso;
@@ -22,6 +23,48 @@ test('una consulta sin sesion responde 401 y no una pagina de login', function (
     $this->getJson('/tools/radicar-solicitud/buscar-caso?q=109')->assertStatus(401);
     $this->putJson('/tools/radicar-solicitud/programacion/1', [])->assertStatus(401);
     $this->deleteJson('/tools/radicar-solicitud/programacion/1')->assertStatus(401);
+});
+
+test('la grilla de Hemo solo trae lo programado por Hemodinamia y la de cirugía el resto', function () {
+    $admin = User::factory()->create();
+    $programados = EstRadisecundario::create(['Nombre' => 'Programados', 'Estado' => true]);
+    $hemo = EstRadisecundario::create(['Nombre' => 'Programado x Hemodinamia', 'Estado' => true]);
+
+    $casoCx = RadicarCaso::create(['Ndocumento' => '4200', 'estRad' => '1']);
+    $casoHemo = RadicarCaso::create(['Ndocumento' => '4201', 'estRad' => '1']);
+    $casoViejo = RadicarCaso::create(['Ndocumento' => '4202', 'estRad' => '1']);
+
+    $cx = ProgramacionCaso::create(['codrad' => $casoCx->codrad, 'codestsecundario' => (string) $programados->id]);
+    $hm = ProgramacionCaso::create(['codrad' => $casoHemo->codrad, 'codestsecundario' => (string) $hemo->id]);
+    // Anterior a que se guardara el Estado QX: cuenta como cirugía.
+    $viejo = ProgramacionCaso::create(['codrad' => $casoViejo->codrad]);
+
+    $idsHemo = collect($this->actingAs($admin)
+        ->getJson('/tools/radicar-solicitud/programados?tipo=hemo')
+        ->assertOk()->json('rows'))->pluck('id')->all();
+
+    $idsCx = collect($this->actingAs($admin)
+        ->getJson('/tools/radicar-solicitud/programados')
+        ->assertOk()->json('rows'))->pluck('id')->sort()->values()->all();
+
+    expect($idsHemo)->toBe([$hm->id])
+        ->and($idsCx)->toBe(collect([$cx->id, $viejo->id])->sort()->values()->all());
+});
+
+test('el seguimiento guarda en la programación el Estado QX con que se programó', function () {
+    $admin = User::factory()->create();
+    $hemo = EstRadisecundario::create(['Nombre' => 'Programado x Hemodinamia', 'Estado' => true]);
+    $caso = RadicarCaso::create(['Ndocumento' => '4203', 'estRad' => '1']);
+
+    $this->actingAs($admin)
+        ->postJson("/tools/radicar-solicitud/{$caso->codrad}/seguimiento", [
+            'codestsecundario' => (string) $hemo->id,
+            'fecha_programacion' => '2026-09-30T10:00',
+        ])
+        ->assertOk();
+
+    expect(ProgramacionCaso::where('codrad', $caso->codrad)->value('codestsecundario'))
+        ->toBe((string) $hemo->id);
 });
 
 test('la grilla de programados entrega los valores crudos para editar la fila', function () {

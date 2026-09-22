@@ -23,6 +23,8 @@ class ProgramacionCaso extends Model
      */
     protected $fillable = [
         'codrad',
+        // Estado QX con el que se programó: distingue cirugía de Hemodinamia.
+        'codestsecundario',
         'fecha_programacion',
         'especialista_medico_id',
         'observaciones_prg',

@@ -1107,6 +1107,7 @@ class RadicarCasoController extends Controller
             if ($esProgramado) {
                 ProgramacionCaso::create(array_merge($datosProgramacion, [
                     'codrad' => $caso->codrad,
+                    'codestsecundario' => $data['codestsecundario'],
                     'user_id' => $request->user()?->id,
                 ]));
             }
@@ -1132,15 +1133,46 @@ class RadicarCasoController extends Controller
     }
 
     /**
+     * Ids de los Estados QX de Hemodinamia ("Programado x Hemodinamia"). Se
+     * buscan por nombre, como "Programados", porque el id cambia entre bases.
+     *
+     * @return list<string>
+     */
+    private function estadosQxHemodinamia(): array
+    {
+        return EstRadisecundario::all(['id', 'Nombre'])
+            ->filter(fn (EstRadisecundario $e) => str_contains(
+                strtolower(\Illuminate\Support\Str::ascii((string) $e->Nombre)),
+                'hemodinamia',
+            ))
+            ->map(fn (EstRadisecundario $e) => (string) $e->id)
+            ->values()
+            ->all();
+    }
+
+    /**
      * Grilla de radicaciones programadas para cirugía. Alimenta el modal
      * "Ver Programados": cada fila cruza una programación con su radicación,
      * el paciente, la especialidad, el especialista y los PDFs (paquete y
      * cotizaciones). Las consultas se hacen por lote —una por relación, no una
      * por fila— para no multiplicar el acceso a la base.
+     *
+     * Con ?tipo=hemo trae solo las programaciones hechas con Estado QX
+     * "Programado x Hemodinamia" (formulario Hemo); sin él, las demás
+     * (cirugía), incluidas las anteriores a que se guardara el Estado QX.
      */
     public function programados(Request $request): JsonResponse
     {
+        $hemodinamia = $this->estadosQxHemodinamia();
+
         $programaciones = ProgramacionCaso::query()
+            ->when(
+                $request->query('tipo') === 'hemo',
+                fn ($q) => $q->whereIn('codestsecundario', $hemodinamia),
+                fn ($q) => $q->where(fn ($q) => $q
+                    ->whereNull('codestsecundario')
+                    ->orWhereNotIn('codestsecundario', $hemodinamia)),
+            )
             ->orderByDesc('fecha_programacion')
             ->orderByDesc('id')
             ->limit(self::TOPE_FILAS_INFORME)

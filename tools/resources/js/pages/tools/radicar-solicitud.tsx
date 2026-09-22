@@ -791,6 +791,11 @@ export default function RadicarSolicitud({
     // Modal "Ver Programados": grilla con todas las radicaciones que están en
     // Estado QX = Programados, con sus datos de programación de cirugía.
     const [programadosOpen, setProgramadosOpen] = useState(false);
+    // Qué grilla muestra el modal: la de cirugía (formulario completo) o la de
+    // Hemodinamia (formulario Hemo, Estado QX "Programado x Hemodinamia").
+    const [programadosTipo, setProgramadosTipo] = useState<'cirugia' | 'hemo'>(
+        'cirugia',
+    );
     const [programadosRows, setProgramadosRows] = useState<ProgramadoRow[]>([]);
     const [programadosLoading, setProgramadosLoading] = useState(false);
     const [programadosError, setProgramadosError] = useState<string | null>(
@@ -1475,10 +1480,14 @@ export default function RadicarSolicitud({
     // Trae la grilla desde el servidor. Se usa al abrir el modal y después de
     // editar o borrar una fila: como el orden depende de la fecha programada,
     // corregirla puede mover la fila de sitio y solo el servidor sabe dónde.
-    const cargarProgramados = () => {
+    const cargarProgramados = (tipo = programadosTipo) => {
         setProgramadosLoading(true);
         setProgramadosError(null);
-        fetch('/tools/radicar-solicitud/programados', {
+        const url =
+            tipo === 'hemo'
+                ? '/tools/radicar-solicitud/programados?tipo=hemo'
+                : '/tools/radicar-solicitud/programados';
+        fetch(url, {
             headers: { Accept: 'application/json' },
         })
             .then(async (r) => {
@@ -1511,14 +1520,17 @@ export default function RadicarSolicitud({
     };
 
     // Abre el modal "Ver Programados" y trae la grilla desde el servidor.
-    const abrirProgramados = () => {
+    const abrirProgramados = (tipo: 'cirugia' | 'hemo' = 'cirugia') => {
+        setProgramadosTipo(tipo);
+        // Sin esto se veían un instante las filas de la otra grilla.
+        setProgramadosRows([]);
         setProgramadosOpen(true);
         setProgramadosFiltro('');
         setProgramadosDesde('');
         setProgramadosHasta('');
         setProgramadosOk(null);
         setProgObsAbiertas(new Set());
-        cargarProgramados();
+        cargarProgramados(tipo);
     };
 
     const alternarProgObs = (id: number) =>
@@ -4469,7 +4481,9 @@ export default function RadicarSolicitud({
                                                 <Button
                                                     type="button"
                                                     variant="outline"
-                                                    onClick={abrirProgramados}
+                                                    onClick={() =>
+                                                        abrirProgramados()
+                                                    }
                                                     title="Ver las radicaciones programadas para cirugía"
                                                     className="h-11 gap-2 text-[#2d3e83] dark:text-white"
                                                 >
@@ -4667,7 +4681,7 @@ export default function RadicarSolicitud({
                                                     {f.estadoQx
                                                         ?.esProgramado && (
                                                         <>
-                                                            <Field label="Fecha y Hora de Programación">
+                                                            <Field label="Fecha y Hora de Programación Hemo">
                                                                 <Input
                                                                     type="datetime-local"
                                                                     value={
@@ -4764,7 +4778,7 @@ export default function RadicarSolicitud({
                                                                 </Select>
                                                             </Field>
                                                             <Field
-                                                                label="Observaciones Prg"
+                                                                label="Observaciones Hemo"
                                                                 className="lg:col-span-2"
                                                             >
                                                                 <Textarea
@@ -4807,23 +4821,41 @@ export default function RadicarSolicitud({
                                                         }
                                                     />
                                                 </div>
-                                                <Button
-                                                    type="submit"
-                                                    disabled={f.ocupado}
-                                                    className="mt-4 h-11 w-full gap-2 font-semibold text-gray-900 hover:opacity-90"
-                                                    style={{
-                                                        backgroundColor:
-                                                            '#eab308',
-                                                    }}
-                                                >
-                                                    {f.ocupado ? (
-                                                        <LoaderCircle className="size-5 animate-spin" />
-                                                    ) : (
-                                                        <Save className="size-5" />
+                                                <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                                                    <Button
+                                                        type="submit"
+                                                        disabled={f.ocupado}
+                                                        className="h-11 flex-1 gap-2 font-semibold text-gray-900 hover:opacity-90"
+                                                        style={{
+                                                            backgroundColor:
+                                                                '#eab308',
+                                                        }}
+                                                    >
+                                                        {f.ocupado ? (
+                                                            <LoaderCircle className="size-5 animate-spin" />
+                                                        ) : (
+                                                            <Save className="size-5" />
+                                                        )}
+                                                        Aplicar Modificaciones
+                                                        al Caso
+                                                    </Button>
+                                                    {f.estadoQx && (
+                                                        <Button
+                                                            type="button"
+                                                            variant="outline"
+                                                            onClick={() =>
+                                                                abrirProgramados(
+                                                                    'hemo',
+                                                                )
+                                                            }
+                                                            title="Ver las radicaciones programadas por Hemodinamia"
+                                                            className="h-11 gap-2 text-[#2d3e83] dark:text-white"
+                                                        >
+                                                            <CalendarClock className="size-5" />
+                                                            Ver programados
+                                                        </Button>
                                                     )}
-                                                    Aplicar Modificaciones al
-                                                    Caso
-                                                </Button>
+                                                </div>
                                             </form>
                                         ))}
                                 </div>
@@ -6136,12 +6168,16 @@ export default function RadicarSolicitud({
                     <DialogHeader>
                         <DialogTitle className="flex items-center gap-2">
                             <CalendarClock className="size-5 text-[#2d3e83] dark:text-white" />
-                            Radicaciones programadas para cirugía
+                            {programadosTipo === 'hemo'
+                                ? 'Radicaciones programadas por Hemodinamia'
+                                : 'Radicaciones programadas para cirugía'}
                         </DialogTitle>
                         <DialogDescription>
-                            Casos con Estado QX en “Programados”. Se ordenan por
-                            fecha y hora de programación, de la más reciente a
-                            la más antigua.
+                            {programadosTipo === 'hemo'
+                                ? 'Casos programados con Estado QX en “Programado x Hemodinamia”.'
+                                : 'Casos con Estado QX en “Programados”.'}{' '}
+                            Se ordenan por fecha y hora de programación, de la
+                            más reciente a la más antigua.
                         </DialogDescription>
                     </DialogHeader>
 
