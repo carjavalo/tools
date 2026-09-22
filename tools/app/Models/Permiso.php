@@ -47,6 +47,12 @@ class Permiso extends Model
         // formulario básico, viene apagada: sin asignarla al rol solo el Super
         // Admin ve los botones.
         ['key' => 'radicar-solicitud-programados', 'titulo' => 'Grilla ver programados', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver', 'editar', 'borrar']],
+        // Botones "Ver programados" sueltos, en la barra de pestañas: dan la
+        // consulta de cada grilla a quien no tiene el formulario que la lleva.
+        // Vienen apagados; los botones de cada fila siguen rigiéndose por
+        // "Grilla ver programados".
+        ['key' => 'radicar-solicitud-ver-programados', 'titulo' => 'Botón Ver programados (Formulario Aplicar Modificaciones)', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver']],
+        ['key' => 'radicar-solicitud-ver-programados-hemo', 'titulo' => 'Botón Ver programados Hemo (Formulario Aplicar Modificaciones Hemo)', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver']],
         ['key' => 'gestion-usuarios', 'titulo' => 'Gestión de Usuarios', 'grupo' => 'Herramientas', 'acciones' => ['ver', 'crear', 'editar', 'borrar']],
         ['key' => 'gestion-roles', 'titulo' => 'Gestión de Roles', 'grupo' => 'Herramientas', 'acciones' => ['ver', 'crear', 'editar', 'borrar']],
         ['key' => 'gestion-eps', 'titulo' => 'Gestión de EPS', 'grupo' => 'Herramientas', 'acciones' => ['ver', 'crear', 'editar', 'borrar']],
@@ -77,6 +83,8 @@ class Permiso extends Model
      */
     public const VISTAS_OPT_IN = [
         'radicar-solicitud-programados',
+        'radicar-solicitud-ver-programados',
+        'radicar-solicitud-ver-programados-hemo',
     ];
 
     /**

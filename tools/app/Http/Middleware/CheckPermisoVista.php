@@ -64,6 +64,12 @@ class CheckPermisoVista
                 return $next($request);
             }
 
+            // Grilla "Ver programados": la consulta quien tiene el formulario
+            // que lleva el botón o el botón suelto asignado en el Gestor.
+            if ($sub === 'programados' && ! $this->puedeVerProgramados($role->id, $request->query('tipo') === 'hemo')) {
+                return $this->denegar($request, 'ver');
+            }
+
             $tab = match (true) {
                 $sub === 'buscar-caso' => 'radicar-solicitud-historial',
                 $sub === 'informe' => 'radicar-solicitud-informes',
@@ -173,6 +179,33 @@ class CheckPermisoVista
         return (! $completo || $completo->ver)
             || ($basico && $basico->ver)
             || ($hemo && $hemo->ver);
+    }
+
+    /**
+     * ¿El rol puede consultar la grilla "Ver programados"? La de cirugía va con
+     * el formulario Aplicar Modificaciones (permitido si no está configurado,
+     * como siempre) y la de Hemo con el formulario Hemo. En los dos casos
+     * también la abre el botón suelto, que hay que asignar expresamente.
+     */
+    private function puedeVerProgramados(int $roleId, bool $hemo): bool
+    {
+        [$formulario, $boton] = $hemo
+            ? ['radicar-solicitud-seguimiento-hemo', 'radicar-solicitud-ver-programados-hemo']
+            : ['radicar-solicitud-seguimiento', 'radicar-solicitud-ver-programados'];
+
+        $permisos = Permiso::where('role_id', $roleId)
+            ->whereIn('vista', [$formulario, $boton])
+            ->get()
+            ->keyBy('vista');
+
+        $form = $permisos->get($formulario);
+        $btn = $permisos->get($boton);
+
+        $formularioPermitido = $hemo
+            ? ($form && $form->ver)
+            : (! $form || $form->ver);
+
+        return $formularioPermitido || ($btn && $btn->ver);
     }
 
     /**

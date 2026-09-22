@@ -51,6 +51,56 @@ test('la grilla de Hemo solo trae lo programado por Hemodinamia y la de cirugía
         ->and($idsCx)->toBe(collect([$cx->id, $viejo->id])->sort()->values()->all());
 });
 
+test('los botones Ver programados se asignan en el Gestor y vienen apagados', function () {
+    $claves = collect(Permiso::VISTAS)->pluck('key');
+
+    expect($claves)->toContain('radicar-solicitud-ver-programados')
+        ->and($claves)->toContain('radicar-solicitud-ver-programados-hemo')
+        ->and(Permiso::VISTAS_OPT_IN)->toContain('radicar-solicitud-ver-programados')
+        ->and(Permiso::VISTAS_OPT_IN)->toContain('radicar-solicitud-ver-programados-hemo');
+});
+
+test('el botón Ver programados Hemo da la grilla Hemo sin el formulario Hemo', function () {
+    $rol = Role::create(['Nombre' => 'Consulta Hemo', 'Estado' => true]);
+    $usuario = User::factory()->create(['rol' => 'Consulta Hemo']);
+
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud', 'ver' => true]);
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud-seguimiento', 'ver' => false]);
+
+    // Sin el formulario Hemo ni el botón: no entra.
+    $this->actingAs($usuario)
+        ->getJson('/tools/radicar-solicitud/programados?tipo=hemo')
+        ->assertForbidden();
+
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud-ver-programados-hemo', 'ver' => true]);
+
+    $this->actingAs($usuario)
+        ->getJson('/tools/radicar-solicitud/programados?tipo=hemo')
+        ->assertOk();
+
+    // El botón Hemo no abre la grilla de cirugía.
+    $this->actingAs($usuario)
+        ->getJson('/tools/radicar-solicitud/programados')
+        ->assertForbidden();
+});
+
+test('el botón Ver programados da la grilla de cirugía sin el formulario completo', function () {
+    $rol = Role::create(['Nombre' => 'Consulta Cx', 'Estado' => true]);
+    $usuario = User::factory()->create(['rol' => 'Consulta Cx']);
+
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud', 'ver' => true]);
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud-seguimiento', 'ver' => false]);
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud-ver-programados', 'ver' => true]);
+
+    $this->actingAs($usuario)
+        ->getJson('/tools/radicar-solicitud/programados')
+        ->assertOk();
+
+    $this->actingAs($usuario)
+        ->getJson('/tools/radicar-solicitud/programados?tipo=hemo')
+        ->assertForbidden();
+});
+
 test('el seguimiento guarda en la programación el Estado QX con que se programó', function () {
     $admin = User::factory()->create();
     $hemo = EstRadisecundario::create(['Nombre' => 'Programado x Hemodinamia', 'Estado' => true]);
