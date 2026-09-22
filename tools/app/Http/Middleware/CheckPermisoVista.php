@@ -148,24 +148,31 @@ class CheckPermisoVista
 
     /**
      * ¿El rol puede registrar un seguimiento? Lo autoriza cualquiera de los
-     * dos formularios que escriben en ese endpoint: el completo (Aplicar
-     * Modificaciones) o el básico.
+     * formularios que escriben en ese endpoint: el completo (Aplicar
+     * Modificaciones), el básico o el de Hemo.
      *
      * El completo, sin configurar, se permite —es la regla histórica de las
-     * sub-vistas—. El básico, en cambio, solo cuenta si está explícitamente
-     * asignado: es una sub-vista nueva y no debe activarse sola.
+     * sub-vistas—. El básico y el de Hemo, en cambio, solo cuentan si están
+     * explícitamente asignados: son sub-vistas nuevas y no deben activarse solas.
      */
     private function puedeSeguimiento(int $roleId): bool
     {
         $permisos = Permiso::where('role_id', $roleId)
-            ->whereIn('vista', ['radicar-solicitud-seguimiento', 'radicar-solicitud-seguimiento-basico'])
+            ->whereIn('vista', [
+                'radicar-solicitud-seguimiento',
+                'radicar-solicitud-seguimiento-basico',
+                'radicar-solicitud-seguimiento-hemo',
+            ])
             ->get()
             ->keyBy('vista');
 
         $completo = $permisos->get('radicar-solicitud-seguimiento');
         $basico = $permisos->get('radicar-solicitud-seguimiento-basico');
+        $hemo = $permisos->get('radicar-solicitud-seguimiento-hemo');
 
-        return (! $completo || $completo->ver) || ($basico && $basico->ver);
+        return (! $completo || $completo->ver)
+            || ($basico && $basico->ver)
+            || ($hemo && $hemo->ver);
     }
 
     /**

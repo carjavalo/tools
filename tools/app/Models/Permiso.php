@@ -36,6 +36,9 @@ class Permiso extends Model
         // en el mismo sitio que el completo. A diferencia del resto de
         // sub-vistas, viene apagada: hay que asignarla al rol para que aparezca.
         ['key' => 'radicar-solicitud-seguimiento-basico', 'titulo' => 'Formulario básico Cotizaciones de Conceptos No Convenidos (Historial)', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver']],
+        // Copia del formulario básico para Hemodinamia: mismos campos, mismo
+        // endpoint y, como aquel, apagada hasta que se asigne al rol.
+        ['key' => 'radicar-solicitud-seguimiento-hemo', 'titulo' => 'Formulario Aplicar Modificaciones (Historial) Hemo', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver']],
         ['key' => 'radicar-solicitud-seguimiento', 'titulo' => 'Formulario Aplicar Modificaciones (Historial)', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver']],
         ['key' => 'radicar-solicitud-grilla', 'titulo' => 'Grilla de Radicaciones (Historial)', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver']],
         // Botones por fila del modal "Radicaciones programadas para cirugía".

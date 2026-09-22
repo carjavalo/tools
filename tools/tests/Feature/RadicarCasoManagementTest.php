@@ -11,6 +11,7 @@ use App\Models\EstRadicado;
 use App\Models\EstRadisecundario;
 use App\Models\Motivo;
 use App\Models\Permiso;
+use App\Models\ProgramacionCaso;
 use App\Models\RadicarCaso;
 use App\Models\Role;
 use App\Models\SeguimientoCaso;
@@ -1622,6 +1623,73 @@ test('un rol que solo tiene el formulario básico puede guardar el seguimiento',
     expect($caso->fecreci->format('Y-m-d'))->toBe('2026-08-26')
         ->and($caso->ObservacionCCX)->toStartWith('Recibido por el servicio')
         ->and($caso->ObservacionCCX)->toContain($usuario->name);
+});
+
+test('la sub-vista del formulario Hemo existe y va justo debajo del básico', function () {
+    $claves = collect(Permiso::VISTAS)->pluck('key')->values();
+    $vista = collect(Permiso::VISTAS)
+        ->firstWhere('key', 'radicar-solicitud-seguimiento-hemo');
+
+    expect($vista)->not->toBeNull()
+        ->and($vista['titulo'])->toBe('Formulario Aplicar Modificaciones (Historial) Hemo')
+        ->and($claves->search('radicar-solicitud-seguimiento-hemo'))
+        ->toBe($claves->search('radicar-solicitud-seguimiento-basico') + 1);
+});
+
+test('un rol que solo tiene el formulario Hemo puede guardar el seguimiento', function () {
+    $rol = Role::create(['Nombre' => 'Servicio Hemo', 'Estado' => true]);
+    $usuario = User::factory()->create(['rol' => 'Servicio Hemo']);
+
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud', 'ver' => true]);
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud-seguimiento', 'ver' => false]);
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud-seguimiento-hemo', 'ver' => true]);
+
+    $estado = EstRadicado::create(['Nombre' => 'Recibido Hemo', 'Estado' => true]);
+    $rol->estadosRadicado()->sync([$estado->id]);
+
+    $caso = RadicarCaso::create(['Ndocumento' => '9993', 'estRad' => (string) $estado->id]);
+
+    $this->actingAs($usuario)
+        ->postJson("/tools/radicar-solicitud/{$caso->codrad}/seguimiento", [
+            'estRad' => (string) $estado->id,
+            'fecreci' => '2026-09-22',
+            'ObservacionCCX' => 'Recibido por Hemo',
+        ])
+        ->assertOk();
+
+    $caso->refresh();
+    expect($caso->fecreci->format('Y-m-d'))->toBe('2026-09-22')
+        ->and($caso->ObservacionCCX)->toStartWith('Recibido por Hemo');
+});
+
+test('el formulario Hemo guarda el Estado QX y la programación de cirugía', function () {
+    $rol = Role::create(['Nombre' => 'Servicio Hemo QX', 'Estado' => true]);
+    $usuario = User::factory()->create(['rol' => 'Servicio Hemo QX']);
+
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud', 'ver' => true]);
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud-seguimiento', 'ver' => false]);
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud-seguimiento-hemo', 'ver' => true]);
+
+    $programados = EstRadisecundario::create(['Nombre' => 'Programados', 'Estado' => true]);
+    $especialista = User::factory()->create(['rol' => 'Medico']);
+    $caso = RadicarCaso::create(['Ndocumento' => '9994', 'estRad' => '1']);
+
+    $this->actingAs($usuario)
+        ->postJson("/tools/radicar-solicitud/{$caso->codrad}/seguimiento", [
+            'codestsecundario' => (string) $programados->id,
+            'fecha_programacion' => '2026-09-25T08:00',
+            'especialista_medico_id' => $especialista->id,
+            'observaciones_prg' => 'Cateterismo',
+        ])
+        ->assertOk();
+
+    $prog = ProgramacionCaso::where('codrad', $caso->codrad)->first();
+
+    expect($caso->refresh()->codestsecundario)->toBe((string) $programados->id)
+        ->and($prog)->not->toBeNull()
+        ->and($prog->fecha_programacion->format('Y-m-d H:i'))->toBe('2026-09-25 08:00')
+        ->and($prog->especialista_medico_id)->toBe($especialista->id)
+        ->and($prog->observaciones_prg)->toBe('Cateterismo');
 });
 
 test('sin ninguno de los dos formularios asignados no se puede guardar el seguimiento', function () {

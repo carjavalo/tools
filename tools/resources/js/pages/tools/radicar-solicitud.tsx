@@ -381,6 +381,18 @@ const EMPTY_SEG_BASICO = {
     ObservacionCCX: '',
 };
 
+/**
+ * Formulario Hemo del Historial: el básico más el Estado QX y, cuando este es
+ * "Programados", los datos de la cirugía programada, igual que el completo.
+ */
+const EMPTY_SEG_HEMO = {
+    ...EMPTY_SEG_BASICO,
+    codestsecundario: '',
+    fecha_programacion: '',
+    especialista_medico_id: '',
+    observaciones_prg: '',
+};
+
 const EMPTY_INF = {
     fechaInicial: '',
     fechaFinal: '',
@@ -726,9 +738,9 @@ export default function RadicarSolicitud({
     // recién creado: al de Nueva Radicación ('codMed') o al de Especialista de
     // la programación de cirugía ('especialista'). Así el mismo modal sirve a
     // los dos selectores sin pisarse.
-    const [medicoDestino, setMedicoDestino] = useState<'codMed' | 'especialista'>(
-        'codMed',
-    );
+    const [medicoDestino, setMedicoDestino] = useState<
+        'codMed' | 'especialista' | 'especialistaHemo'
+    >('codMed');
     // Lista de médicos del selector: parte de la prop del servidor y crece
     // cuando se crea uno desde el modal, sin recargar la página.
     const [medicosList, setMedicosList] = useState<MedicoOpt[]>(medicos);
@@ -765,6 +777,11 @@ export default function RadicarSolicitud({
     const [aplicandoBasico, setAplicandoBasico] = useState(false);
     const [segBasicoOk, setSegBasicoOk] = useState(false);
     const [segBasicoError, setSegBasicoError] = useState<string | null>(null);
+    // Formulario Hemo: igual al básico, con su propio estado por la misma razón.
+    const [segHemo, setSegHemo] = useState({ ...EMPTY_SEG_HEMO });
+    const [aplicandoHemo, setAplicandoHemo] = useState(false);
+    const [segHemoOk, setSegHemoOk] = useState(false);
+    const [segHemoError, setSegHemoError] = useState<string | null>(null);
     const [borrarOpen, setBorrarOpen] = useState(false);
     const [borrarError, setBorrarError] = useState<string | null>(null);
     // El servidor dejó de reconocer la sesión (401 o 419). Se avisa en un
@@ -1178,11 +1195,13 @@ export default function RadicarSolicitud({
     // Botón + del campo Especialista Médico (programación de cirugía): mismo
     // modal de crear médico, pero el médico creado queda seleccionado en el
     // campo de programación, no en el de Nueva Radicación.
-    const openCrearEspecialista = () => {
+    const openCrearEspecialista = (
+        destino: 'especialista' | 'especialistaHemo' = 'especialista',
+    ) => {
         setUserErrors({});
         setEditandoId(null);
         setModoUsuario('medico');
-        setMedicoDestino('especialista');
+        setMedicoDestino(destino);
         setNuevoUsuario({ ...EMPTY_USUARIO, rol: 'Medico' });
         setCrearOpen(true);
     };
@@ -1305,6 +1324,11 @@ export default function RadicarSolicitud({
                             'especialista_medico_id',
                             String(medico.id),
                         );
+                    } else if (medicoDestino === 'especialistaHemo') {
+                        setSegHemoField(
+                            'especialista_medico_id',
+                            String(medico.id),
+                        );
                     } else {
                         form.setData('codMed', String(medico.id));
                     }
@@ -1410,12 +1434,13 @@ export default function RadicarSolicitud({
 
     // Cambiar el Estado QX. Al dejar de ser "Programados" se limpian los tres
     // campos de programación para que no viajen valores de un estado anterior.
-    const setEstadoQx = (valor: string) => {
+    // La usan el formulario completo y el de Hemo.
+    const cambiosEstadoQx = (valor: string) => {
         const programado = esEstadoProgramado(
             estadosSecundarios.find((s) => String(s.id) === valor)?.Nombre,
         );
-        setSeg((prev) => ({
-            ...prev,
+
+        return {
             codestsecundario: valor,
             ...(programado
                 ? {}
@@ -1424,8 +1449,28 @@ export default function RadicarSolicitud({
                       especialista_medico_id: '',
                       observaciones_prg: '',
                   }),
-        }));
+        };
     };
+
+    const setEstadoQx = (valor: string) =>
+        setSeg((prev) => ({ ...prev, ...cambiosEstadoQx(valor) }));
+
+    // Formulario Hemo: mismo Estado QX y misma programación que el completo.
+    const setSegHemoField = (campo: string, valor: string) =>
+        setSegHemo((prev) => ({ ...prev, [campo]: valor }));
+
+    const setEstadoQxHemo = (valor: string) =>
+        setSegHemo((prev) => ({ ...prev, ...cambiosEstadoQx(valor) }));
+
+    const segHemoEsProgramado = useMemo(
+        () =>
+            esEstadoProgramado(
+                estadosSecundarios.find(
+                    (s) => String(s.id) === String(segHemo.codestsecundario),
+                )?.Nombre,
+            ),
+        [estadosSecundarios, segHemo.codestsecundario],
+    );
 
     // Trae la grilla desde el servidor. Se usa al abrir el modal y después de
     // editar o borrar una fila: como el orden depende de la fecha programada,
@@ -2065,6 +2110,17 @@ export default function RadicarSolicitud({
         );
     };
 
+    const aplicarModificacionHemo = (e: FormEvent) => {
+        e.preventDefault();
+        enviarSeguimiento(
+            segHemo,
+            () => setSegHemo({ ...EMPTY_SEG_HEMO }),
+            setAplicandoHemo,
+            setSegHemoOk,
+            setSegHemoError,
+        );
+    };
+
     const borrarCaso = () => {
         if (!caso) return;
         setBorrando(true);
@@ -2411,6 +2467,12 @@ export default function RadicarSolicitud({
     const puedeAplicarModificacionesBasico =
         esSuperAdmin ||
         permisosUsuario['radicar-solicitud-seguimiento-basico']?.ver === true;
+
+    // Formulario Hemo (Historial): copia del básico, con la misma regla de
+    // asignación expresa.
+    const puedeAplicarModificacionesHemo =
+        esSuperAdmin ||
+        permisosUsuario['radicar-solicitud-seguimiento-hemo']?.ver === true;
 
     // Botones de cada fila del modal "Ver programados". Se rigen por la
     // sub-vista "Grilla ver programados" del Gestor de Permisos: "ver" habilita
@@ -4288,8 +4350,8 @@ export default function RadicarSolicitud({
                                                             action={
                                                                 <button
                                                                     type="button"
-                                                                    onClick={
-                                                                        openCrearEspecialista
+                                                                    onClick={() =>
+                                                                        openCrearEspecialista()
                                                                     }
                                                                     title="Crear un médico nuevo si no aparece en la lista"
                                                                     className="inline-flex size-5 items-center justify-center rounded-md bg-[#2d3e83]/10 text-[#2d3e83] transition-colors hover:bg-[#2d3e83]/20 dark:bg-white/10 dark:text-white"
@@ -4318,7 +4380,8 @@ export default function RadicarSolicitud({
                                                                     {medicosList.length ===
                                                                         0 && (
                                                                         <div className="px-2 py-1.5 text-xs text-muted-foreground">
-                                                                            No hay
+                                                                            No
+                                                                            hay
                                                                             médicos
                                                                             registrados.
                                                                         </div>
@@ -4422,127 +4485,347 @@ export default function RadicarSolicitud({
                                         radicación. Se administra por su propia
                                         sub-vista del Gestor de Permisos y
                                         convive con el completo cuando el rol
-                                        tiene las dos asignadas. */}
-                                    {puedeAplicarModificacionesBasico && (
-                                        <form
-                                            onSubmit={aplicarModificacionBasica}
-                                            className="rounded-xl border bg-card p-4 shadow-sm"
-                                        >
-                                            <div className="mb-3 text-xs font-bold tracking-wide text-[#2d3e83] uppercase dark:text-white">
-                                                Formulario básico — recepción
-                                                del servicio
-                                            </div>
-                                            {segBasicoOk && (
-                                                <div className="mb-3 flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800 dark:border-green-900 dark:bg-green-950 dark:text-green-200">
-                                                    <CheckCircle2 className="size-4" />
-                                                    Modificación registrada en
-                                                    la trazabilidad del caso.
+                                        tiene las dos asignadas. El de Hemo es
+                                        una copia con su propia sub-vista. */}
+                                    {[
+                                        {
+                                            key: 'basico',
+                                            visible:
+                                                puedeAplicarModificacionesBasico,
+                                            titulo: 'Formulario básico — recepción del servicio',
+                                            valores: segBasico,
+                                            setCampo: (
+                                                campo: string,
+                                                valor: string,
+                                            ) =>
+                                                setSegBasico((prev) => ({
+                                                    ...prev,
+                                                    [campo]: valor,
+                                                })),
+                                            estadoQx: null,
+                                            onSubmit: aplicarModificacionBasica,
+                                            ocupado: aplicandoBasico,
+                                            ok: segBasicoOk,
+                                            error: segBasicoError,
+                                        },
+                                        {
+                                            key: 'hemo',
+                                            visible:
+                                                puedeAplicarModificacionesHemo,
+                                            titulo: 'Formulario Hemo — recepción del servicio',
+                                            valores: segHemo,
+                                            setCampo: setSegHemoField,
+                                            estadoQx: {
+                                                valores: segHemo,
+                                                onChange: setEstadoQxHemo,
+                                                esProgramado:
+                                                    segHemoEsProgramado,
+                                            },
+                                            onSubmit: aplicarModificacionHemo,
+                                            ocupado: aplicandoHemo,
+                                            ok: segHemoOk,
+                                            error: segHemoError,
+                                        },
+                                    ]
+                                        .filter((f) => f.visible)
+                                        .map((f) => (
+                                            <form
+                                                key={f.key}
+                                                onSubmit={f.onSubmit}
+                                                className="rounded-xl border bg-card p-4 shadow-sm"
+                                            >
+                                                <div className="mb-3 text-xs font-bold tracking-wide text-[#2d3e83] uppercase dark:text-white">
+                                                    {f.titulo}
                                                 </div>
-                                            )}
-                                            {segBasicoError && (
-                                                <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
-                                                    {segBasicoError}
-                                                </div>
-                                            )}
-                                            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                                                <Field label="Estado Actual">
-                                                    <Select
-                                                        value={segBasico.estRad}
-                                                        onValueChange={(v) =>
-                                                            setSegBasico(
-                                                                (prev) => ({
-                                                                    ...prev,
-                                                                    estRad: v,
-                                                                }),
-                                                            )
-                                                        }
-                                                    >
-                                                        <SelectTrigger>
-                                                            <SelectValue placeholder="Seleccione…" />
-                                                        </SelectTrigger>
-                                                        <SelectContent>
-                                                            {estados.length ===
-                                                                0 && (
-                                                                <div className="px-2 py-1.5 text-xs text-muted-foreground">
-                                                                    Tu rol no
-                                                                    tiene
-                                                                    estados
-                                                                    asignados.
-                                                                </div>
-                                                            )}
-                                                            {estados.map(
-                                                                (s) => (
-                                                                    <SelectItem
-                                                                        key={
-                                                                            s.id
+                                                {f.ok && (
+                                                    <div className="mb-3 flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800 dark:border-green-900 dark:bg-green-950 dark:text-green-200">
+                                                        <CheckCircle2 className="size-4" />
+                                                        Modificación registrada
+                                                        en la trazabilidad del
+                                                        caso.
+                                                    </div>
+                                                )}
+                                                {f.error && (
+                                                    <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
+                                                        {f.error}
+                                                    </div>
+                                                )}
+                                                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                                                    <Field label="Estado Actual">
+                                                        <Select
+                                                            value={
+                                                                f.valores.estRad
+                                                            }
+                                                            onValueChange={(
+                                                                v,
+                                                            ) =>
+                                                                f.setCampo(
+                                                                    'estRad',
+                                                                    v,
+                                                                )
+                                                            }
+                                                        >
+                                                            <SelectTrigger>
+                                                                <SelectValue placeholder="Seleccione…" />
+                                                            </SelectTrigger>
+                                                            <SelectContent>
+                                                                {estados.length ===
+                                                                    0 && (
+                                                                    <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                                                                        Tu rol
+                                                                        no tiene
+                                                                        estados
+                                                                        asignados.
+                                                                    </div>
+                                                                )}
+                                                                {estados.map(
+                                                                    (s) => (
+                                                                        <SelectItem
+                                                                            key={
+                                                                                s.id
+                                                                            }
+                                                                            value={String(
+                                                                                s.id,
+                                                                            )}
+                                                                        >
+                                                                            {
+                                                                                s.Nombre
+                                                                            }
+                                                                        </SelectItem>
+                                                                    ),
+                                                                )}
+                                                            </SelectContent>
+                                                        </Select>
+                                                    </Field>
+                                                    <Field label="Fecha Recibido Serv">
+                                                        <Input
+                                                            type="date"
+                                                            value={
+                                                                f.valores
+                                                                    .fecreci
+                                                            }
+                                                            onChange={(e) =>
+                                                                f.setCampo(
+                                                                    'fecreci',
+                                                                    e.target
+                                                                        .value,
+                                                                )
+                                                            }
+                                                        />
+                                                    </Field>
+                                                    {f.estadoQx && (
+                                                        <Field label="Estado QX">
+                                                            <Select
+                                                                value={
+                                                                    f.estadoQx
+                                                                        .valores
+                                                                        .codestsecundario
+                                                                }
+                                                                onValueChange={
+                                                                    f.estadoQx
+                                                                        .onChange
+                                                                }
+                                                            >
+                                                                <SelectTrigger>
+                                                                    <SelectValue placeholder="Seleccione…" />
+                                                                </SelectTrigger>
+                                                                <SelectContent>
+                                                                    {estadosSecundarios.length ===
+                                                                        0 && (
+                                                                        <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                                                                            No
+                                                                            hay
+                                                                            estados
+                                                                            QX
+                                                                            creados.
+                                                                        </div>
+                                                                    )}
+                                                                    {estadosSecundarios.map(
+                                                                        (s) => (
+                                                                            <SelectItem
+                                                                                key={
+                                                                                    s.id
+                                                                                }
+                                                                                value={String(
+                                                                                    s.id,
+                                                                                )}
+                                                                            >
+                                                                                {
+                                                                                    s.Nombre
+                                                                                }
+                                                                            </SelectItem>
+                                                                        ),
+                                                                    )}
+                                                                </SelectContent>
+                                                            </Select>
+                                                        </Field>
+                                                    )}
+                                                    {/* Programación de cirugía:
+                                                        igual que en el completo,
+                                                        solo con Estado QX
+                                                        "Programados". */}
+                                                    {f.estadoQx
+                                                        ?.esProgramado && (
+                                                        <>
+                                                            <Field label="Fecha y Hora de Programación">
+                                                                <Input
+                                                                    type="datetime-local"
+                                                                    value={
+                                                                        f
+                                                                            .estadoQx
+                                                                            .valores
+                                                                            .fecha_programacion
+                                                                    }
+                                                                    onChange={(
+                                                                        e,
+                                                                    ) =>
+                                                                        f.setCampo(
+                                                                            'fecha_programacion',
+                                                                            e
+                                                                                .target
+                                                                                .value,
+                                                                        )
+                                                                    }
+                                                                />
+                                                            </Field>
+                                                            <Field
+                                                                label="Especialista Médico"
+                                                                action={
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() =>
+                                                                            openCrearEspecialista(
+                                                                                'especialistaHemo',
+                                                                            )
                                                                         }
-                                                                        value={String(
-                                                                            s.id,
-                                                                        )}
+                                                                        title="Crear un médico nuevo si no aparece en la lista"
+                                                                        className="inline-flex size-5 items-center justify-center rounded-md bg-[#2d3e83]/10 text-[#2d3e83] transition-colors hover:bg-[#2d3e83]/20 dark:bg-white/10 dark:text-white"
                                                                     >
-                                                                        {
-                                                                            s.Nombre
-                                                                        }
-                                                                    </SelectItem>
-                                                                ),
-                                                            )}
-                                                        </SelectContent>
-                                                    </Select>
-                                                </Field>
-                                                <Field label="Fecha Recibido Serv">
-                                                    <Input
-                                                        type="date"
-                                                        value={
-                                                            segBasico.fecreci
+                                                                        <UserPlus className="size-3.5" />
+                                                                    </button>
+                                                                }
+                                                            >
+                                                                <Select
+                                                                    value={
+                                                                        f
+                                                                            .estadoQx
+                                                                            .valores
+                                                                            .especialista_medico_id
+                                                                    }
+                                                                    onValueChange={(
+                                                                        v,
+                                                                    ) =>
+                                                                        f.setCampo(
+                                                                            'especialista_medico_id',
+                                                                            v,
+                                                                        )
+                                                                    }
+                                                                >
+                                                                    <SelectTrigger>
+                                                                        <SelectValue placeholder="Seleccione…" />
+                                                                    </SelectTrigger>
+                                                                    <SelectContent>
+                                                                        {medicosList.length ===
+                                                                            0 && (
+                                                                            <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                                                                                No
+                                                                                hay
+                                                                                médicos
+                                                                                registrados.
+                                                                            </div>
+                                                                        )}
+                                                                        {medicosList.map(
+                                                                            (
+                                                                                m,
+                                                                            ) => (
+                                                                                <SelectItem
+                                                                                    key={
+                                                                                        m.id
+                                                                                    }
+                                                                                    value={String(
+                                                                                        m.id,
+                                                                                    )}
+                                                                                >
+                                                                                    {[
+                                                                                        m.name,
+                                                                                        m.Apellido1,
+                                                                                        m.apellido2,
+                                                                                    ]
+                                                                                        .filter(
+                                                                                            Boolean,
+                                                                                        )
+                                                                                        .join(
+                                                                                            ' ',
+                                                                                        )}
+                                                                                </SelectItem>
+                                                                            ),
+                                                                        )}
+                                                                    </SelectContent>
+                                                                </Select>
+                                                            </Field>
+                                                            <Field
+                                                                label="Observaciones Prg"
+                                                                className="lg:col-span-2"
+                                                            >
+                                                                <Textarea
+                                                                    value={
+                                                                        f
+                                                                            .estadoQx
+                                                                            .valores
+                                                                            .observaciones_prg
+                                                                    }
+                                                                    onChange={(
+                                                                        e,
+                                                                    ) =>
+                                                                        f.setCampo(
+                                                                            'observaciones_prg',
+                                                                            e
+                                                                                .target
+                                                                                .value,
+                                                                        )
+                                                                    }
+                                                                    rows={2}
+                                                                    placeholder="Observaciones de la programación…"
+                                                                />
+                                                            </Field>
+                                                        </>
+                                                    )}
+                                                    <ObservacionesCcx
+                                                        className="md:col-span-2 lg:col-span-3"
+                                                        registrado={
+                                                            caso.ObservacionCCX
                                                         }
-                                                        onChange={(e) =>
-                                                            setSegBasico(
-                                                                (prev) => ({
-                                                                    ...prev,
-                                                                    fecreci:
-                                                                        e.target
-                                                                            .value,
-                                                                }),
+                                                        value={
+                                                            f.valores
+                                                                .ObservacionCCX
+                                                        }
+                                                        onChange={(v) =>
+                                                            f.setCampo(
+                                                                'ObservacionCCX',
+                                                                v,
                                                             )
                                                         }
                                                     />
-                                                </Field>
-                                                <ObservacionesCcx
-                                                    className="md:col-span-2 lg:col-span-3"
-                                                    registrado={
-                                                        caso.ObservacionCCX
-                                                    }
-                                                    value={
-                                                        segBasico.ObservacionCCX
-                                                    }
-                                                    onChange={(v) =>
-                                                        setSegBasico(
-                                                            (prev) => ({
-                                                                ...prev,
-                                                                ObservacionCCX:
-                                                                    v,
-                                                            }),
-                                                        )
-                                                    }
-                                                />
-                                            </div>
-                                            <Button
-                                                type="submit"
-                                                disabled={aplicandoBasico}
-                                                className="mt-4 h-11 w-full gap-2 font-semibold text-gray-900 hover:opacity-90"
-                                                style={{
-                                                    backgroundColor: '#eab308',
-                                                }}
-                                            >
-                                                {aplicandoBasico ? (
-                                                    <LoaderCircle className="size-5 animate-spin" />
-                                                ) : (
-                                                    <Save className="size-5" />
-                                                )}
-                                                Aplicar Modificaciones al Caso
-                                            </Button>
-                                        </form>
-                                    )}
+                                                </div>
+                                                <Button
+                                                    type="submit"
+                                                    disabled={f.ocupado}
+                                                    className="mt-4 h-11 w-full gap-2 font-semibold text-gray-900 hover:opacity-90"
+                                                    style={{
+                                                        backgroundColor:
+                                                            '#eab308',
+                                                    }}
+                                                >
+                                                    {f.ocupado ? (
+                                                        <LoaderCircle className="size-5 animate-spin" />
+                                                    ) : (
+                                                        <Save className="size-5" />
+                                                    )}
+                                                    Aplicar Modificaciones al
+                                                    Caso
+                                                </Button>
+                                            </form>
+                                        ))}
                                 </div>
                             )}
                         </div>
@@ -5857,8 +6140,8 @@ export default function RadicarSolicitud({
                         </DialogTitle>
                         <DialogDescription>
                             Casos con Estado QX en “Programados”. Se ordenan por
-                            fecha y hora de programación, de la más reciente a la
-                            más antigua.
+                            fecha y hora de programación, de la más reciente a
+                            la más antigua.
                         </DialogDescription>
                     </DialogHeader>
 
@@ -5935,7 +6218,9 @@ export default function RadicarSolicitud({
                                 <tr className="text-left text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
                                     <th className="px-3 py-2">N° Caso</th>
                                     <th className="px-3 py-2">Paciente</th>
-                                    <th className="px-3 py-2">Identificación</th>
+                                    <th className="px-3 py-2">
+                                        Identificación
+                                    </th>
                                     <th className="px-3 py-2">Especialidad</th>
                                     <th className="px-3 py-2">Médico</th>
                                     <th className="px-3 py-2">
@@ -6033,22 +6318,26 @@ export default function RadicarSolicitud({
                                             <td className="px-3 py-2">
                                                 {r.cotizaciones.length === 0
                                                     ? '—'
-                                                    : r.cotizaciones.map((c) => (
-                                                          <a
-                                                              key={c.id}
-                                                              href={c.url}
-                                                              target="_blank"
-                                                              rel="noreferrer"
-                                                              title={c.tercero}
-                                                              className="mb-1 flex items-center gap-1 text-[#2d3e83] hover:underline dark:text-white"
-                                                          >
-                                                              <FileText className="size-4 shrink-0" />
-                                                              <span className="truncate">
-                                                                  {c.tercero ||
-                                                                      'Ver PDF'}
-                                                              </span>
-                                                          </a>
-                                                      ))}
+                                                    : r.cotizaciones.map(
+                                                          (c) => (
+                                                              <a
+                                                                  key={c.id}
+                                                                  href={c.url}
+                                                                  target="_blank"
+                                                                  rel="noreferrer"
+                                                                  title={
+                                                                      c.tercero
+                                                                  }
+                                                                  className="mb-1 flex items-center gap-1 text-[#2d3e83] hover:underline dark:text-white"
+                                                              >
+                                                                  <FileText className="size-4 shrink-0" />
+                                                                  <span className="truncate">
+                                                                      {c.tercero ||
+                                                                          'Ver PDF'}
+                                                                  </span>
+                                                              </a>
+                                                          ),
+                                                      )}
                                             </td>
                                             <td className="px-3 py-2 text-muted-foreground">
                                                 {r.observaciones ? (
