@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\Role;
 use App\Models\User;
 use Inertia\Testing\AssertableInertia as Assert;
 
@@ -98,6 +99,27 @@ test('a user can be updated without changing the password', function () {
     $target->refresh();
     expect($target->name)->toBe('Nuevo Nombre');
     expect($target->password)->toBe($originalPassword);
+});
+
+test('a user can be assigned a role with a long name', function () {
+    // El nombre del rol admite 120 caracteres; users.rol solo guardaba 30 y
+    // asignar "Operador Cirugia CardioVascular" (31) respondía error 500.
+    $admin = User::factory()->create();
+    $target = User::factory()->create(['email' => 'largo@example.com']);
+    $nombre = 'Operador Cirugia CardioVascular';
+    Role::create(['Nombre' => $nombre, 'Estado' => true]);
+
+    $this->actingAs($admin)
+        ->put('/tools/gestion-usuarios/'.$target->id, [
+            'name' => 'Mayerline',
+            'rol' => $nombre,
+            'email' => 'largo@example.com',
+            'password' => '',
+            'password_confirmation' => '',
+        ])
+        ->assertRedirect(route('tools.gestion-usuarios'));
+
+    expect($target->refresh()->rol)->toBe($nombre);
 });
 
 test('a user can be updated with a new password', function () {
