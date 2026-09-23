@@ -336,7 +336,18 @@ class RadicarCasoController extends Controller
             ->get(['id', 'codrad', 'tercero'])
             ->groupBy('codrad');
 
-        return $casos->map(function ($caso) use ($pacientes, $estados, $convenios, $adjuntos) {
+        // Códigos CUPS y procedimientos de cada caso, como en el detalle del
+        // caso. Dos consultas para las 200 filas: codRadicado es texto, de ahí
+        // el casteo.
+        $anexados = CupsAnezado::whereIn('codRadicado', $casos->pluck('codrad')->map(fn ($c) => (string) $c)->all())
+            ->orderBy('id')
+            ->get(['codRadicado', 'cusv_id'])
+            ->groupBy('codRadicado');
+        $cups = Cups::whereIn('id', $anexados->flatten(1)->pluck('cusv_id')->unique())
+            ->get(['id', 'CodCupsHuv', 'Nombre'])
+            ->keyBy('id');
+
+        return $casos->map(function ($caso) use ($pacientes, $estados, $convenios, $adjuntos, $anexados, $cups) {
             $p = $pacientes->get($caso->Ndocumento);
 
             return [
@@ -347,6 +358,15 @@ class RadicarCasoController extends Controller
                     : '—',
                 'documento' => $caso->Ndocumento,
                 'eps' => $p?->Eps ?? '—',
+                'procedimientos' => ($anexados->get((string) $caso->codrad) ?? collect())
+                    ->map(function (CupsAnezado $a) use ($cups) {
+                        $c = $cups->get($a->cusv_id);
+
+                        return [
+                            'codigo' => $c?->CodCupsHuv ?? (string) $a->cusv_id,
+                            'descripcion' => $c?->Nombre ?? '',
+                        ];
+                    })->values()->all(),
                 'convenio' => $caso->convenio
                     ? ($convenios[$caso->convenio] ?? $caso->convenio)
                     : '—',

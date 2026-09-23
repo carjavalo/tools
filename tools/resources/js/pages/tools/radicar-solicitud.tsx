@@ -94,6 +94,8 @@ interface CasoListaRow {
     paciente: string;
     documento: string | null;
     eps: string;
+    // Códigos CUPS & procedimientos registrados en el caso.
+    procedimientos: { codigo: string; descripcion: string }[];
     convenio: string;
     estado: string;
     // PDFs de los conceptos cotizados. Llega vacío para los roles que no
@@ -3398,7 +3400,7 @@ export default function RadicarSolicitud({
                                                         e.target.value,
                                                     )
                                                 }
-                                                placeholder="Filtrar por caso, paciente, cédula, convenio…"
+                                                placeholder="Filtrar por caso, paciente, cédula, CUPS, convenio…"
                                                 className="h-8 pl-9 text-sm"
                                             />
                                         </div>
@@ -3421,6 +3423,10 @@ export default function RadicarSolicitud({
                                                     </th>
                                                     <th className="px-3 py-2 font-medium">
                                                         EPS
+                                                    </th>
+                                                    <th className="px-3 py-2 font-medium">
+                                                        Códigos CUPS &
+                                                        procedimientos
                                                     </th>
                                                     <th className="px-3 py-2 font-medium">
                                                         Convenio
@@ -3450,6 +3456,10 @@ export default function RadicarSolicitud({
                                                             c.paciente,
                                                             c.documento ?? '',
                                                             c.eps,
+                                                            ...c.procedimientos.map(
+                                                                (p) =>
+                                                                    `${p.codigo} ${p.descripcion}`,
+                                                            ),
                                                             c.convenio,
                                                             c.estado,
                                                         ]
@@ -3494,6 +3504,40 @@ export default function RadicarSolicitud({
                                                             </td>
                                                             <td className="px-3 py-2 text-muted-foreground">
                                                                 {c.eps}
+                                                            </td>
+                                                            <td className="min-w-56 px-3 py-2 text-xs text-foreground">
+                                                                {c
+                                                                    .procedimientos
+                                                                    .length ===
+                                                                0 ? (
+                                                                    <span className="text-muted-foreground">
+                                                                        —
+                                                                    </span>
+                                                                ) : (
+                                                                    <ul className="space-y-0.5">
+                                                                        {c.procedimientos.map(
+                                                                            (
+                                                                                p,
+                                                                                i,
+                                                                            ) => (
+                                                                                <li
+                                                                                    key={
+                                                                                        i
+                                                                                    }
+                                                                                >
+                                                                                    <span className="font-mono font-semibold">
+                                                                                        {
+                                                                                            p.codigo
+                                                                                        }
+                                                                                    </span>{' '}
+                                                                                    |{' '}
+                                                                                    {p.descripcion ||
+                                                                                        '—'}
+                                                                                </li>
+                                                                            ),
+                                                                        )}
+                                                                    </ul>
+                                                                )}
                                                             </td>
                                                             <td className="px-3 py-2 text-muted-foreground">
                                                                 {c.convenio}
@@ -3551,7 +3595,7 @@ export default function RadicarSolicitud({
                                                 {casosLista.length === 0 && (
                                                     <tr>
                                                         <td
-                                                            colSpan={8}
+                                                            colSpan={9}
                                                             className="px-3 py-8 text-center text-muted-foreground"
                                                         >
                                                             No hay radicaciones

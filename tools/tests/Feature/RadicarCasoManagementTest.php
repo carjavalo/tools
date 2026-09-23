@@ -1775,6 +1775,33 @@ test('la grilla trae el PDF de los conceptos cotizados', function () {
         ->and($fila['cotizaciones'][0]['url'])->toContain('/cotizacion/');
 });
 
+test('la grilla del Historial muestra los códigos CUPS y procedimientos de cada caso', function () {
+    $admin = User::factory()->create();
+    $caso = RadicarCaso::create(['Ndocumento' => '7700', 'estRad' => '1']);
+    $uno = Cups::create(['Nombre' => 'Cateterismo cardiaco', 'CodCupsHuv' => '372100', 'Estado' => true]);
+    $dos = Cups::create(['Nombre' => 'Angioplastia', 'CodCupsHuv' => '360600', 'Estado' => true]);
+
+    foreach ([$uno, $dos] as $cups) {
+        CupsAnezado::create([
+            'codRadicado' => (string) $caso->codrad,
+            'cusv_id' => $cups->id,
+            'N_Autorizacion' => 'A',
+        ]);
+    }
+
+    $fila = collect(
+        $this->actingAs($admin)
+            ->get('/tools/radicar-solicitud')
+            ->assertOk()
+            ->viewData('page')['props']['casosLista']
+    )->firstWhere('codrad', $caso->codrad);
+
+    expect($fila['procedimientos'])->toBe([
+        ['codigo' => '372100', 'descripcion' => 'Cateterismo cardiaco'],
+        ['codigo' => '360600', 'descripcion' => 'Angioplastia'],
+    ]);
+});
+
 test('quien ve la grilla verifica las cotizaciones aunque no las gestione', function () {
     // La columna existe para que cualquiera pueda verificar lo cotizado, así
     // que no depende del permiso del formulario de cotizaciones. Basta con ver
