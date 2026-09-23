@@ -13,6 +13,7 @@ import { dashboard } from '@/routes';
 import { type NavItem, type SharedData } from '@/types';
 import { Link, usePage } from '@inertiajs/react';
 import {
+    BriefcaseMedical,
     Building2,
     CalendarClock,
     ClipboardCheck,
@@ -62,6 +63,11 @@ const mainNavItems: NavItem[] = [
                 title: 'Gestión de Usuarios',
                 href: '/tools/gestion-usuarios',
                 icon: Users,
+            },
+            {
+                title: 'Gestión Servicios',
+                href: '/tools/gestion-servicios',
+                icon: BriefcaseMedical,
             },
             {
                 title: 'Gestión de Roles',

@@ -12,39 +12,39 @@ Route::prefix('tools')->name('tools.')->group(function () {
     Route::get('qr-generator', function () {
         return Inertia::render('tools/qr-generator');
     })->name('qr-generator');
-    
+
     Route::get('pdf-compress', function () {
         return Inertia::render('tools/pdf-compress');
     })->name('pdf-compress');
-    
+
     Route::get('ocr-extract', function () {
         return Inertia::render('tools/ocr-extract');
     })->name('ocr-extract');
-    
+
     Route::get('merge-pdfs', function () {
         return Inertia::render('tools/merge-pdfs');
     })->name('merge-pdfs');
-    
+
     Route::get('split-pdf', function () {
         return Inertia::render('tools/split-pdf');
     })->name('split-pdf');
-    
+
     Route::get('images-to-pdf', function () {
         return Inertia::render('tools/images-to-pdf');
     })->name('images-to-pdf');
-    
+
     Route::get('images-to-word', function () {
         return Inertia::render('tools/images-to-word');
     })->name('images-to-word');
-    
+
     Route::get('pdf-to-images', function () {
         return Inertia::render('tools/pdf-to-images');
     })->name('pdf-to-images');
-    
+
     Route::get('word-to-pdf', function () {
         return Inertia::render('tools/word-to-pdf');
     })->name('word-to-pdf');
-    
+
     Route::get('rotate-pdf', function () {
         return Inertia::render('tools/rotate-pdf');
     })->name('rotate-pdf');
@@ -102,6 +102,12 @@ Route::prefix('tools')->name('tools.')->group(function () {
         Route::post('gestion-usuarios', [App\Http\Controllers\UserManagementController::class, 'store'])->name('gestion-usuarios.store');
         Route::put('gestion-usuarios/{user}', [App\Http\Controllers\UserManagementController::class, 'update'])->name('gestion-usuarios.update');
         Route::delete('gestion-usuarios/{user}', [App\Http\Controllers\UserManagementController::class, 'destroy'])->name('gestion-usuarios.destroy');
+
+        // Gestión Servicios (CRUD de la tabla serasignado)
+        Route::get('gestion-servicios', [App\Http\Controllers\ServicioManagementController::class, 'index'])->name('gestion-servicios');
+        Route::post('gestion-servicios', [App\Http\Controllers\ServicioManagementController::class, 'store'])->name('gestion-servicios.store');
+        Route::put('gestion-servicios/{servicio}', [App\Http\Controllers\ServicioManagementController::class, 'update'])->name('gestion-servicios.update');
+        Route::delete('gestion-servicios/{servicio}', [App\Http\Controllers\ServicioManagementController::class, 'destroy'])->name('gestion-servicios.destroy');
 
         // Gestión de Roles (CRUD)
         Route::get('gestion-roles', [App\Http\Controllers\RoleManagementController::class, 'index'])->name('gestion-roles');
@@ -192,47 +198,47 @@ Route::prefix('tools')->name('tools.')->group(function () {
     Route::get('page-numbers', function () {
         return Inertia::render('tools/page-numbers');
     })->name('page-numbers');
-    
+
     Route::get('watermark-pdf', function () {
         return Inertia::render('tools/watermark-pdf');
     })->name('watermark-pdf');
-    
+
     Route::get('sort-pdf', function () {
         return Inertia::render('tools/sort-pdf');
     })->name('sort-pdf');
-    
+
     Route::get('crop-pdf', function () {
         return Inertia::render('tools/crop-pdf');
     })->name('crop-pdf');
-    
+
     Route::get('powerpoint-to-pdf', function () {
         return Inertia::render('tools/powerpoint-to-pdf');
     })->name('powerpoint-to-pdf');
-    
+
     Route::get('excel-to-pdf', function () {
         return Inertia::render('tools/excel-to-pdf');
     })->name('excel-to-pdf');
-    
+
     Route::get('resume-document', function () {
         return Inertia::render('tools/resume-document');
     })->name('resume-document');
-    
+
     Route::get('sign-pdf', function () {
         return Inertia::render('tools/sign-pdf');
     })->name('sign-pdf');
-    
+
     Route::get('protect-pdf', function () {
         return Inertia::render('tools/protect-pdf');
     })->name('protect-pdf');
-    
+
     Route::get('cups', function () {
         return Inertia::render('tools/cups');
     })->name('cups');
-    
+
     Route::get('evarisdrop', function () {
         return Inertia::render('tools/evarisdrop');
     })->name('evarisdrop');
-    
+
     // API endpoints for tools
     Route::post('word-to-pdf/convert', [App\Http\Controllers\WordToPDFController::class, 'convert'])->name('word-to-pdf.convert');
     Route::post('powerpoint-to-pdf/convert', [App\Http\Controllers\PowerPointToPDFController::class, 'convert'])->name('powerpoint-to-pdf.convert');
@@ -241,11 +247,11 @@ Route::prefix('tools')->name('tools.')->group(function () {
     Route::post('sign-pdf/sign', [App\Http\Controllers\SignPDFController::class, 'sign'])->name('sign-pdf.sign');
     Route::post('protect-pdf/protect', [App\Http\Controllers\ProtectPDFController::class, 'protect'])->name('protect-pdf.protect');
     Route::post('ocr-extract/extract', [App\Http\Controllers\OCRController::class, 'extract'])->name('ocr-extract.extract');
-    
+
     // CUPS endpoints
     Route::post('cups/process-json-sos', [App\Http\Controllers\CupsController::class, 'processJsonSOS'])->name('cups.process-json-sos');
     Route::get('cups/download-processed/{filename}', [App\Http\Controllers\CupsController::class, 'downloadProcessed'])->name('cups.download-processed');
-    
+
     // Evarisdrop endpoints
     Route::post('evarisdrop/room/create', [App\Http\Controllers\EvarisdropRoomController::class, 'createRoom'])->name('evarisdrop.room.create');
     Route::post('evarisdrop/room/join', [App\Http\Controllers\EvarisdropRoomController::class, 'joinRoom'])->name('evarisdrop.room.join');

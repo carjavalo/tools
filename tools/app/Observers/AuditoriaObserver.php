@@ -18,6 +18,7 @@ use App\Models\RadicarCaso;
 use App\Models\Regimen;
 use App\Models\Role;
 use App\Models\SeguimientoCaso;
+use App\Models\Serasignado;
 use App\Models\SubEspecialidad;
 use App\Models\TipoDocumento;
 use App\Models\TrazabilidadCaso;
@@ -58,6 +59,7 @@ class AuditoriaObserver
             EstRadicado::class,
             EstRadisecundario::class,
             Motivo::class,
+            Serasignado::class,
             Eps::class,
             Convenio::class,
             Regimen::class,

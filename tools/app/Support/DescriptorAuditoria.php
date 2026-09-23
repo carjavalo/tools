@@ -35,6 +35,7 @@ class DescriptorAuditoria
         'EstRadicado' => 'el estado',
         'EstRadisecundario' => 'el estado QX',
         'Motivo' => 'el motivo',
+        'Serasignado' => 'el servicio',
         'Eps' => 'la EPS',
         'Convenio' => 'el convenio',
         'Regimen' => 'el régimen',
@@ -91,6 +92,9 @@ class DescriptorAuditoria
         'Eps' => 'EPS',
         'codesp' => 'Especialidad',
         'Observacion' => 'Observación',
+        'nombre' => 'Nombre',
+        'descripcion' => 'Descripción',
+        'estado' => 'Estado',
     ];
 
     public static function modulo(Model $model): string
@@ -169,7 +173,7 @@ class DescriptorAuditoria
         $plano = trim((string) $valor);
 
         // Booleanos: "No" es un valor, no un vacío.
-        if (in_array($campo, ['copago', 'maos', 'Estado', 'ver', 'crear', 'editar', 'borrar'], true)) {
+        if (in_array($campo, ['copago', 'maos', 'Estado', 'estado', 'ver', 'crear', 'editar', 'borrar'], true)) {
             return in_array($plano, ['1', 'true'], true) ? 'Sí' : 'No';
         }
 
