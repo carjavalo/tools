@@ -175,6 +175,8 @@ interface PageProps {
     // filtro no puede quedar recortado a los estados del rol.
     estadosFiltro: Option[];
     defaultEstadoId: number | null;
+    // Servicios activos de la sede activa (campo Servicio Asignado).
+    servicios: { codigo: number; nombre: string }[];
     today: string;
     puedeGestionarCotizaciones: boolean;
     muestraGrillaCasos: boolean;
@@ -210,6 +212,8 @@ interface CasoDetalle {
     tipo_Docu: string;
     Ndocumento: string;
     telefonos: string;
+    // Servicio asignado ('—' en radicaciones anteriores al campo).
+    servicio: string;
     eps: string;
     convenio: string;
     especialidad: string;
@@ -223,6 +227,8 @@ interface CasoDetalle {
     paquete: string | null;
     paqueteUrl: string | null;
     codMed: string | null;
+    codservicio: string | null;
+    servicioInactivo: boolean;
     estRad: string | null;
     fecreci: string | null;
     entregaProg: string | null;
@@ -289,6 +295,7 @@ interface InformeRow {
 type ProcRow = { cusv_id: string; N_Autorizacion: string };
 
 type RadicarForm = {
+    codservicio: string;
     Codesp: string;
     codsubesp: string;
     codMed: string;
@@ -717,6 +724,7 @@ export default function RadicarSolicitud({
     subespecialidadesFiltro,
     estadosFiltro,
     defaultEstadoId,
+    servicios,
     today,
     puedeGestionarCotizaciones,
     muestraGrillaCasos,
@@ -844,6 +852,7 @@ export default function RadicarSolicitud({
     const [modifSaving, setModifSaving] = useState(false);
     const [modifError, setModifError] = useState<string | null>(null);
     const [modif, setModif] = useState({
+        codservicio: '',
         codMed: '',
         estRad: '',
         copago: false,
@@ -900,6 +909,7 @@ export default function RadicarSolicitud({
     } | null>(null);
 
     const form = useForm<RadicarForm>({
+        codservicio: '',
         Codesp: '',
         codsubesp: '',
         codMed: '',
@@ -1754,6 +1764,8 @@ export default function RadicarSolicitud({
     const abrirModificarRadicado = () => {
         if (!caso) return;
         setModif({
+            // Vacío en las radicaciones anteriores al campo: hay que escogerlo.
+            codservicio: caso.codservicio ?? '',
             codMed: caso.codMed ?? '',
             estRad: caso.estRad ?? '',
             copago: caso.copago ?? false,
@@ -1829,6 +1841,7 @@ export default function RadicarSolicitud({
         // con _method=PUT y Laravel lo enruta al método de actualización.
         const fd = new FormData();
         fd.append('_method', 'PUT');
+        fd.append('codservicio', modif.codservicio);
         fd.append('codMed', modif.codMed);
         fd.append('estRad', modif.estRad);
         fd.append('copago', modif.copago ? '1' : '0');
@@ -2899,6 +2912,43 @@ export default function RadicarSolicitud({
                                             className="bg-muted/40"
                                         />
                                     </Field>
+                                    {/* Servicio que tramita la radicación.
+                                        Solo los activos de la sede por la
+                                        que se ingresó (Gestión Servicios). */}
+                                    <Field label="Servicio Asignado *">
+                                        <Select
+                                            value={form.data.codservicio}
+                                            onValueChange={(v) =>
+                                                form.setData('codservicio', v)
+                                            }
+                                        >
+                                            <SelectTrigger>
+                                                <SelectValue placeholder="Seleccione…" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {servicios.length === 0 && (
+                                                    <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                                                        No hay servicios activos
+                                                        en esta sede. Créelos en
+                                                        Gestión Servicios.
+                                                    </div>
+                                                )}
+                                                {servicios.map((s) => (
+                                                    <SelectItem
+                                                        key={s.codigo}
+                                                        value={String(s.codigo)}
+                                                    >
+                                                        {s.nombre}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                        {form.errors.codservicio && (
+                                            <span className="text-xs text-red-600">
+                                                {form.errors.codservicio}
+                                            </span>
+                                        )}
+                                    </Field>
                                 </div>
 
                                 {/* Fila 3 */}
@@ -3716,6 +3766,10 @@ export default function RadicarSolicitud({
                                             <Dato
                                                 label="Teléfonos"
                                                 value={caso.telefonos}
+                                            />
+                                            <Dato
+                                                label="Servicio asignado"
+                                                value={caso.servicio}
                                             />
                                             <Dato
                                                 label="Especialidad"
@@ -6769,6 +6823,54 @@ export default function RadicarSolicitud({
                     )}
 
                     <div className="grid gap-4 sm:grid-cols-2">
+                        {/* Servicio asignado: los activos de la sede del
+                            caso. Si el caso tiene uno ya desactivado, se
+                            ofrece también para poder conservarlo. */}
+                        <div className="grid gap-2 sm:col-span-2">
+                            <Label>Servicio Asignado *</Label>
+                            <Select
+                                value={modif.codservicio}
+                                onValueChange={(v) =>
+                                    setModifField('codservicio', v)
+                                }
+                            >
+                                <SelectTrigger>
+                                    <SelectValue placeholder="Seleccione…" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {servicios.length === 0 &&
+                                        !caso?.servicioInactivo && (
+                                            <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                                                No hay servicios activos en esta
+                                                sede. Créelos en Gestión
+                                                Servicios.
+                                            </div>
+                                        )}
+                                    {caso?.servicioInactivo &&
+                                        caso.codservicio && (
+                                            <SelectItem
+                                                value={caso.codservicio}
+                                            >
+                                                {caso.servicio} (inactivo)
+                                            </SelectItem>
+                                        )}
+                                    {servicios.map((s) => (
+                                        <SelectItem
+                                            key={s.codigo}
+                                            value={String(s.codigo)}
+                                        >
+                                            {s.nombre}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                            {caso && !caso.codservicio && (
+                                <p className="text-xs text-amber-600 dark:text-amber-400">
+                                    Esta radicación no tiene servicio asignado:
+                                    escójalo para poder guardar.
+                                </p>
+                            )}
+                        </div>
                         <div className="grid gap-2">
                             <Label>Médico *</Label>
                             <Select

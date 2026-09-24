@@ -15,9 +15,11 @@ use App\Models\ProgramacionCaso;
 use App\Models\RadicarCaso;
 use App\Models\Role;
 use App\Models\SeguimientoCaso;
+use App\Models\Serasignado;
 use App\Models\SubEspecialidad;
 use App\Models\TrazabilidadCaso;
 use App\Models\User;
+use App\Support\Sede;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Inertia\Testing\AssertableInertia as Assert;
@@ -457,6 +459,7 @@ test('cambiar el estado desde Modificar Radicado deja registro con el antes y el
     ]);
 
     $this->actingAs($admin)->putJson("/tools/radicar-solicitud/{$caso->codrad}", [
+        'codservicio' => servicioDePrueba(),
         'codMed' => (string) $admin->id,
         'estRad' => (string) $autorizado->id,
         'fentregapro' => '2026-07-30',
@@ -778,6 +781,7 @@ test('el copago se guarda con su valor y queda en la bitacora', function () {
     $caso = RadicarCaso::create(['Ndocumento' => '9100', 'estRad' => '1']);
 
     $this->actingAs($admin)->putJson("/tools/radicar-solicitud/{$caso->codrad}", [
+        'codservicio' => servicioDePrueba(),
         'codMed' => (string) $admin->id,
         'estRad' => '1',
         'copago' => true,
@@ -809,6 +813,7 @@ test('marcar copago sin valor es rechazado', function () {
 
     $this->actingAs($admin)
         ->putJson("/tools/radicar-solicitud/{$caso->codrad}", [
+            'codservicio' => servicioDePrueba(),
             'codMed' => (string) $admin->id,
             'estRad' => '1',
             'copago' => true,
@@ -846,6 +851,7 @@ test('modificar un radicado con un año de mas de 4 digitos se rechaza', functio
 
     $this->actingAs($admin)
         ->putJson("/tools/radicar-solicitud/{$caso->codrad}", [
+            'codservicio' => servicioDePrueba(),
             'codMed' => (string) $admin->id,
             'estRad' => '1',
             'copago' => false,
@@ -873,6 +879,7 @@ test('desmarcar el copago borra el valor guardado', function () {
     ]);
 
     $this->actingAs($admin)->putJson("/tools/radicar-solicitud/{$caso->codrad}", [
+        'codservicio' => servicioDePrueba(),
         'codMed' => (string) $admin->id,
         'estRad' => '1',
         'copago' => false,
@@ -923,6 +930,7 @@ test('el paquete se sube, se reemplaza y borra el archivo anterior', function ()
     $caso = RadicarCaso::create(['Ndocumento' => '9600', 'estRad' => '1']);
 
     $base = [
+        'codservicio' => servicioDePrueba(),
         'codMed' => (string) $admin->id,
         'estRad' => '1',
         'copago' => false,
@@ -965,6 +973,7 @@ test('el paquete se guarda con el radicado y el documento del paciente en el nom
     $caso = RadicarCaso::create(['Ndocumento' => '1088223344', 'estRad' => '1']);
 
     $this->actingAs($admin)->put("/tools/radicar-solicitud/{$caso->codrad}", [
+        'codservicio' => servicioDePrueba(),
         'codMed' => (string) $admin->id,
         'estRad' => '1',
         'copago' => false,
@@ -993,6 +1002,7 @@ test('modificar el radicado y subir el PDF no exige la Fecha Recibido Serv', fun
 
     $this->actingAs($admin)
         ->put("/tools/radicar-solicitud/{$caso->codrad}", [
+            'codservicio' => servicioDePrueba(),
             'codMed' => (string) $admin->id,
             'estRad' => '1',
             'copago' => false,
@@ -1019,6 +1029,7 @@ test('el paquete rechaza archivos que no sean PDF o pasen de 30 MB', function ()
     $caso = RadicarCaso::create(['Ndocumento' => '9700', 'estRad' => '1']);
 
     $base = [
+        'codservicio' => servicioDePrueba(),
         'codMed' => (string) $admin->id,
         'estRad' => '1',
         'copago' => false,
@@ -1101,6 +1112,7 @@ test('modificar el radicado funciona por POST con _method=PUT y multipart', func
 
     $this->actingAs($admin)->post("/tools/radicar-solicitud/{$caso->codrad}", [
         '_method' => 'PUT',
+        'codservicio' => servicioDePrueba(),
         'codMed' => (string) $admin->id,
         'estRad' => '1',
         'copago' => '1',
@@ -1143,6 +1155,7 @@ test('si el guardado falla, el PDF anterior sobrevive y el nuevo no queda huerfa
     // Un CUPS inexistente hace fallar la validación de procedimientos.
     $this->actingAs($admin)
         ->putJson("/tools/radicar-solicitud/{$caso->codrad}", [
+            'codservicio' => servicioDePrueba(),
             'codMed' => (string) $admin->id,
             'estRad' => '1',
             'copago' => false,
@@ -1165,6 +1178,7 @@ test('si el guardado falla, el PDF anterior sobrevive y el nuevo no queda huerfa
     // Con datos correctos el reemplazo sí ocurre y limpia el anterior.
     $this->actingAs($admin)
         ->put("/tools/radicar-solicitud/{$caso->codrad}", [
+            'codservicio' => servicioDePrueba(),
             'codMed' => (string) $admin->id,
             'estRad' => '1',
             'copago' => false,
@@ -2394,4 +2408,93 @@ test('cambiar solo el nombre del paciente se ve enseguida en la consulta del cas
         ->assertJsonPath('caso.paciente', 'Nombre Nuevo Apellido Nuevo');
 
     expect($caso->refresh()->Ndocumento)->toBe('888');
+});
+
+/**
+ * Código de un servicio activo de la Sede Cali (donde nacen las radicaciones de
+ * estas pruebas). Modificar Radicado exige el servicio asignado.
+ */
+function servicioDePrueba(): int
+{
+    $existente = Serasignado::withoutGlobalScope('sede')
+        ->where('nombre', 'Servicio de prueba')
+        ->where('sede', Sede::CALI)
+        ->first();
+
+    return ($existente ?? Serasignado::withoutGlobalScope('sede')->forceCreate([
+        'nombre' => 'Servicio de prueba',
+        'estado' => true,
+        'sede' => Sede::CALI,
+    ]))->codigo;
+}
+
+test('modificar radicado asigna el servicio a una radicacion antigua', function () {
+    $admin = User::factory()->create();
+    $cups = Cups::create(['Nombre' => 'Proc', 'Estado' => true]);
+    // Radicación anterior al campo: sin servicio.
+    $caso = RadicarCaso::create(['Ndocumento' => '9960', 'estRad' => '1']);
+    $servicio = servicioDePrueba();
+
+    $this->actingAs($admin)->putJson("/tools/radicar-solicitud/{$caso->codrad}", [
+        'codservicio' => $servicio,
+        'codMed' => (string) $admin->id,
+        'estRad' => '1',
+        'fentregapro' => '2026-09-01',
+        'fecAutorizacion' => '2026-09-01',
+        'fechavenautorizacion' => '2026-12-01',
+        'ObservacionTFX' => 'OB',
+        'procedimientos' => [['cusv_id' => $cups->id, 'N_Autorizacion' => 'A1']],
+    ])->assertOk()->assertJsonPath('caso.codservicio', (string) $servicio);
+
+    expect($caso->refresh()->codservicio)->toBe($servicio)
+        // Queda en la trazabilidad con el nombre del servicio.
+        ->and(TrazabilidadCaso::where('codrad', $caso->codrad)->where('campo', 'codservicio')->value('nuevo'))
+        ->toBe('Servicio de prueba');
+});
+
+test('modificar radicado exige el servicio y no acepta uno de otra sede', function () {
+    $admin = User::factory()->create();
+    $cups = Cups::create(['Nombre' => 'Proc', 'Estado' => true]);
+    $caso = RadicarCaso::create(['Ndocumento' => '9961', 'estRad' => '1']);
+    $cartago = Serasignado::withoutGlobalScope('sede')
+        ->forceCreate(['nombre' => 'De Cartago', 'estado' => true, 'sede' => Sede::CARTAGO]);
+
+    $base = [
+        'codMed' => (string) $admin->id,
+        'estRad' => '1',
+        'fentregapro' => '2026-09-01',
+        'fecAutorizacion' => '2026-09-01',
+        'fechavenautorizacion' => '2026-12-01',
+        'ObservacionTFX' => 'OB',
+        'procedimientos' => [['cusv_id' => $cups->id, 'N_Autorizacion' => 'A1']],
+    ];
+
+    $this->actingAs($admin)->putJson("/tools/radicar-solicitud/{$caso->codrad}", $base)
+        ->assertUnprocessable()->assertJsonValidationErrors(['codservicio']);
+
+    $this->actingAs($admin)->putJson("/tools/radicar-solicitud/{$caso->codrad}", [...$base, 'codservicio' => $cartago->codigo])
+        ->assertUnprocessable()->assertJsonValidationErrors(['codservicio']);
+
+    expect($caso->refresh()->codservicio)->toBeNull();
+});
+
+test('modificar radicado conserva un servicio que se desactivo despues', function () {
+    $admin = User::factory()->create();
+    $cups = Cups::create(['Nombre' => 'Proc', 'Estado' => true]);
+    $servicio = servicioDePrueba();
+    $caso = RadicarCaso::create(['Ndocumento' => '9962', 'estRad' => '1', 'codservicio' => $servicio]);
+    Serasignado::withoutGlobalScope('sede')->whereKey($servicio)->update(['estado' => false]);
+
+    $this->actingAs($admin)->putJson("/tools/radicar-solicitud/{$caso->codrad}", [
+        'codservicio' => $servicio,
+        'codMed' => (string) $admin->id,
+        'estRad' => '1',
+        'fentregapro' => '2026-09-01',
+        'fecAutorizacion' => '2026-09-01',
+        'fechavenautorizacion' => '2026-12-01',
+        'ObservacionTFX' => 'Cambio de observación',
+        'procedimientos' => [['cusv_id' => $cups->id, 'N_Autorizacion' => 'A1']],
+    ])->assertOk()->assertJsonPath('caso.servicioInactivo', true);
+
+    expect($caso->refresh()->ObservacionTFX)->toBe('Cambio de observación');
 });

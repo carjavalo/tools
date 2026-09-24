@@ -28,6 +28,8 @@ class RadicarCaso extends Model
      * @var list<string>
      */
     protected $fillable = [
+        // Servicio asignado (Gestión Servicios, serasignado.codigo).
+        'codservicio',
         'Codesp',
         'codsubesp',
         'codMed',

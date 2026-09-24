@@ -7,6 +7,7 @@ use App\Models\Eps;
 use App\Models\ProgramacionCaso;
 use App\Models\RadicarCaso;
 use App\Models\Role;
+use App\Models\Serasignado;
 use App\Models\User;
 use App\Support\Sede;
 use Illuminate\Support\Facades\DB;
@@ -42,9 +43,15 @@ function usuarioConSedes(string $rol, array $sedes): User
     return User::factory()->create(['rol' => $rol]);
 }
 
-/** Datos válidos de una Nueva Radicación, con sus catálogos creados. */
-function payloadRadicacion(string $documento): array
+/**
+ * Datos válidos de una Nueva Radicación, con sus catálogos creados. El
+ * servicio asignado se crea activo en la sede dada, que debe ser la de la
+ * sesión para que la radicación lo acepte.
+ */
+function payloadRadicacion(string $documento, string $sede = Sede::CALI): array
 {
+    $servicio = Serasignado::withoutGlobalScope('sede')
+        ->forceCreate(['nombre' => 'Servicio '.$documento, 'estado' => true, 'sede' => $sede]);
     $medico = User::factory()->create(['rol' => 'Medico']);
     User::factory()->create(['rol' => 'paciente', 'Numero_D' => $documento]);
     Eps::firstOrCreate(['nit_empresa' => '900100'], ['Nombre' => 'EPS Prueba', 'Estado' => true]);
@@ -57,6 +64,7 @@ function payloadRadicacion(string $documento): array
     $cups = Cups::create(['Nombre' => 'Procedimiento Uno', 'Estado' => true]);
 
     return [
+        'codservicio' => $servicio->codigo,
         'Codesp' => '01',
         'codMed' => (string) $medico->id,
         'Ndocumento' => $documento,
@@ -77,7 +85,7 @@ function payloadRadicacion(string $documento): array
 test('lo radicado queda en la sede por la que se ingreso', function () {
     $this->actingAs(User::factory()->create())
         ->withSession(['sede' => Sede::CARTAGO])
-        ->post('/tools/radicar-solicitud', payloadRadicacion('7001'))
+        ->post('/tools/radicar-solicitud', payloadRadicacion('7001', Sede::CARTAGO))
         ->assertRedirect(route('tools.radicar-solicitud'))
         ->assertSessionHas('success', fn (string $mensaje) => str_contains($mensaje, 'Sede Cartago'));
 
@@ -355,5 +363,72 @@ test('el gestor de permisos no configura sedes para medicos', function () {
         ->assertInertia(fn (Assert $page) => $page
             ->where('sedesRol', [Sede::CALI, Sede::CARTAGO])
             ->where('sedesFijas', true)
+        );
+});
+
+test('la radicacion guarda el servicio asignado', function () {
+    $datos = payloadRadicacion('7101');
+
+    $this->actingAs(User::factory()->create())
+        ->withSession(['sede' => Sede::CALI])
+        ->post('/tools/radicar-solicitud', $datos)
+        ->assertRedirect(route('tools.radicar-solicitud'));
+
+    $this->assertDatabaseHas('RadicarCaso', ['Ndocumento' => '7101', 'codservicio' => $datos['codservicio']]);
+});
+
+test('el servicio asignado es obligatorio', function () {
+    $datos = payloadRadicacion('7102');
+    unset($datos['codservicio']);
+
+    $this->actingAs(User::factory()->create())
+        ->withSession(['sede' => Sede::CALI])
+        ->from('/tools/radicar-solicitud')
+        ->post('/tools/radicar-solicitud', $datos)
+        ->assertSessionHasErrors(['codservicio']);
+
+    $this->assertDatabaseMissing('RadicarCaso', ['Ndocumento' => '7102']);
+});
+
+test('no se radica con un servicio de la otra sede ni con uno inactivo', function () {
+    // Servicio de Cartago, radicando desde Cali.
+    $this->actingAs(User::factory()->create())
+        ->withSession(['sede' => Sede::CALI])
+        ->from('/tools/radicar-solicitud')
+        ->post('/tools/radicar-solicitud', payloadRadicacion('7103', Sede::CARTAGO))
+        ->assertSessionHasErrors(['codservicio']);
+
+    // Servicio de Cali, pero desactivado.
+    $datos = payloadRadicacion('7104');
+    Serasignado::withoutGlobalScope('sede')->whereKey($datos['codservicio'])->update(['estado' => false]);
+
+    $this->actingAs(User::factory()->create())
+        ->withSession(['sede' => Sede::CALI])
+        ->from('/tools/radicar-solicitud')
+        ->post('/tools/radicar-solicitud', $datos)
+        ->assertSessionHasErrors(['codservicio']);
+
+    $this->assertDatabaseMissing('RadicarCaso', ['Ndocumento' => '7103']);
+    $this->assertDatabaseMissing('RadicarCaso', ['Ndocumento' => '7104']);
+});
+
+test('nueva radicacion ofrece solo los servicios activos de la sede activa', function () {
+    $admin = User::factory()->create();
+    Serasignado::withoutGlobalScope('sede')->forceCreate(['nombre' => 'Cali activo', 'estado' => true, 'sede' => Sede::CALI]);
+    Serasignado::withoutGlobalScope('sede')->forceCreate(['nombre' => 'Cali inactivo', 'estado' => false, 'sede' => Sede::CALI]);
+    Serasignado::withoutGlobalScope('sede')->forceCreate(['nombre' => 'Cartago activo', 'estado' => true, 'sede' => Sede::CARTAGO]);
+
+    $this->actingAs($admin)->withSession(['sede' => Sede::CALI])
+        ->get('/tools/radicar-solicitud')
+        ->assertInertia(fn (Assert $page) => $page
+            ->has('servicios', 1)
+            ->where('servicios.0.nombre', 'Cali activo')
+        );
+
+    $this->actingAs($admin)->withSession(['sede' => Sede::CARTAGO])
+        ->get('/tools/radicar-solicitud')
+        ->assertInertia(fn (Assert $page) => $page
+            ->has('servicios', 1)
+            ->where('servicios.0.nombre', 'Cartago activo')
         );
 });

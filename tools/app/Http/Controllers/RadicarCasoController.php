@@ -16,6 +16,7 @@ use App\Models\ProgramacionCaso;
 use App\Models\RadicarCaso;
 use App\Models\Role;
 use App\Models\SeguimientoCaso;
+use App\Models\Serasignado;
 use App\Models\SubEspecialidad;
 use App\Models\TipoDocumento;
 use App\Models\TrazabilidadCaso;
@@ -63,6 +64,7 @@ class RadicarCasoController extends Controller
         'codestsecundario' => 'Estado QX',
         'fecreci' => 'Fecha Recibido Serv',
         'estcod' => 'Motivo',
+        'codservicio' => 'Servicio asignado',
         'fecAutorizacion' => 'Fecha Autorización',
         'fechavenautorizacion' => 'Fecha Vencimiento Autorización',
         'ObservacionTFX' => 'OB TFX',
@@ -139,6 +141,12 @@ class RadicarCasoController extends Controller
             // filas visibles que nadie podría filtrar.
             'estadosFiltro' => EstRadicado::orderBy('Nombre')->get(['id', 'Nombre']),
             'defaultEstadoId' => $defaultEstadoId,
+            // Servicio Asignado de Nueva Radicación: solo los activos de la
+            // sede activa (el modelo filtra por sede, también al Super Admin:
+            // la radicación nace en la sede por la que se ingresó).
+            'servicios' => Serasignado::where('estado', true)
+                ->orderBy('nombre')
+                ->get(['codigo', 'nombre']),
             'today' => now()->toDateString(),
             // Formulario de cotizaciones: administrable por rol en el Gestor de
             // Permisos (sub-vista radicar-solicitud-cotizaciones).
@@ -743,6 +751,16 @@ class RadicarCasoController extends Controller
         // Secundario y Fecha Recibido no se exigen porque no
         // están en la vista.
         $data = $request->validate([
+            // Servicio que tramita la radicación: uno activo de la sede en la
+            // que queda el caso. Uno de la otra sede o desactivado se rechaza,
+            // aunque llegue en la petición.
+            'codservicio' => [
+                'required',
+                'integer',
+                Rule::exists('serasignado', 'codigo')
+                    ->where('sede', Sede::activa() ?? Sede::CALI)
+                    ->where('estado', true),
+            ],
             'Codesp' => ['required', 'string', 'max:10'],
             'codMed' => ['required', 'string', 'max:20'],
             // El paciente debe existir: de él se llenan tipo de documento,
@@ -794,6 +812,7 @@ class RadicarCasoController extends Controller
             'procedimientos.*.cusv_id.required' => 'Seleccione el código CUPS.',
             'procedimientos.*.N_Autorizacion.required' => 'Digite el N° de autorización EPS.',
         ], [
+            'codservicio' => 'servicio asignado',
             'Codesp' => 'especialidad',
             'codMed' => 'médico',
             'Ndocumento' => 'identificación',
@@ -881,6 +900,19 @@ class RadicarCasoController extends Controller
         $this->normalizarCopago($request);
 
         $data = $request->validate([
+            // Servicio asignado: obligatorio también al modificar, para que
+            // las radicaciones anteriores al campo lo completen. Debe ser de la
+            // sede del caso y estar activo; se acepta conservar el que ya tiene
+            // aunque lo hayan desactivado después, para no bloquear la edición
+            // del resto del radicado.
+            'codservicio' => [
+                'required',
+                'integer',
+                Rule::exists('serasignado', 'codigo')
+                    ->where('sede', $caso->sede)
+                    ->where(fn ($q) => $q->where('estado', true)
+                        ->orWhere('codigo', (int) $caso->codservicio)),
+            ],
             'codMed' => ['required', 'string', 'max:20'],
             'estRad' => ['required', 'string', 'max:5'],
             // Copago: el valor solo se exige (y solo se guarda) si está marcado.
@@ -913,6 +945,7 @@ class RadicarCasoController extends Controller
             'procedimientos.min' => 'Debe conservar al menos un procedimiento (CUPS).',
             'procedimientos.*.cusv_id.required' => 'Seleccione el código CUPS.',
         ], [
+            'codservicio' => 'servicio asignado',
             'codMed' => 'médico',
             'estRad' => 'estado actual',
             'valor_copago' => 'valor del copago',
@@ -1868,6 +1901,7 @@ class RadicarCasoController extends Controller
             'estRad' => EstRadicado::find($plano)?->Nombre,
             'codestsecundario' => EstRadisecundario::find($plano)?->Nombre,
             'estcod' => Motivo::find($plano)?->Nombre,
+            'codservicio' => Serasignado::withoutGlobalScope('sede')->whereKey($plano)->value('nombre'),
             'Codesp' => Especialidad::where('espcodser', $plano)->value('Nombre'),
             'codsubesp' => SubEspecialidad::where('cod_SubEspecialidad', $plano)->value('Nombre'),
             'convenio' => Convenio::where('nit_Convenio', $plano)->value('nombre'),
@@ -2249,6 +2283,10 @@ class RadicarCasoController extends Controller
             'telefonos' => $paciente
                 ? trim(implode(' / ', array_filter([$paciente->Telefono1, $paciente->telefono2])))
                 : '',
+            // Las radicaciones anteriores al campo no tienen servicio.
+            'servicio' => $caso->codservicio
+                ? (Serasignado::withoutGlobalScope('sede')->whereKey($caso->codservicio)->value('nombre') ?? '—')
+                : '—',
             'eps' => $paciente?->Eps ?? '',
             'convenio' => $caso->convenio
                 ? (Convenio::where('nit_Convenio', $caso->convenio)->value('nombre') ?? $caso->convenio)
@@ -2270,6 +2308,12 @@ class RadicarCasoController extends Controller
                 : null,
             // Valores crudos para el modal de Modificar Radicado.
             'codMed' => $caso->codMed,
+            // Valor crudo para el select de Modificar Radicado.
+            'codservicio' => $caso->codservicio !== null ? (string) $caso->codservicio : null,
+            // Si el servicio del caso ya no está activo, el select no lo trae en
+            // su lista: se envía para poder mostrarlo como opción.
+            'servicioInactivo' => $caso->codservicio !== null
+                && ! Serasignado::withoutGlobalScope('sede')->whereKey($caso->codservicio)->where('estado', true)->exists(),
             'estRad' => $caso->estRad,
             // Se formatean aquí: el casteo 'date:Y-m-d' solo aplica cuando se
             // serializa el modelo entero. Al meter el Carbon suelto en este

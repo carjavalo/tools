@@ -9,6 +9,7 @@ use App\Models\EstRadicado;
 use App\Models\EstRadisecundario;
 use App\Models\Motivo;
 use App\Models\RadicarCaso;
+use App\Models\Serasignado;
 use App\Models\SubEspecialidad;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Model;
@@ -76,6 +77,7 @@ class DescriptorAuditoria
         'paquete' => 'Paquete (PDF)',
         'maos' => 'MAOS',
         'estcod' => 'Motivo',
+        'codservicio' => 'Servicio asignado',
         'sede' => 'Sede',
         'rol' => 'Rol',
         'Estado' => 'Estado',
@@ -189,6 +191,7 @@ class DescriptorAuditoria
             'estRad' => EstRadicado::find($plano)?->Nombre,
             'codestsecundario' => EstRadisecundario::find($plano)?->Nombre,
             'estcod' => Motivo::find($plano)?->Nombre,
+            'codservicio' => Serasignado::withoutGlobalScope('sede')->whereKey($plano)->value('nombre'),
             'Codesp', 'codesp' => Especialidad::where('espcodser', $plano)->value('Nombre'),
             'codsubesp' => SubEspecialidad::where('cod_SubEspecialidad', $plano)->value('Nombre'),
             'convenio' => Convenio::where('nit_Convenio', $plano)->value('nombre'),
