@@ -97,6 +97,11 @@ class RadicarCasoController extends Controller
             ->distinct()->get(['Codesp', 'codsubesp'])
             ->groupBy(fn ($c) => mb_strtolower($c->codsubesp));
 
+        // Grilla de Radicaciones del Historial, con sus filtros.
+        $filtrosGrilla = $this->filtrosGrillaCasos($request);
+        $topeGrilla = $this->topeGrillaCasos($filtrosGrilla);
+        $casosLista = $this->muestraGrillaCasos($request) ? $this->listaCasos($request) : [];
+
         return Inertia::render('tools/radicar-solicitud', [
             'especialidades' => Especialidad::orderBy('Nombre')->get(['id', 'espcodser', 'Nombre']),
             'subespecialidades' => SubEspecialidad::orderBy('Nombre')
@@ -154,9 +159,15 @@ class RadicarCasoController extends Controller
             // Grilla de radicaciones: administrable por rol en el Gestor de
             // Permisos (sub-vista radicar-solicitud-grilla).
             'muestraGrillaCasos' => $this->muestraGrillaCasos($request),
-            'casosLista' => $this->muestraGrillaCasos($request)
-                ? $this->listaCasos($request)
-                : [],
+            'casosLista' => $casosLista,
+            // Filtros aplicados a la grilla y si el resultado llegó al tope de
+            // filas (para avisar que hay más y conviene acotar).
+            'casosListaFiltros' => $filtrosGrilla,
+            'casosListaTope' => $topeGrilla,
+            'casosListaTruncada' => count($casosLista) >= $topeGrilla,
+            // Opciones del filtro Servicio asignado de la grilla: todos los de
+            // la sede, también los inactivos, porque hay radicaciones con ellos.
+            'serviciosFiltro' => Serasignado::orderBy('nombre')->get(['codigo', 'nombre', 'estado']),
         ]);
     }
 
@@ -320,11 +331,28 @@ class RadicarCasoController extends Controller
      */
     private function listaCasos(Request $request): array
     {
+        $filtros = $this->filtrosGrillaCasos($request);
+
         $query = RadicarCaso::orderByDesc('codrad');
         $this->limitarPorEstadosDelRol($query, $request);
 
-        $casos = $query->limit(200)
-            ->get(['codrad', 'Ndocumento', 'estRad', 'convenio', 'created_at']);
+        // Filtros de la grilla: fecha de creación y servicio asignado. Se
+        // aplican aquí y no en el navegador porque la grilla solo carga las
+        // más recientes: filtrando allá no se alcanzarían las antiguas.
+        $query
+            ->when($filtros['desde'] !== '', fn ($q) => $q->whereDate('created_at', '>=', $filtros['desde']))
+            ->when($filtros['hasta'] !== '', fn ($q) => $q->whereDate('created_at', '<=', $filtros['hasta']))
+            ->when($filtros['servicio'] === 'sin', fn ($q) => $q->whereNull('codservicio'))
+            ->when(ctype_digit($filtros['servicio']), fn ($q) => $q->where('codservicio', (int) $filtros['servicio']));
+
+        $casos = $query->limit($this->topeGrillaCasos($filtros))
+            ->get(['codrad', 'Ndocumento', 'estRad', 'convenio', 'codservicio', 'created_at']);
+
+        // Nombre del servicio asignado de cada fila. Sin el filtro de sede: el
+        // caso ya es de la sede activa, y su servicio también.
+        $servicios = Serasignado::withoutGlobalScope('sede')
+            ->whereIn('codigo', $casos->pluck('codservicio')->filter()->unique())
+            ->pluck('nombre', 'codigo');
 
         $pacientes = User::whereIn('Numero_D', $casos->pluck('Ndocumento')->filter())
             ->get(['Numero_D', 'name', 'Apellido1', 'apellido2', 'tipo_Docu', 'Eps'])
@@ -355,7 +383,7 @@ class RadicarCasoController extends Controller
             ->get(['id', 'CodCupsHuv', 'Nombre'])
             ->keyBy('id');
 
-        return $casos->map(function ($caso) use ($pacientes, $estados, $convenios, $adjuntos, $anexados, $cups) {
+        return $casos->map(function ($caso) use ($pacientes, $estados, $convenios, $adjuntos, $anexados, $cups, $servicios) {
             $p = $pacientes->get($caso->Ndocumento);
 
             return [
@@ -378,6 +406,8 @@ class RadicarCasoController extends Controller
                 'convenio' => $caso->convenio
                     ? ($convenios[$caso->convenio] ?? $caso->convenio)
                     : '—',
+                // Las radicaciones anteriores al campo no tienen servicio.
+                'servicio' => $caso->codservicio ? ($servicios[$caso->codservicio] ?? '—') : '—',
                 'estado' => $estados[(int) $caso->estRad] ?? '—',
                 'cotizaciones' => ($adjuntos->get($caso->codrad) ?? collect())
                     ->map(fn (CotizacionCaso $c) => [
@@ -387,6 +417,44 @@ class RadicarCasoController extends Controller
                     ])->values()->all(),
             ];
         })->values()->all();
+    }
+
+    /**
+     * Filtros de la Grilla de Radicaciones del Historial, saneados: fechas
+     * aaaa-mm-dd válidas (o vacías) y servicio '' (todos), 'sin' (sin servicio
+     * asignado) o el código de un servicio. Lo que no cumple se ignora.
+     *
+     * @return array{desde: string, hasta: string, servicio: string}
+     */
+    private function filtrosGrillaCasos(Request $request): array
+    {
+        $fecha = function (string $clave) use ($request): string {
+            $valor = trim((string) $request->query($clave, ''));
+
+            return preg_match('/^\d{4}-\d{2}-\d{2}$/', $valor) && strtotime($valor) !== false ? $valor : '';
+        };
+
+        $servicio = trim((string) $request->query('grid_servicio', ''));
+
+        return [
+            'desde' => $fecha('grid_desde'),
+            'hasta' => $fecha('grid_hasta'),
+            'servicio' => $servicio === 'sin' || ctype_digit($servicio) ? $servicio : '',
+        ];
+    }
+
+    /**
+     * Cuántas filas trae la grilla: las 200 más recientes sin filtros; con
+     * filtros, hasta 2000, para que el rango pedido salga completo (y completo
+     * se exporte a Excel).
+     *
+     * @param  array{desde: string, hasta: string, servicio: string}  $filtros
+     */
+    private function topeGrillaCasos(array $filtros): int
+    {
+        return $filtros['desde'] !== '' || $filtros['hasta'] !== '' || $filtros['servicio'] !== ''
+            ? 2000
+            : 200;
     }
 
     /**

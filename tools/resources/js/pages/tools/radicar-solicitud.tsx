@@ -97,6 +97,8 @@ interface CasoListaRow {
     // Códigos CUPS & procedimientos registrados en el caso.
     procedimientos: { codigo: string; descripcion: string }[];
     convenio: string;
+    // Nombre del servicio asignado ('—' si la radicación no tiene).
+    servicio: string;
     estado: string;
     // PDFs de los conceptos cotizados. Llega vacío para los roles que no
     // pueden ver las cotizaciones.
@@ -181,6 +183,12 @@ interface PageProps {
     puedeGestionarCotizaciones: boolean;
     muestraGrillaCasos: boolean;
     casosLista: CasoListaRow[];
+    // Filtros de la grilla del Historial que aplicó el servidor.
+    casosListaFiltros: { desde: string; hasta: string; servicio: string };
+    casosListaTope: number;
+    casosListaTruncada: boolean;
+    // Servicios de la sede (también los inactivos) para filtrar la grilla.
+    serviciosFiltro: { codigo: number; nombre: string; estado: boolean }[];
 }
 
 interface PacienteInfo {
@@ -729,6 +737,10 @@ export default function RadicarSolicitud({
     puedeGestionarCotizaciones,
     muestraGrillaCasos,
     casosLista,
+    casosListaFiltros,
+    casosListaTope,
+    casosListaTruncada,
+    serviciosFiltro,
 }: PageProps) {
     const { flash, auth } = usePage<SharedData>().props;
     const esSuperAdmin = auth?.user?.rol === 'Super Admin';
@@ -873,6 +885,132 @@ export default function RadicarSolicitud({
     const [cotOk, setCotOk] = useState(false);
     const [cotError, setCotError] = useState<string | null>(null);
     const [gridFilter, setGridFilter] = useState('');
+    // Filtros de la grilla que se consultan al servidor. Arrancan con lo que
+    // trae la URL, para que recargar la página los conserve.
+    const [gridDesde, setGridDesde] = useState(casosListaFiltros.desde);
+    const [gridHasta, setGridHasta] = useState(casosListaFiltros.hasta);
+    const [gridServicio, setGridServicio] = useState(
+        casosListaFiltros.servicio || 'todos',
+    );
+    const [gridCargando, setGridCargando] = useState(false);
+    const gridHayFiltros =
+        gridDesde !== '' || gridHasta !== '' || gridServicio !== 'todos';
+    const gridFechasInvertidas =
+        gridDesde !== '' && gridHasta !== '' && gridDesde > gridHasta;
+    const gridMontado = useRef(false);
+
+    // Al cambiar un filtro se vuelve a pedir solo la grilla: la pestaña, el
+    // caso abierto y lo demás de la página se conservan.
+    useEffect(() => {
+        if (!gridMontado.current) {
+            gridMontado.current = true;
+            return;
+        }
+        if (gridFechasInvertidas) return;
+
+        const timer = setTimeout(() => {
+            router.get(
+                '/tools/radicar-solicitud',
+                {
+                    ...(gridDesde ? { grid_desde: gridDesde } : {}),
+                    ...(gridHasta ? { grid_hasta: gridHasta } : {}),
+                    ...(gridServicio !== 'todos'
+                        ? { grid_servicio: gridServicio }
+                        : {}),
+                },
+                {
+                    only: [
+                        'casosLista',
+                        'casosListaFiltros',
+                        'casosListaTope',
+                        'casosListaTruncada',
+                    ],
+                    preserveState: true,
+                    preserveScroll: true,
+                    replace: true,
+                    onStart: () => setGridCargando(true),
+                    onFinish: () => setGridCargando(false),
+                },
+            );
+        }, 300);
+
+        return () => clearTimeout(timer);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [gridDesde, gridHasta, gridServicio]);
+
+    const limpiarFiltrosGrilla = () => {
+        setGridDesde('');
+        setGridHasta('');
+        setGridServicio('todos');
+    };
+
+    // Lo que muestra la grilla: lo que devolvió el servidor con sus filtros,
+    // acotado además por el buscador de texto. Es también lo que se exporta.
+    const casosFiltrados = useMemo(() => {
+        const f = gridFilter.trim().toLowerCase();
+        if (!f) return casosLista;
+
+        return casosLista.filter((c) =>
+            [
+                String(c.codrad),
+                c.paciente,
+                c.documento ?? '',
+                c.eps,
+                ...c.procedimientos.map((p) => `${p.codigo} ${p.descripcion}`),
+                c.convenio,
+                c.servicio,
+                c.estado,
+            ]
+                .join(' ')
+                .toLowerCase()
+                .includes(f),
+        );
+    }, [casosLista, gridFilter]);
+
+    // Descarga en Excel lo que muestra la grilla, con todos sus filtros.
+    const exportarGrillaExcel = async () => {
+        if (casosFiltrados.length === 0) return;
+
+        const XLSX = await import('xlsx');
+
+        const filas = casosFiltrados.map((c) => ({
+            'Caso N°': c.codrad,
+            Fecha: c.fecha ?? '',
+            Paciente: c.paciente,
+            Identificación: c.documento ?? '',
+            EPS: c.eps,
+            'Códigos CUPS & procedimientos': c.procedimientos
+                .map((p) => `${p.codigo} | ${p.descripcion}`)
+                .join('; '),
+            Convenio: c.convenio,
+            'Servicio asignado': c.servicio,
+            Estado: c.estado,
+            'Cotizaciones (PDF)': c.cotizaciones.length,
+        }));
+
+        const hoja = XLSX.utils.json_to_sheet(filas);
+        hoja['!cols'] = Object.keys(filas[0]).map((clave) => ({
+            wch: Math.min(
+                60,
+                Math.max(
+                    clave.length + 2,
+                    ...filas.map(
+                        (f) => String(f[clave as keyof typeof f] ?? '').length,
+                    ),
+                ),
+            ),
+        }));
+
+        const libro = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(libro, hoja, 'Radicaciones');
+
+        // El nombre del archivo lleva el rango filtrado, si lo hay.
+        const rango =
+            gridDesde || gridHasta
+                ? `${gridDesde || 'inicio'}_a_${gridHasta || 'hoy'}`
+                : new Date().toISOString().slice(0, 10);
+        XLSX.writeFile(libro, `radicaciones-${rango}.xlsx`);
+    };
     // Informes
     const [inf, setInf] = useState({ ...EMPTY_INF });
     const [infRows, setInfRows] = useState<InformeRow[] | null>(null);
@@ -3437,9 +3575,12 @@ export default function RadicarSolicitud({
                             {muestraGrillaCasos && (
                                 <div className="mb-5 rounded-xl border bg-card shadow-sm">
                                     <div className="flex flex-col gap-2 border-b p-3 sm:flex-row sm:items-center sm:justify-between">
-                                        <span className="text-xs font-bold tracking-wide text-[#2d3e83] uppercase dark:text-white">
+                                        <span className="flex items-center gap-2 text-xs font-bold tracking-wide text-[#2d3e83] uppercase dark:text-white">
                                             Radicaciones realizadas — clic en
                                             una fila para cargarla
+                                            {gridCargando && (
+                                                <LoaderCircle className="size-3.5 animate-spin" />
+                                            )}
                                         </span>
                                         <div className="relative w-full sm:max-w-xs">
                                             <Search className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -3450,10 +3591,144 @@ export default function RadicarSolicitud({
                                                         e.target.value,
                                                     )
                                                 }
-                                                placeholder="Filtrar por caso, paciente, cédula, CUPS, convenio…"
+                                                placeholder="Filtrar por caso, paciente, cédula, CUPS, servicio…"
                                                 className="h-8 pl-9 text-sm"
                                             />
                                         </div>
+                                    </div>
+                                    {/* Filtros de la grilla: fechas de
+                                        creación y servicio asignado. Se
+                                        consultan al servidor, así que alcanzan
+                                        también radicaciones antiguas. */}
+                                    <div className="flex flex-col gap-3 border-b bg-muted/20 p-3 lg:flex-row lg:items-end">
+                                        <div className="grid flex-1 gap-3 sm:grid-cols-3">
+                                            <div className="grid gap-1">
+                                                <Label className="text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
+                                                    Fecha creación inicial
+                                                </Label>
+                                                <Input
+                                                    type="date"
+                                                    value={gridDesde}
+                                                    max={gridHasta || undefined}
+                                                    onChange={(e) =>
+                                                        setGridDesde(
+                                                            e.target.value,
+                                                        )
+                                                    }
+                                                    className="h-8 text-sm"
+                                                />
+                                            </div>
+                                            <div className="grid gap-1">
+                                                <Label className="text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
+                                                    Fecha creación final
+                                                </Label>
+                                                <Input
+                                                    type="date"
+                                                    value={gridHasta}
+                                                    min={gridDesde || undefined}
+                                                    onChange={(e) =>
+                                                        setGridHasta(
+                                                            e.target.value,
+                                                        )
+                                                    }
+                                                    className="h-8 text-sm"
+                                                />
+                                            </div>
+                                            <div className="grid gap-1">
+                                                <Label className="text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
+                                                    Servicio asignado
+                                                </Label>
+                                                <Select
+                                                    value={gridServicio}
+                                                    onValueChange={
+                                                        setGridServicio
+                                                    }
+                                                >
+                                                    <SelectTrigger className="h-8 text-sm">
+                                                        <SelectValue />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="todos">
+                                                            Todos los servicios
+                                                        </SelectItem>
+                                                        <SelectItem value="sin">
+                                                            Sin servicio
+                                                            asignado
+                                                        </SelectItem>
+                                                        {serviciosFiltro.map(
+                                                            (s) => (
+                                                                <SelectItem
+                                                                    key={
+                                                                        s.codigo
+                                                                    }
+                                                                    value={String(
+                                                                        s.codigo,
+                                                                    )}
+                                                                >
+                                                                    {s.nombre}
+                                                                    {!s.estado &&
+                                                                        ' (inactivo)'}
+                                                                </SelectItem>
+                                                            ),
+                                                        )}
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+                                        </div>
+                                        <div className="flex gap-2">
+                                            {gridHayFiltros && (
+                                                <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    size="sm"
+                                                    onClick={
+                                                        limpiarFiltrosGrilla
+                                                    }
+                                                    className="h-8 gap-1.5"
+                                                >
+                                                    <X className="size-4" />
+                                                    Limpiar
+                                                </Button>
+                                            )}
+                                            <Button
+                                                type="button"
+                                                size="sm"
+                                                onClick={exportarGrillaExcel}
+                                                disabled={
+                                                    casosFiltrados.length === 0
+                                                }
+                                                title="Descargar en Excel las radicaciones que muestra la grilla con los filtros aplicados"
+                                                className="h-8 gap-1.5 bg-green-700 text-white hover:bg-green-800"
+                                            >
+                                                <FileSpreadsheet className="size-4" />
+                                                Exportar Excel
+                                            </Button>
+                                        </div>
+                                    </div>
+                                    {gridFechasInvertidas && (
+                                        <p className="border-b bg-amber-50 px-3 py-1.5 text-xs text-amber-800 dark:bg-amber-950 dark:text-amber-200">
+                                            La fecha inicial es posterior a la
+                                            final: corrija el rango para
+                                            filtrar.
+                                        </p>
+                                    )}
+                                    <div className="flex items-center justify-between border-b px-3 py-1.5 text-xs text-muted-foreground">
+                                        <span>
+                                            {casosFiltrados.length}{' '}
+                                            {casosFiltrados.length === 1
+                                                ? 'radicación'
+                                                : 'radicaciones'}
+                                            {gridHayFiltros
+                                                ? ' con los filtros aplicados'
+                                                : ' más recientes'}
+                                        </span>
+                                        {casosListaTruncada && (
+                                            <span className="text-amber-700 dark:text-amber-400">
+                                                Se muestran las primeras{' '}
+                                                {casosListaTope}: acote el rango
+                                                de fechas para ver el resto.
+                                            </span>
+                                        )}
                                     </div>
                                     <div className="max-h-64 overflow-auto">
                                         <table className="w-full text-left text-sm">
@@ -3482,6 +3757,9 @@ export default function RadicarSolicitud({
                                                         Convenio
                                                     </th>
                                                     <th className="px-3 py-2 font-medium">
+                                                        Servicio asignado
+                                                    </th>
+                                                    <th className="px-3 py-2 font-medium">
                                                         Estado
                                                     </th>
                                                     {/* Los PDF de los conceptos
@@ -3495,161 +3773,152 @@ export default function RadicarSolicitud({
                                                 </tr>
                                             </thead>
                                             <tbody className="divide-y">
-                                                {casosLista
-                                                    .filter((c) => {
-                                                        const f = gridFilter
-                                                            .trim()
-                                                            .toLowerCase();
-                                                        if (!f) return true;
-                                                        return [
-                                                            String(c.codrad),
-                                                            c.paciente,
-                                                            c.documento ?? '',
-                                                            c.eps,
-                                                            ...c.procedimientos.map(
-                                                                (p) =>
-                                                                    `${p.codigo} ${p.descripcion}`,
-                                                            ),
-                                                            c.convenio,
-                                                            c.estado,
-                                                        ]
-                                                            .join(' ')
-                                                            .toLowerCase()
-                                                            .includes(f);
-                                                    })
-                                                    .map((c) => (
-                                                        <tr
-                                                            key={c.codrad}
-                                                            onClick={() => {
-                                                                setHistQuery(
-                                                                    String(
-                                                                        c.codrad,
-                                                                    ),
-                                                                );
-                                                                consultarCaso(
-                                                                    String(
-                                                                        c.codrad,
-                                                                    ),
-                                                                );
-                                                            }}
-                                                            className={`cursor-pointer transition-colors hover:bg-[#2d3e83]/5 dark:hover:bg-white/5 ${
-                                                                caso?.codrad ===
-                                                                c.codrad
-                                                                    ? 'bg-[#2d3e83]/10 dark:bg-white/10'
-                                                                    : ''
-                                                            }`}
-                                                        >
-                                                            <td className="px-3 py-2 font-bold text-[#2d3e83] dark:text-white">
-                                                                #{c.codrad}
-                                                            </td>
-                                                            <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">
-                                                                {c.fecha ?? '—'}
-                                                            </td>
-                                                            <td className="px-3 py-2 font-medium text-foreground">
-                                                                {c.paciente}
-                                                            </td>
-                                                            <td className="px-3 py-2 text-muted-foreground">
-                                                                {c.documento ??
-                                                                    '—'}
-                                                            </td>
-                                                            <td className="px-3 py-2 text-muted-foreground">
-                                                                {c.eps}
-                                                            </td>
-                                                            <td className="min-w-56 px-3 py-2 text-xs text-foreground">
-                                                                {c
-                                                                    .procedimientos
-                                                                    .length ===
-                                                                0 ? (
-                                                                    <span className="text-muted-foreground">
-                                                                        —
-                                                                    </span>
-                                                                ) : (
-                                                                    <ul className="space-y-0.5">
-                                                                        {c.procedimientos.map(
-                                                                            (
-                                                                                p,
-                                                                                i,
-                                                                            ) => (
-                                                                                <li
-                                                                                    key={
-                                                                                        i
-                                                                                    }
-                                                                                >
-                                                                                    <span className="font-mono font-semibold">
-                                                                                        {
-                                                                                            p.codigo
-                                                                                        }
-                                                                                    </span>{' '}
-                                                                                    |{' '}
-                                                                                    {p.descripcion ||
-                                                                                        '—'}
-                                                                                </li>
-                                                                            ),
-                                                                        )}
-                                                                    </ul>
-                                                                )}
-                                                            </td>
-                                                            <td className="px-3 py-2 text-muted-foreground">
-                                                                {c.convenio}
-                                                            </td>
-                                                            <td className="px-3 py-2">
-                                                                <span className="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700 dark:bg-green-950 dark:text-green-300">
-                                                                    {c.estado}
+                                                {casosFiltrados.map((c) => (
+                                                    <tr
+                                                        key={c.codrad}
+                                                        onClick={() => {
+                                                            setHistQuery(
+                                                                String(
+                                                                    c.codrad,
+                                                                ),
+                                                            );
+                                                            consultarCaso(
+                                                                String(
+                                                                    c.codrad,
+                                                                ),
+                                                            );
+                                                        }}
+                                                        className={`cursor-pointer transition-colors hover:bg-[#2d3e83]/5 dark:hover:bg-white/5 ${
+                                                            caso?.codrad ===
+                                                            c.codrad
+                                                                ? 'bg-[#2d3e83]/10 dark:bg-white/10'
+                                                                : ''
+                                                        }`}
+                                                    >
+                                                        <td className="px-3 py-2 font-bold text-[#2d3e83] dark:text-white">
+                                                            #{c.codrad}
+                                                        </td>
+                                                        <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">
+                                                            {c.fecha ?? '—'}
+                                                        </td>
+                                                        <td className="px-3 py-2 font-medium text-foreground">
+                                                            {c.paciente}
+                                                        </td>
+                                                        <td className="px-3 py-2 text-muted-foreground">
+                                                            {c.documento ?? '—'}
+                                                        </td>
+                                                        <td className="px-3 py-2 text-muted-foreground">
+                                                            {c.eps}
+                                                        </td>
+                                                        <td className="min-w-56 px-3 py-2 text-xs text-foreground">
+                                                            {c.procedimientos
+                                                                .length ===
+                                                            0 ? (
+                                                                <span className="text-muted-foreground">
+                                                                    —
                                                                 </span>
-                                                            </td>
-                                                            <td className="px-3 py-2">
-                                                                {c.cotizaciones
-                                                                    .length ===
-                                                                0 ? (
-                                                                    <span className="text-muted-foreground">
-                                                                        —
-                                                                    </span>
-                                                                ) : (
-                                                                    <div className="flex flex-wrap gap-1">
-                                                                        {c.cotizaciones.map(
-                                                                            (
-                                                                                cot,
-                                                                            ) => (
-                                                                                <a
-                                                                                    key={
-                                                                                        cot.id
+                                                            ) : (
+                                                                <ul className="space-y-0.5">
+                                                                    {c.procedimientos.map(
+                                                                        (
+                                                                            p,
+                                                                            i,
+                                                                        ) => (
+                                                                            <li
+                                                                                key={
+                                                                                    i
+                                                                                }
+                                                                            >
+                                                                                <span className="font-mono font-semibold">
+                                                                                    {
+                                                                                        p.codigo
                                                                                     }
-                                                                                    href={
-                                                                                        cot.url
-                                                                                    }
-                                                                                    target="_blank"
-                                                                                    rel="noreferrer"
-                                                                                    // Sin esto el clic
-                                                                                    // también cargaría
-                                                                                    // el caso, porque
-                                                                                    // la fila entera
-                                                                                    // es un botón.
-                                                                                    onClick={(
-                                                                                        e,
-                                                                                    ) =>
-                                                                                        e.stopPropagation()
-                                                                                    }
-                                                                                    title={`Abrir la cotización de ${cot.tercero} en una pestaña nueva`}
-                                                                                    className="inline-flex items-center gap-1 rounded-md bg-[#2d3e83]/10 px-2 py-0.5 text-xs font-medium text-[#2d3e83] transition-colors hover:bg-[#2d3e83]/20 dark:bg-white/10 dark:text-white"
-                                                                                >
-                                                                                    <Eye className="size-3" />
-                                                                                    PDF
-                                                                                </a>
-                                                                            ),
-                                                                        )}
-                                                                    </div>
-                                                                )}
-                                                            </td>
-                                                        </tr>
-                                                    ))}
-                                                {casosLista.length === 0 && (
+                                                                                </span>{' '}
+                                                                                |{' '}
+                                                                                {p.descripcion ||
+                                                                                    '—'}
+                                                                            </li>
+                                                                        ),
+                                                                    )}
+                                                                </ul>
+                                                            )}
+                                                        </td>
+                                                        <td className="px-3 py-2 text-muted-foreground">
+                                                            {c.convenio}
+                                                        </td>
+                                                        <td className="px-3 py-2">
+                                                            {c.servicio ===
+                                                            '—' ? (
+                                                                <span className="text-muted-foreground">
+                                                                    —
+                                                                </span>
+                                                            ) : (
+                                                                <span className="inline-flex items-center rounded-full bg-[#2d3e83]/10 px-2 py-0.5 text-xs font-medium text-[#2d3e83] dark:bg-white/10 dark:text-white">
+                                                                    {c.servicio}
+                                                                </span>
+                                                            )}
+                                                        </td>
+                                                        <td className="px-3 py-2">
+                                                            <span className="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700 dark:bg-green-950 dark:text-green-300">
+                                                                {c.estado}
+                                                            </span>
+                                                        </td>
+                                                        <td className="px-3 py-2">
+                                                            {c.cotizaciones
+                                                                .length ===
+                                                            0 ? (
+                                                                <span className="text-muted-foreground">
+                                                                    —
+                                                                </span>
+                                                            ) : (
+                                                                <div className="flex flex-wrap gap-1">
+                                                                    {c.cotizaciones.map(
+                                                                        (
+                                                                            cot,
+                                                                        ) => (
+                                                                            <a
+                                                                                key={
+                                                                                    cot.id
+                                                                                }
+                                                                                href={
+                                                                                    cot.url
+                                                                                }
+                                                                                target="_blank"
+                                                                                rel="noreferrer"
+                                                                                // Sin esto el clic
+                                                                                // también cargaría
+                                                                                // el caso, porque
+                                                                                // la fila entera
+                                                                                // es un botón.
+                                                                                onClick={(
+                                                                                    e,
+                                                                                ) =>
+                                                                                    e.stopPropagation()
+                                                                                }
+                                                                                title={`Abrir la cotización de ${cot.tercero} en una pestaña nueva`}
+                                                                                className="inline-flex items-center gap-1 rounded-md bg-[#2d3e83]/10 px-2 py-0.5 text-xs font-medium text-[#2d3e83] transition-colors hover:bg-[#2d3e83]/20 dark:bg-white/10 dark:text-white"
+                                                                            >
+                                                                                <Eye className="size-3" />
+                                                                                PDF
+                                                                            </a>
+                                                                        ),
+                                                                    )}
+                                                                </div>
+                                                            )}
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                                {casosFiltrados.length ===
+                                                    0 && (
                                                     <tr>
                                                         <td
-                                                            colSpan={9}
+                                                            colSpan={10}
                                                             className="px-3 py-8 text-center text-muted-foreground"
                                                         >
-                                                            No hay radicaciones
-                                                            registradas.
+                                                            {gridHayFiltros ||
+                                                            gridFilter.trim()
+                                                                ? 'Ninguna radicación coincide con los filtros.'
+                                                                : 'No hay radicaciones registradas.'}
                                                         </td>
                                                     </tr>
                                                 )}

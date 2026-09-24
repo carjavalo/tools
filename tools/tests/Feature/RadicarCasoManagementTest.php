@@ -2498,3 +2498,54 @@ test('modificar radicado conserva un servicio que se desactivo despues', functio
 
     expect($caso->refresh()->ObservacionTFX)->toBe('Cambio de observación');
 });
+
+test('la grilla del historial muestra el servicio asignado y filtra por el', function () {
+    $admin = User::factory()->create();
+    $servicio = servicioDePrueba();
+    $conServicio = RadicarCaso::create(['Ndocumento' => '9970', 'estRad' => '1', 'codservicio' => $servicio]);
+    $sinServicio = RadicarCaso::create(['Ndocumento' => '9971', 'estRad' => '1']);
+
+    $lista = fn (string $query) => collect(
+        $this->actingAs($admin)->get('/tools/radicar-solicitud'.$query)
+            ->assertOk()->viewData('page')['props']['casosLista']
+    );
+
+    $todas = $lista('');
+    expect($todas->firstWhere('codrad', $conServicio->codrad)['servicio'])->toBe('Servicio de prueba')
+        ->and($todas->firstWhere('codrad', $sinServicio->codrad)['servicio'])->toBe('—');
+
+    expect($lista('?grid_servicio='.$servicio)->pluck('codrad')->all())->toBe([$conServicio->codrad])
+        ->and($lista('?grid_servicio=sin')->pluck('codrad')->all())->toBe([$sinServicio->codrad]);
+});
+
+test('la grilla del historial filtra por fecha de creacion', function () {
+    $admin = User::factory()->create();
+    $agosto = RadicarCaso::create(['Ndocumento' => '9972', 'estRad' => '1']);
+    $agosto->forceFill(['created_at' => '2026-08-10 09:00:00'])->saveQuietly();
+    $septiembre = RadicarCaso::create(['Ndocumento' => '9973', 'estRad' => '1']);
+    $septiembre->forceFill(['created_at' => '2026-09-15 09:00:00'])->saveQuietly();
+
+    $codrads = fn (string $query) => collect(
+        $this->actingAs($admin)->get('/tools/radicar-solicitud'.$query)
+            ->viewData('page')['props']['casosLista']
+    )->pluck('codrad')->all();
+
+    expect($codrads('?grid_desde=2026-09-01'))->toBe([$septiembre->codrad])
+        ->and($codrads('?grid_hasta=2026-08-31'))->toBe([$agosto->codrad])
+        // El día final se incluye completo.
+        ->and($codrads('?grid_desde=2026-08-10&grid_hasta=2026-08-10'))->toBe([$agosto->codrad]);
+});
+
+test('la grilla del historial ignora filtros mal formados', function () {
+    $admin = User::factory()->create();
+    RadicarCaso::create(['Ndocumento' => '9974', 'estRad' => '1']);
+
+    $this->actingAs($admin)
+        ->get('/tools/radicar-solicitud?grid_desde=ayer&grid_servicio=1%20or%201=1')
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('casosListaFiltros', ['desde' => '', 'hasta' => '', 'servicio' => ''])
+            ->where('casosListaTope', 200)
+            ->has('casosLista', 1)
+        );
+});
