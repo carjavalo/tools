@@ -25,8 +25,11 @@ import { dashboard } from '@/routes';
 import { type BreadcrumbItem, type SharedData } from '@/types';
 import { Head, router, useForm, usePage } from '@inertiajs/react';
 import {
+    ArrowDown,
+    ArrowUp,
     BarChart3,
     CalendarClock,
+    CalendarDays,
     CheckCircle2,
     ChevronDown,
     ChevronLeft,
@@ -385,6 +388,339 @@ function esEstadoProgramado(nombre: string | null | undefined): boolean {
         .trim()
         .toLowerCase()
         .startsWith('programad');
+}
+
+const HORAS_24 = Array.from({ length: 24 }, (_, i) =>
+    String(i).padStart(2, '0'),
+);
+const MINUTOS_60 = Array.from({ length: 60 }, (_, i) =>
+    String(i).padStart(2, '0'),
+);
+const DIAS_SEMANA = ['DO', 'LU', 'MA', 'MI', 'JU', 'VI', 'SA'];
+
+/** Fecha local como "aaaa-mm-dd" (sin pasar por UTC, que cambia el día). */
+function isoLocal(d: Date): string {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/**
+ * Fecha y Hora de Programación con hora militar (00 a 23).
+ *
+ * Replica el control nativo datetime-local —un solo campo y, al abrirlo, el
+ * calendario con las columnas de hora y minutos al lado—, porque el nativo
+ * muestra la hora en a. m./p. m. según la configuración regional del equipo y
+ * no se puede forzar a 24 h.
+ *
+ * Maneja el mismo valor que datetime-local ("aaaa-mm-ddTHH:mm"), así que el
+ * servidor recibe lo de siempre. Como el nativo, mientras falte la fecha o la
+ * hora entrega '' (sin valor).
+ */
+function FechaHora24({
+    value,
+    onChange,
+}: {
+    value: string;
+    onChange: (valor: string) => void;
+}) {
+    const partir = (v: string) => {
+        const m = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})/.exec(v);
+        return m
+            ? { fecha: m[1], hora: m[2], min: m[3] }
+            : { fecha: '', hora: '', min: '' };
+    };
+
+    const [partes, setPartes] = useState(() => partir(value));
+    const [abierto, setAbierto] = useState(false);
+    const [mes, setMes] = useState(() => {
+        const base = partes.fecha
+            ? new Date(`${partes.fecha}T00:00`)
+            : new Date();
+        return new Date(base.getFullYear(), base.getMonth(), 1);
+    });
+    const [pos, setPos] = useState({ top: 0, left: 0 });
+    const campo = useRef<HTMLButtonElement>(null);
+    const panel = useRef<HTMLDivElement>(null);
+    const colHoras = useRef<HTMLDivElement>(null);
+    const colMinutos = useRef<HTMLDivElement>(null);
+
+    // Cambio desde afuera: se carga el valor; si llega vacío y aquí había una
+    // fecha completa, es que el formulario se limpió después de guardar.
+    useEffect(() => {
+        if (value) {
+            setPartes(partir(value));
+        } else {
+            setPartes((prev) =>
+                prev.fecha && prev.hora && prev.min
+                    ? { fecha: '', hora: '', min: '' }
+                    : prev,
+            );
+        }
+    }, [value]);
+
+    const actualizar = (sig: typeof partes) => {
+        setPartes(sig);
+        onChange(
+            sig.fecha && sig.hora && sig.min
+                ? `${sig.fecha}T${sig.hora}:${sig.min}`
+                : '',
+        );
+    };
+
+    // El panel va con posición fija para que no lo recorte el borde de la
+    // tarjeta; se ubica bajo el campo o encima si abajo no cabe.
+    const ubicar = () => {
+        const r = campo.current?.getBoundingClientRect();
+        if (!r) return;
+        const alto = 300;
+        const top =
+            r.bottom + 4 + alto > window.innerHeight && r.top > alto
+                ? r.top - alto - 4
+                : r.bottom + 4;
+        setPos({ top, left: Math.min(r.left, window.innerWidth - 340) });
+    };
+
+    useEffect(() => {
+        if (!abierto) return;
+
+        ubicar();
+        // Lo escogido queda a la vista en las columnas, como en el nativo.
+        colHoras.current
+            ?.querySelector('[data-activo="true"]')
+            ?.scrollIntoView({ block: 'start' });
+        colMinutos.current
+            ?.querySelector('[data-activo="true"]')
+            ?.scrollIntoView({ block: 'start' });
+
+        const fuera = (e: MouseEvent) => {
+            const t = e.target as Node;
+            if (!panel.current?.contains(t) && !campo.current?.contains(t)) {
+                setAbierto(false);
+            }
+        };
+        const tecla = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') setAbierto(false);
+        };
+        document.addEventListener('mousedown', fuera);
+        document.addEventListener('keydown', tecla);
+        window.addEventListener('scroll', ubicar, true);
+        window.addEventListener('resize', ubicar);
+
+        return () => {
+            document.removeEventListener('mousedown', fuera);
+            document.removeEventListener('keydown', tecla);
+            window.removeEventListener('scroll', ubicar, true);
+            window.removeEventListener('resize', ubicar);
+        };
+    }, [abierto]);
+
+    // Días del mes en semanas de domingo a sábado, con los del mes anterior y
+    // siguiente para completar las 6 filas.
+    const primero = new Date(mes.getFullYear(), mes.getMonth(), 1);
+    const dias = Array.from(
+        { length: 42 },
+        (_, i) =>
+            new Date(
+                mes.getFullYear(),
+                mes.getMonth(),
+                1 - primero.getDay() + i,
+            ),
+    );
+    const hoy = isoLocal(new Date());
+    const tituloMes = mes.toLocaleDateString('es-CO', {
+        month: 'long',
+        year: 'numeric',
+    });
+
+    const texto = partes.fecha
+        ? `${partes.fecha.slice(8, 10)}/${partes.fecha.slice(5, 7)}/${partes.fecha.slice(0, 4)}`
+        : 'dd/mm/aaaa';
+    const hora = `${partes.hora || '--'}:${partes.min || '--'}`;
+
+    return (
+        <>
+            <button
+                ref={campo}
+                type="button"
+                onClick={() => setAbierto((v) => !v)}
+                className="flex h-9 w-full min-w-0 items-center justify-between rounded-md border border-input bg-transparent px-3 py-1 text-left text-base shadow-xs transition-[color,box-shadow] outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 md:text-sm dark:bg-input/30"
+            >
+                <span
+                    className={
+                        partes.fecha || partes.hora
+                            ? 'text-foreground'
+                            : 'text-muted-foreground'
+                    }
+                >
+                    {texto} {hora}
+                </span>
+                <CalendarDays className="size-4 text-foreground/80" />
+            </button>
+
+            {abierto && (
+                <div
+                    ref={panel}
+                    style={{ top: pos.top, left: pos.left }}
+                    className="fixed z-50 flex rounded-md border bg-popover text-sm text-popover-foreground shadow-lg"
+                >
+                    {/* Calendario */}
+                    <div className="w-[16.5rem] p-3">
+                        <div className="mb-2 flex items-center justify-between">
+                            <span className="font-semibold first-letter:uppercase">
+                                {tituloMes}
+                            </span>
+                            <div className="flex gap-1">
+                                <button
+                                    type="button"
+                                    title="Mes anterior"
+                                    onClick={() =>
+                                        setMes(
+                                            new Date(
+                                                mes.getFullYear(),
+                                                mes.getMonth() - 1,
+                                                1,
+                                            ),
+                                        )
+                                    }
+                                    className="rounded p-1 hover:bg-muted"
+                                >
+                                    <ArrowUp className="size-4" />
+                                </button>
+                                <button
+                                    type="button"
+                                    title="Mes siguiente"
+                                    onClick={() =>
+                                        setMes(
+                                            new Date(
+                                                mes.getFullYear(),
+                                                mes.getMonth() + 1,
+                                                1,
+                                            ),
+                                        )
+                                    }
+                                    className="rounded p-1 hover:bg-muted"
+                                >
+                                    <ArrowDown className="size-4" />
+                                </button>
+                            </div>
+                        </div>
+                        <div className="grid grid-cols-7 text-center text-xs">
+                            {DIAS_SEMANA.map((d) => (
+                                <span
+                                    key={d}
+                                    className="py-1 font-semibold text-muted-foreground"
+                                >
+                                    {d}
+                                </span>
+                            ))}
+                            {dias.map((d) => {
+                                const iso = isoLocal(d);
+                                const delMes = d.getMonth() === mes.getMonth();
+                                const activo = iso === partes.fecha;
+                                return (
+                                    <button
+                                        key={iso}
+                                        type="button"
+                                        onClick={() =>
+                                            actualizar({
+                                                ...partes,
+                                                fecha: iso,
+                                            })
+                                        }
+                                        className={`m-0.5 rounded py-1 ${
+                                            activo
+                                                ? 'bg-blue-600 font-semibold text-white'
+                                                : iso === hoy
+                                                  ? 'font-semibold ring-1 ring-blue-600'
+                                                  : 'hover:bg-muted'
+                                        } ${!delMes && !activo ? 'text-muted-foreground/60' : ''}`}
+                                    >
+                                        {d.getDate()}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                        <div className="mt-2 flex justify-between text-xs">
+                            <button
+                                type="button"
+                                onClick={() =>
+                                    actualizar({ fecha: '', hora: '', min: '' })
+                                }
+                                className="text-blue-600 hover:underline"
+                            >
+                                Borrar
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    const ahora = new Date();
+                                    setMes(
+                                        new Date(
+                                            ahora.getFullYear(),
+                                            ahora.getMonth(),
+                                            1,
+                                        ),
+                                    );
+                                    actualizar({ ...partes, fecha: hoy });
+                                }}
+                                className="text-blue-600 hover:underline"
+                            >
+                                Hoy
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Hora (00 a 23) y minutos */}
+                    {[
+                        {
+                            ref: colHoras,
+                            valores: HORAS_24,
+                            actual: partes.hora,
+                            campo: 'hora' as const,
+                            titulo: 'Hora',
+                        },
+                        {
+                            ref: colMinutos,
+                            valores: MINUTOS_60,
+                            actual: partes.min,
+                            campo: 'min' as const,
+                            titulo: 'Min',
+                        },
+                    ].map((col) => (
+                        <div key={col.campo} className="flex flex-col border-l">
+                            <span className="border-b py-1 text-center text-[11px] font-semibold text-muted-foreground">
+                                {col.titulo}
+                            </span>
+                            <div
+                                ref={col.ref}
+                                className="h-[16.5rem] w-16 overflow-y-auto p-1 pr-2"
+                            >
+                                {col.valores.map((v) => (
+                                    <button
+                                        key={v}
+                                        type="button"
+                                        data-activo={v === col.actual}
+                                        onClick={() =>
+                                            actualizar({
+                                                ...partes,
+                                                [col.campo]: v,
+                                            })
+                                        }
+                                        className={`block w-full rounded py-1 text-center ${
+                                            v === col.actual
+                                                ? 'bg-blue-600 font-semibold text-white'
+                                                : 'hover:bg-muted'
+                                        }`}
+                                    >
+                                        {v}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
+        </>
+    );
 }
 
 /**
@@ -4750,16 +5086,14 @@ export default function RadicarSolicitud({
                                                 {segEsProgramado && (
                                                     <>
                                                         <Field label="Fecha y Hora de Programación">
-                                                            <Input
-                                                                type="datetime-local"
+                                                            <FechaHora24
                                                                 value={
                                                                     seg.fecha_programacion
                                                                 }
-                                                                onChange={(e) =>
+                                                                onChange={(v) =>
                                                                     setSegField(
                                                                         'fecha_programacion',
-                                                                        e.target
-                                                                            .value,
+                                                                        v,
                                                                     )
                                                                 }
                                                             />
@@ -5089,8 +5423,7 @@ export default function RadicarSolicitud({
                                                         ?.esProgramado && (
                                                         <>
                                                             <Field label="Fecha y Hora de Programación Hemo">
-                                                                <Input
-                                                                    type="datetime-local"
+                                                                <FechaHora24
                                                                     value={
                                                                         f
                                                                             .estadoQx
@@ -5098,13 +5431,11 @@ export default function RadicarSolicitud({
                                                                             .fecha_programacion
                                                                     }
                                                                     onChange={(
-                                                                        e,
+                                                                        v,
                                                                     ) =>
                                                                         f.setCampo(
                                                                             'fecha_programacion',
-                                                                            e
-                                                                                .target
-                                                                                .value,
+                                                                            v,
                                                                         )
                                                                     }
                                                                 />
