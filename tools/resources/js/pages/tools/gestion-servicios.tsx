@@ -27,6 +27,7 @@ import {
     Hash,
     ListChecks,
     LoaderCircle,
+    MapPin,
     Pencil,
     Plus,
     Search,
@@ -39,6 +40,7 @@ import { FormEvent, ReactNode, useEffect, useRef, useState } from 'react';
 
 interface ServicioRow {
     codigo: number;
+    sede: string;
     nombre: string;
     descripcion: string | null;
     estado: boolean;
@@ -56,8 +58,11 @@ interface Paginated<T> {
 
 interface PageProps {
     servicios: Paginated<ServicioRow>;
-    filters: { search: string };
+    filters: { search: string; sede: string };
     stats: { total: number; activos: number; inactivos: number };
+    // Solo el Super Admin: ve las dos sedes y escoge la de cada servicio.
+    puedeEscogerSede: boolean;
+    sedes: { clave: string; nombre: string }[];
 }
 
 const breadcrumbs: BreadcrumbItem[] = [
@@ -67,17 +72,72 @@ const breadcrumbs: BreadcrumbItem[] = [
 
 const MAX_CAMPO = 120;
 
+const NOMBRES_SEDE: Record<string, string> = {
+    cali: 'Sede Cali',
+    cartago: 'Sede Cartago',
+};
+
+/** Etiqueta de la sede a la que pertenece un servicio. */
+function SedeBadge({ sede }: { sede: string }) {
+    return (
+        <span
+            className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold whitespace-nowrap ${
+                sede === 'cartago'
+                    ? 'bg-violet-100 text-violet-700 dark:bg-violet-950 dark:text-violet-300'
+                    : 'bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300'
+            }`}
+        >
+            <MapPin className="size-3" />
+            {NOMBRES_SEDE[sede] ?? sede}
+        </span>
+    );
+}
+
 type ServicioForm = {
     nombre: string;
     descripcion: string;
     estado: boolean;
+    // Solo lo tiene en cuenta el servidor cuando quien guarda es Super Admin.
+    sede: string;
 };
 
 const emptyForm: ServicioForm = {
     nombre: '',
     descripcion: '',
     estado: true,
+    sede: '',
 };
+
+/** Botones para escoger una sede (o "Todas", en el filtro). */
+function SelectorSede({
+    opciones,
+    valor,
+    onChange,
+}: {
+    opciones: { clave: string; nombre: string }[];
+    valor: string;
+    onChange: (clave: string) => void;
+}) {
+    return (
+        <div className="inline-flex flex-wrap gap-1 rounded-lg border bg-muted/40 p-1">
+            {opciones.map((o) => (
+                <button
+                    key={o.clave || 'todas'}
+                    type="button"
+                    onClick={() => onChange(o.clave)}
+                    className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
+                        valor === o.clave
+                            ? 'bg-[#2d3e83] text-white shadow-sm dark:bg-white dark:text-[#2d3e83]'
+                            : 'text-muted-foreground hover:bg-background hover:text-foreground'
+                    }`}
+                >
+                    {o.clave && <MapPin className="size-3.5" />}
+                    {o.nombre}
+                </button>
+            ))}
+        </div>
+    );
+}
 
 /**
  * Resalta en el texto lo que se está buscando, para ver de un vistazo por qué
@@ -122,12 +182,18 @@ export default function GestionServicios({
     servicios,
     filters,
     stats,
+    puedeEscogerSede,
+    sedes,
 }: PageProps) {
-    const { flash } = usePage<SharedData>().props;
+    const { flash, auth } = usePage<SharedData>().props;
     const acciones = usePermisosVista('gestion-servicios');
     const [search, setSearch] = useState(filters.search ?? '');
+    // Filtro de sede del Super Admin ('' = todas).
+    const [sedeFiltro, setSedeFiltro] = useState(filters.sede ?? '');
     const [formOpen, setFormOpen] = useState(false);
     const [editingId, setEditingId] = useState<number | null>(null);
+    // Sede del servicio en edición; al crear es la sede activa.
+    const [sedeEditando, setSedeEditando] = useState<string | null>(null);
     const [viewRow, setViewRow] = useState<ServicioRow | null>(null);
     const [deleteTarget, setDeleteTarget] = useState<ServicioRow | null>(null);
     const [deleting, setDeleting] = useState(false);
@@ -156,27 +222,39 @@ export default function GestionServicios({
             return;
         }
         const timer = setTimeout(() => {
-            router.get('/tools/gestion-servicios', search ? { search } : {}, {
+            router.get('/tools/gestion-servicios', consulta(), {
                 preserveState: true,
                 preserveScroll: true,
                 replace: true,
             });
         }, 350);
         return () => clearTimeout(timer);
-    }, [search]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [search, sedeFiltro]);
+
+    // Parámetros de la lista: búsqueda y, para el Super Admin, sede.
+    const consulta = (extra: Record<string, unknown> = {}) => ({
+        ...(search ? { search } : {}),
+        ...(sedeFiltro ? { sede: sedeFiltro } : {}),
+        ...extra,
+    });
 
     const goToPage = (page: number) => {
-        router.get(
-            '/tools/gestion-servicios',
-            { ...(search ? { search } : {}), page },
-            { preserveState: true, preserveScroll: true },
-        );
+        router.get('/tools/gestion-servicios', consulta({ page }), {
+            preserveState: true,
+            preserveScroll: true,
+        });
     };
 
     const openCreate = () => {
-        form.reset();
         form.clearErrors();
+        // Arranca en la sede que se está filtrando o, si no, en la activa.
+        form.setData({
+            ...emptyForm,
+            sede: sedeFiltro || auth.sede?.clave || 'cali',
+        });
         setEditingId(null);
+        setSedeEditando(null);
         setFormOpen(true);
     };
 
@@ -186,8 +264,10 @@ export default function GestionServicios({
             nombre: row.nombre,
             descripcion: row.descripcion ?? '',
             estado: row.estado,
+            sede: row.sede,
         });
         setEditingId(row.codigo);
+        setSedeEditando(row.sede);
         setFormOpen(true);
     };
 
@@ -263,11 +343,26 @@ export default function GestionServicios({
                             <BriefcaseMedical className="size-6" />
                         </div>
                         <div>
-                            <h1 className="text-2xl font-bold tracking-tight text-foreground">
+                            <h1 className="flex flex-wrap items-center gap-2 text-2xl font-bold tracking-tight text-foreground">
                                 Gestión Servicios
+                                {/* Los servicios son de la sede activa:
+                                    lo que se cree queda en ella y solo se
+                                    muestran los suyos. El Super Admin ve
+                                    las dos y filtra abajo. */}
+                                {!puedeEscogerSede && auth.sede && (
+                                    <span
+                                        title="Los servicios que crees quedarán en esta sede y solo se muestran los suyos. Para trabajar en la otra, ingresa por su opción en el inicio."
+                                        className="inline-flex items-center gap-1.5 rounded-full bg-[#2d3e83]/10 px-3 py-1 text-xs font-semibold text-[#2d3e83] dark:bg-white/10 dark:text-white"
+                                    >
+                                        <MapPin className="size-3.5" />
+                                        {auth.sede.nombre}
+                                    </span>
+                                )}
                             </h1>
                             <p className="text-sm text-muted-foreground">
-                                Administra los servicios asignables del sistema.
+                                {puedeEscogerSede
+                                    ? 'Administra los servicios asignables de las dos sedes.'
+                                    : 'Administra los servicios asignables de la sede.'}
                             </p>
                         </div>
                     </div>
@@ -323,7 +418,7 @@ export default function GestionServicios({
 
                 {/* Tarjeta de tabla */}
                 <div className="flex flex-1 flex-col overflow-hidden rounded-xl border bg-card shadow-sm">
-                    <div className="border-b p-4">
+                    <div className="flex flex-col gap-3 border-b p-4 sm:flex-row sm:items-center sm:justify-between">
                         <div className="relative w-full sm:max-w-xs">
                             <Search className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
                             <Input
@@ -343,6 +438,16 @@ export default function GestionServicios({
                                 </button>
                             )}
                         </div>
+                        {puedeEscogerSede && (
+                            <SelectorSede
+                                opciones={[
+                                    { clave: '', nombre: 'Todas las sedes' },
+                                    ...sedes,
+                                ]}
+                                valor={sedeFiltro}
+                                onChange={setSedeFiltro}
+                            />
+                        )}
                     </div>
 
                     <div className="overflow-x-auto">
@@ -354,6 +459,9 @@ export default function GestionServicios({
                                     </th>
                                     <th className="px-4 py-3 font-medium">
                                         Nombre
+                                    </th>
+                                    <th className="px-4 py-3 font-medium">
+                                        Sede
                                     </th>
                                     <th className="px-4 py-3 font-medium">
                                         Estado
@@ -370,7 +478,7 @@ export default function GestionServicios({
                                 {servicios.data.length === 0 && (
                                     <tr>
                                         <td
-                                            colSpan={5}
+                                            colSpan={6}
                                             className="px-4 py-12 text-center text-muted-foreground"
                                         >
                                             <div className="flex flex-col items-center gap-3">
@@ -416,6 +524,9 @@ export default function GestionServicios({
                                                     )}
                                                 </span>
                                             </div>
+                                        </td>
+                                        <td className="px-4 py-3">
+                                            <SedeBadge sede={row.sede} />
                                         </td>
                                         <td className="px-4 py-3">
                                             <div className="flex items-center gap-2">
@@ -563,6 +674,37 @@ export default function GestionServicios({
                         </DialogDescription>
                     </DialogHeader>
 
+                    {/* El Super Admin escoge la sede. Para los demás no se
+                        escoge: es la de la opción por la que se ingresó, y
+                        se muestra para que quede claro dónde queda. */}
+                    {puedeEscogerSede ? (
+                        <div className="grid gap-2">
+                            <Label>Sede *</Label>
+                            <SelectorSede
+                                opciones={sedes}
+                                valor={form.data.sede}
+                                onChange={(v) => form.setData('sede', v)}
+                            />
+                            <InputError message={form.errors.sede} />
+                        </div>
+                    ) : (
+                        (sedeEditando ?? auth.sede?.clave) && (
+                            <div className="flex items-center justify-between gap-3 rounded-lg border bg-muted/40 px-3 py-2">
+                                <span className="text-sm text-muted-foreground">
+                                    {isEditing
+                                        ? 'Sede del servicio'
+                                        : 'Se registrará en'}
+                                </span>
+                                <SedeBadge
+                                    sede={
+                                        (sedeEditando ??
+                                            auth.sede?.clave) as string
+                                    }
+                                />
+                            </div>
+                        )
+                    )}
+
                     <form onSubmit={submit} className="grid gap-4">
                         <div className="grid gap-2">
                             <div className="flex items-center justify-between">
@@ -663,6 +805,7 @@ export default function GestionServicios({
                                             <Hash className="size-3 text-muted-foreground" />
                                             {viewRow.codigo}
                                         </span>
+                                        <SedeBadge sede={viewRow.sede} />
                                         <span
                                             className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
                                                 viewRow.estado

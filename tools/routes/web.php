@@ -106,8 +106,8 @@ Route::prefix('tools')->name('tools.')->group(function () {
         // Gestión Servicios (CRUD de la tabla serasignado)
         Route::get('gestion-servicios', [App\Http\Controllers\ServicioManagementController::class, 'index'])->name('gestion-servicios');
         Route::post('gestion-servicios', [App\Http\Controllers\ServicioManagementController::class, 'store'])->name('gestion-servicios.store');
-        Route::put('gestion-servicios/{servicio}', [App\Http\Controllers\ServicioManagementController::class, 'update'])->name('gestion-servicios.update');
-        Route::delete('gestion-servicios/{servicio}', [App\Http\Controllers\ServicioManagementController::class, 'destroy'])->name('gestion-servicios.destroy');
+        Route::put('gestion-servicios/{servicio}', [App\Http\Controllers\ServicioManagementController::class, 'update'])->whereNumber('servicio')->name('gestion-servicios.update');
+        Route::delete('gestion-servicios/{servicio}', [App\Http\Controllers\ServicioManagementController::class, 'destroy'])->whereNumber('servicio')->name('gestion-servicios.destroy');
 
         // Gestión de Roles (CRUD)
         Route::get('gestion-roles', [App\Http\Controllers\RoleManagementController::class, 'index'])->name('gestion-roles');
