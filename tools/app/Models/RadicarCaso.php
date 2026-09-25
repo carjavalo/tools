@@ -8,6 +8,18 @@ use Illuminate\Database\Eloquent\Model;
 
 class RadicarCaso extends Model
 {
+    /** Ámbito de las radicaciones de Nueva Radicación. */
+    public const AMBULATORIO = 'ambulatorio';
+
+    /** Ámbito de las radicaciones de Radicado Hospitalario: extrema prioridad. */
+    public const HOSPITALARIO = 'hospitalario';
+
+    /** Ámbitos con su nombre para la interfaz. */
+    public const AMBITOS = [
+        self::AMBULATORIO => 'Ambulatorio',
+        self::HOSPITALARIO => 'Hospitalario',
+    ];
+
     /**
      * The table associated with the model.
      *
@@ -30,6 +42,9 @@ class RadicarCaso extends Model
     protected $fillable = [
         // Servicio asignado (Gestión Servicios, serasignado.codigo).
         'codservicio',
+        // 'ambulatorio' u 'hospitalario': lo fija el servidor según la
+        // pestaña desde la que se radica, nunca la petición directamente.
+        'ambito',
         'Codesp',
         'codsubesp',
         'codMed',

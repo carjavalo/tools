@@ -94,6 +94,9 @@ interface CupsOpt {
 
 interface CasoListaRow {
     codrad: number;
+    ambito: Ambito;
+    // Hospitalaria en Solicitud Cotización: va de primera y en negrilla.
+    urgente: boolean;
     fecha: string | null;
     paciente: string;
     documento: string | null;
@@ -131,6 +134,7 @@ interface CotizacionItem {
 }
 
 interface ProgramadoRow {
+    ambito: Ambito;
     id: number;
     codrad: number;
     paciente: string;
@@ -188,7 +192,12 @@ interface PageProps {
     muestraGrillaCasos: boolean;
     casosLista: CasoListaRow[];
     // Filtros de la grilla del Historial que aplicó el servidor.
-    casosListaFiltros: { desde: string; hasta: string; servicio: string };
+    casosListaFiltros: {
+        desde: string;
+        hasta: string;
+        servicio: string;
+        ambito: string;
+    };
     casosListaTope: number;
     casosListaTruncada: boolean;
     // Servicios de la sede (también los inactivos) para filtrar la grilla.
@@ -219,6 +228,7 @@ interface ProcDetalle {
 }
 
 interface CasoDetalle {
+    ambito: Ambito;
     codrad: number;
     paciente: string;
     tipo_Docu: string;
@@ -257,6 +267,7 @@ interface CasoDetalle {
 }
 
 interface InformeRow {
+    ambito: Ambito;
     // Cadena porque una fila puede venir de la bitácora (T), de un
     // seguimiento (S) o de la radicación sin movimientos (C).
     id: string;
@@ -325,6 +336,46 @@ type RadicarForm = {
     ObservacionCCX: string;
     procedimientos: ProcRow[];
 };
+
+/**
+ * Ámbito de la radicación: ambulatorio (Nueva Radicación) u hospitalario
+ * (Radicado Hospitalario, extrema prioridad).
+ */
+type Ambito = 'ambulatorio' | 'hospitalario';
+
+const AMBITOS: { clave: Ambito; nombre: string }[] = [
+    { clave: 'ambulatorio', nombre: 'Ambulatorio' },
+    { clave: 'hospitalario', nombre: 'Hospitalario' },
+];
+
+const nombreAmbito = (a: Ambito | undefined) =>
+    a === 'hospitalario' ? 'Hospitalario' : 'Ambulatorio';
+
+/**
+ * Clase de una fila (<tr>) según su ámbito: las hospitalarias con todo su
+ * texto en rojo encendido, para que se tramiten de inmediato; las urgentes
+ * (hospitalarias en Solicitud Cotización) además en negrilla y con fondo
+ * rojizo. Se fuerza sobre las celdas porque cada una trae su propio color.
+ */
+const claseFilaAmbito = (a: Ambito | undefined, urgente = false) =>
+    a !== 'hospitalario'
+        ? ''
+        : urgente
+          ? 'bg-red-50 dark:bg-red-950/40 [&>td]:font-bold! [&>td]:text-red-600! dark:[&>td]:text-red-400!'
+          : '[&>td]:font-medium! [&>td]:text-red-600! dark:[&>td]:text-red-400!';
+
+/** Etiqueta del ámbito para las grillas y el detalle. */
+function AmbitoBadge({ ambito }: { ambito: Ambito | undefined }) {
+    return ambito === 'hospitalario' ? (
+        <span className="inline-flex items-center rounded-full bg-red-600 px-2 py-0.5 text-[10px] font-bold tracking-wide whitespace-nowrap text-white uppercase">
+            Hospitalario
+        </span>
+    ) : (
+        <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold tracking-wide whitespace-nowrap text-muted-foreground uppercase">
+            Ambulatorio
+        </span>
+    );
+}
 
 /** Pestañas de la vista, en el orden en que se muestran. */
 const PESTANAS = ['nueva', 'hospitalario', 'historial', 'informes'] as const;
@@ -760,6 +811,8 @@ const EMPTY_INF = {
     especialidad: '',
     subespecialidad: '',
     estado: '',
+    // 'ambulatorio' u 'hospitalario'; vacío = todos.
+    ambito: '',
     // Período de la cirugía programada (Fecha y Hora Prog.), distinto del de
     // Fecha Inicial / Fecha Final, que es el de los movimientos.
     programadoInicial: '',
@@ -1257,9 +1310,15 @@ export default function RadicarSolicitud({
     const [gridServicio, setGridServicio] = useState(
         casosListaFiltros.servicio || 'todos',
     );
+    const [gridAmbito, setGridAmbito] = useState(
+        casosListaFiltros.ambito || 'todos',
+    );
     const [gridCargando, setGridCargando] = useState(false);
     const gridHayFiltros =
-        gridDesde !== '' || gridHasta !== '' || gridServicio !== 'todos';
+        gridDesde !== '' ||
+        gridHasta !== '' ||
+        gridServicio !== 'todos' ||
+        gridAmbito !== 'todos';
     const gridFechasInvertidas =
         gridDesde !== '' && gridHasta !== '' && gridDesde > gridHasta;
     const gridMontado = useRef(false);
@@ -1282,6 +1341,9 @@ export default function RadicarSolicitud({
                     ...(gridServicio !== 'todos'
                         ? { grid_servicio: gridServicio }
                         : {}),
+                    ...(gridAmbito !== 'todos'
+                        ? { grid_ambito: gridAmbito }
+                        : {}),
                 },
                 {
                     only: [
@@ -1301,12 +1363,13 @@ export default function RadicarSolicitud({
 
         return () => clearTimeout(timer);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [gridDesde, gridHasta, gridServicio]);
+    }, [gridDesde, gridHasta, gridServicio, gridAmbito]);
 
     const limpiarFiltrosGrilla = () => {
         setGridDesde('');
         setGridHasta('');
         setGridServicio('todos');
+        setGridAmbito('todos');
     };
 
     // Lo que muestra la grilla: lo que devolvió el servidor con sus filtros,
@@ -1324,6 +1387,7 @@ export default function RadicarSolicitud({
                 ...c.procedimientos.map((p) => `${p.codigo} ${p.descripcion}`),
                 c.convenio,
                 c.servicio,
+                nombreAmbito(c.ambito),
                 c.estado,
             ]
                 .join(' ')
@@ -1340,6 +1404,7 @@ export default function RadicarSolicitud({
 
         const filas = casosFiltrados.map((c) => ({
             'Caso N°': c.codrad,
+            Ámbito: nombreAmbito(c.ambito),
             Fecha: c.fecha ?? '',
             Paciente: c.paciente,
             Identificación: c.documento ?? '',
@@ -2208,6 +2273,7 @@ export default function RadicarSolicitud({
                     r.paciente,
                     r.especialidad,
                     r.medico,
+                    nombreAmbito(r.ambito),
                 ]
                     .join(' ')
                     .toLowerCase()
@@ -2230,6 +2296,7 @@ export default function RadicarSolicitud({
 
         const filas = programadosFiltrados.map((r) => ({
             'N° Caso': r.codrad,
+            Ámbito: nombreAmbito(r.ambito),
             Paciente: r.paciente,
             Identificación: r.documento,
             Especialidad: r.especialidad,
@@ -2812,6 +2879,7 @@ export default function RadicarSolicitud({
 
         const filas = infRows.map((r) => ({
             'N° Caso': r.codrad,
+            Ámbito: nombreAmbito(r.ambito),
             'Fecha Recibido': r.fechaRecibido ?? '',
             'Fecha y Hora de Programación': r.fechasProgramacion.join(' / '),
             Documento: r.documento,
@@ -3153,11 +3221,25 @@ export default function RadicarSolicitud({
                                         >
                                             <FilePlus2 className="size-5" />
                                         </div>
-                                        <h1 className="text-lg font-bold tracking-tight text-foreground">
-                                            Radicación de Casos{' '}
-                                            <span className="text-muted-foreground">
-                                                (Multi-CUPS /
-                                                Multi-Autorización)
+                                        <h1 className="flex flex-wrap items-center gap-2 text-lg font-bold tracking-tight text-foreground">
+                                            <span>
+                                                Radicación de Casos{' '}
+                                                <span className="text-muted-foreground">
+                                                    (Multi-CUPS /
+                                                    Multi-Autorización)
+                                                </span>
+                                            </span>
+                                            {/* Ámbito con el que quedará la
+                                                radicación: lo define la
+                                                pestaña desde la que se radica. */}
+                                            <span title="Ámbito con el que quedará registrada la radicación">
+                                                <AmbitoBadge
+                                                    ambito={
+                                                        tab === 'hospitalario'
+                                                            ? 'hospitalario'
+                                                            : 'ambulatorio'
+                                                    }
+                                                />
                                             </span>
                                         </h1>
                                     </div>
@@ -4032,7 +4114,7 @@ export default function RadicarSolicitud({
                                         consultan al servidor, así que alcanzan
                                         también radicaciones antiguas. */}
                                     <div className="flex flex-col gap-3 border-b bg-muted/20 p-3 lg:flex-row lg:items-end">
-                                        <div className="grid flex-1 gap-3 sm:grid-cols-3">
+                                        <div className="grid flex-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
                                             <div className="grid gap-1">
                                                 <Label className="text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
                                                     Fecha creación inicial
@@ -4102,6 +4184,34 @@ export default function RadicarSolicitud({
                                                                 </SelectItem>
                                                             ),
                                                         )}
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+                                            <div className="grid gap-1">
+                                                <Label className="text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
+                                                    Ámbito
+                                                </Label>
+                                                <Select
+                                                    value={gridAmbito}
+                                                    onValueChange={
+                                                        setGridAmbito
+                                                    }
+                                                >
+                                                    <SelectTrigger className="h-8 text-sm">
+                                                        <SelectValue />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="todos">
+                                                            Todos los ámbitos
+                                                        </SelectItem>
+                                                        {AMBITOS.map((a) => (
+                                                            <SelectItem
+                                                                key={a.clave}
+                                                                value={a.clave}
+                                                            >
+                                                                {a.nombre}
+                                                            </SelectItem>
+                                                        ))}
                                                     </SelectContent>
                                                 </Select>
                                             </div>
@@ -4224,10 +4334,28 @@ export default function RadicarSolicitud({
                                                             c.codrad
                                                                 ? 'bg-[#2d3e83]/10 dark:bg-white/10'
                                                                 : ''
-                                                        }`}
+                                                        } ${claseFilaAmbito(c.ambito, c.urgente)}`}
+                                                        title={
+                                                            c.urgente
+                                                                ? 'Hospitalaria en Solicitud Cotización: trámite inmediato'
+                                                                : c.ambito ===
+                                                                    'hospitalario'
+                                                                  ? 'Radicación de ámbito hospitalario: extrema prioridad'
+                                                                  : undefined
+                                                        }
                                                     >
                                                         <td className="px-3 py-2 font-bold text-[#2d3e83] dark:text-white">
-                                                            #{c.codrad}
+                                                            <div className="flex flex-col items-start gap-1">
+                                                                #{c.codrad}
+                                                                {c.ambito ===
+                                                                    'hospitalario' && (
+                                                                    <AmbitoBadge
+                                                                        ambito={
+                                                                            c.ambito
+                                                                        }
+                                                                    />
+                                                                )}
+                                                            </div>
                                                         </td>
                                                         <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">
                                                             {c.fecha ?? '—'}
@@ -4450,8 +4578,11 @@ export default function RadicarSolicitud({
                                             <Dato
                                                 label="N° Consecutivo"
                                                 value={
-                                                    <span className="font-bold text-[#2d3e83] dark:text-white">
+                                                    <span className="inline-flex items-center gap-2 font-bold text-[#2d3e83] dark:text-white">
                                                         #{caso.codrad}
+                                                        <AmbitoBadge
+                                                            ambito={caso.ambito}
+                                                        />
                                                     </span>
                                                 }
                                             />
@@ -5915,6 +6046,34 @@ export default function RadicarSolicitud({
                                             </SelectContent>
                                         </Select>
                                     </Field>
+                                    <Field label="Ámbito">
+                                        <Select
+                                            value={inf.ambito || 'todos'}
+                                            onValueChange={(v) =>
+                                                setInfField(
+                                                    'ambito',
+                                                    v === 'todos' ? '' : v,
+                                                )
+                                            }
+                                        >
+                                            <SelectTrigger>
+                                                <SelectValue placeholder="Todos" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="todos">
+                                                    Todos
+                                                </SelectItem>
+                                                {AMBITOS.map((a) => (
+                                                    <SelectItem
+                                                        key={a.clave}
+                                                        value={a.clave}
+                                                    >
+                                                        {a.nombre}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </Field>
                                     {/* Período de la cirugía programada: deja
                                         solo las radicaciones con alguna Fecha y
                                         Hora Prog. dentro de él. */}
@@ -6122,10 +6281,20 @@ export default function RadicarSolicitud({
                                             {infRowsPagina.map((r) => (
                                                 <tr
                                                     key={r.id}
-                                                    className="hover:bg-muted/40"
+                                                    className={`hover:bg-muted/40 ${claseFilaAmbito(r.ambito)}`}
                                                 >
                                                     <td className="px-3 py-2 font-semibold text-[#2d3e83] dark:text-white">
-                                                        #{r.codrad}
+                                                        <div className="flex flex-col items-start gap-1">
+                                                            #{r.codrad}
+                                                            {r.ambito ===
+                                                                'hospitalario' && (
+                                                                <AmbitoBadge
+                                                                    ambito={
+                                                                        r.ambito
+                                                                    }
+                                                                />
+                                                            )}
+                                                        </div>
                                                     </td>
                                                     <td className="px-3 py-2 text-muted-foreground">
                                                         {r.fechaRecibido || '—'}
@@ -7146,10 +7315,18 @@ export default function RadicarSolicitud({
                                     programadosFiltrados.map((r) => (
                                         <tr
                                             key={r.id}
-                                            className="align-top hover:bg-muted/40"
+                                            className={`align-top hover:bg-muted/40 ${claseFilaAmbito(r.ambito)}`}
                                         >
                                             <td className="px-3 py-2 font-semibold text-foreground">
-                                                #{r.codrad}
+                                                <div className="flex flex-col items-start gap-1">
+                                                    #{r.codrad}
+                                                    {r.ambito ===
+                                                        'hospitalario' && (
+                                                        <AmbitoBadge
+                                                            ambito={r.ambito}
+                                                        />
+                                                    )}
+                                                </div>
                                             </td>
                                             <td className="px-3 py-2">
                                                 {r.paciente}

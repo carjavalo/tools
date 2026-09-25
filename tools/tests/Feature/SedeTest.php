@@ -4,6 +4,7 @@ use App\Models\Convenio;
 use App\Models\CotizacionCaso;
 use App\Models\Cups;
 use App\Models\Eps;
+use App\Models\EstRadicado;
 use App\Models\Permiso;
 use App\Models\ProgramacionCaso;
 use App\Models\RadicarCaso;
@@ -479,4 +480,76 @@ test('Radicado Hospitalario funciona aunque Nueva Radicacion este apagada', func
         ->assertRedirect(route('tools.radicar-solicitud'));
 
     $this->assertDatabaseHas('RadicarCaso', ['Ndocumento' => '7204']);
+});
+
+test('Nueva Radicacion crea ambulatorias y Radicado Hospitalario crea hospitalarias', function () {
+    $admin = User::factory()->create();
+
+    $this->actingAs($admin)->withSession(['sede' => Sede::CARTAGO])
+        ->post('/tools/radicar-solicitud', [...payloadRadicacion('7301', Sede::CARTAGO), 'pestana' => 'nueva'])
+        ->assertRedirect(route('tools.radicar-solicitud'));
+    $this->actingAs($admin)->withSession(['sede' => Sede::CARTAGO])
+        ->post('/tools/radicar-solicitud', [...payloadRadicacion('7302', Sede::CARTAGO), 'pestana' => 'hospitalario'])
+        ->assertRedirect(route('tools.radicar-solicitud'))
+        ->assertSessionHas('success', fn (string $m) => str_contains($m, 'ámbito Hospitalario'));
+    // El ámbito no se puede mandar directamente en la petición.
+    $this->actingAs($admin)->withSession(['sede' => Sede::CARTAGO])
+        ->post('/tools/radicar-solicitud', [...payloadRadicacion('7303', Sede::CARTAGO), 'ambito' => 'hospitalario'])
+        ->assertRedirect(route('tools.radicar-solicitud'));
+
+    $this->assertDatabaseHas('RadicarCaso', ['Ndocumento' => '7301', 'ambito' => 'ambulatorio', 'sede' => Sede::CARTAGO]);
+    $this->assertDatabaseHas('RadicarCaso', ['Ndocumento' => '7302', 'ambito' => 'hospitalario', 'sede' => Sede::CARTAGO]);
+    $this->assertDatabaseHas('RadicarCaso', ['Ndocumento' => '7303', 'ambito' => 'ambulatorio']);
+});
+
+test('en el historial las hospitalarias en Solicitud Cotizacion van de primeras y marcadas urgentes', function () {
+    $admin = User::factory()->create();
+    $solicitud = EstRadicado::create(['Nombre' => 'Solicitud Cotización', 'Estado' => true]);
+    $otro = EstRadicado::create(['Nombre' => 'Recibido', 'Estado' => true]);
+
+    $urgente = casoEnSede(Sede::CALI, ['Ndocumento' => '7401', 'estRad' => (string) $solicitud->id, 'ambito' => 'hospitalario']);
+    $hospOtro = casoEnSede(Sede::CALI, ['Ndocumento' => '7402', 'estRad' => (string) $otro->id, 'ambito' => 'hospitalario']);
+    $ambSolicitud = casoEnSede(Sede::CALI, ['Ndocumento' => '7403', 'estRad' => (string) $solicitud->id, 'ambito' => 'ambulatorio']);
+
+    $lista = collect($this->actingAs($admin)->withSession(['sede' => Sede::CALI])
+        ->get('/tools/radicar-solicitud')->viewData('page')['props']['casosLista']);
+
+    // La urgente primero aunque sea la más antigua; el resto, más reciente primero.
+    expect($lista->pluck('codrad')->all())->toBe([$urgente->codrad, $ambSolicitud->codrad, $hospOtro->codrad])
+        ->and($lista->firstWhere('codrad', $urgente->codrad)['urgente'])->toBeTrue()
+        ->and($lista->firstWhere('codrad', $hospOtro->codrad)['urgente'])->toBeFalse()
+        ->and($lista->firstWhere('codrad', $hospOtro->codrad)['ambito'])->toBe('hospitalario')
+        // Una ambulatoria en Solicitud Cotización no es urgente.
+        ->and($lista->firstWhere('codrad', $ambSolicitud->codrad)['urgente'])->toBeFalse();
+});
+
+test('los filtros del historial y del informe buscan por ambito', function () {
+    $admin = User::factory()->create();
+    $hosp = casoEnSede(Sede::CALI, ['Ndocumento' => '7501', 'ambito' => 'hospitalario']);
+    $amb = casoEnSede(Sede::CALI, ['Ndocumento' => '7502', 'ambito' => 'ambulatorio']);
+
+    $grilla = fn (string $ambito) => collect($this->actingAs($admin)->withSession(['sede' => Sede::CALI])
+        ->get('/tools/radicar-solicitud?grid_ambito='.$ambito)->viewData('page')['props']['casosLista'])
+        ->pluck('codrad')->all();
+
+    expect($grilla('hospitalario'))->toBe([$hosp->codrad])
+        ->and($grilla('ambulatorio'))->toBe([$amb->codrad]);
+
+    $informe = $this->actingAs($admin)->withSession(['sede' => Sede::CALI])
+        ->getJson('/tools/radicar-solicitud/informe?ambito=hospitalario')
+        ->assertOk()->json('rows');
+
+    expect(collect($informe)->pluck('codrad')->unique()->values()->all())->toBe([$hosp->codrad])
+        ->and($informe[0]['ambito'])->toBe('hospitalario');
+});
+
+test('ver programados trae el ambito de cada radicacion', function () {
+    $admin = User::factory()->create();
+    $hosp = casoEnSede(Sede::CALI, ['Ndocumento' => '7601', 'ambito' => 'hospitalario']);
+    ProgramacionCaso::create(['codrad' => $hosp->codrad]);
+
+    $rows = $this->actingAs($admin)->withSession(['sede' => Sede::CALI])
+        ->getJson('/tools/radicar-solicitud/programados')->assertOk()->json('rows');
+
+    expect(collect($rows)->firstWhere('codrad', $hosp->codrad)['ambito'])->toBe('hospitalario');
 });

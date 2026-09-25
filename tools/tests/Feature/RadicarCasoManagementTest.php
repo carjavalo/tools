@@ -2541,10 +2541,10 @@ test('la grilla del historial ignora filtros mal formados', function () {
     RadicarCaso::create(['Ndocumento' => '9974', 'estRad' => '1']);
 
     $this->actingAs($admin)
-        ->get('/tools/radicar-solicitud?grid_desde=ayer&grid_servicio=1%20or%201=1')
+        ->get('/tools/radicar-solicitud?grid_desde=ayer&grid_servicio=1%20or%201=1&grid_ambito=urgencias')
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
-            ->where('casosListaFiltros', ['desde' => '', 'hasta' => '', 'servicio' => ''])
+            ->where('casosListaFiltros', ['desde' => '', 'hasta' => '', 'servicio' => '', 'ambito' => ''])
             ->where('casosListaTope', 200)
             ->has('casosLista', 1)
         );

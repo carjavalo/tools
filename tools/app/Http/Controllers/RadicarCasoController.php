@@ -65,6 +65,7 @@ class RadicarCasoController extends Controller
         'fecreci' => 'Fecha Recibido Serv',
         'estcod' => 'Motivo',
         'codservicio' => 'Servicio asignado',
+        'ambito' => 'Ámbito',
         'fecAutorizacion' => 'Fecha Autorización',
         'fechavenautorizacion' => 'Fecha Vencimiento Autorización',
         'ObservacionTFX' => 'OB TFX',
@@ -333,20 +334,32 @@ class RadicarCasoController extends Controller
     {
         $filtros = $this->filtrosGrillaCasos($request);
 
-        $query = RadicarCaso::orderByDesc('codrad');
+        // Las hospitalarias en Solicitud Cotización son de trámite inmediato:
+        // van de primeras, y el resto en su orden de siempre (más reciente
+        // primero). Se ordena en SQL para que el tope de filas no las deje
+        // fuera.
+        $urgentes = $this->estadosSolicitudCotizacion();
+
+        $query = RadicarCaso::query()
+            ->when($urgentes !== [], fn ($q) => $q->orderByRaw(
+                'CASE WHEN ambito = ? AND estRad IN ('.implode(',', array_fill(0, count($urgentes), '?')).') THEN 0 ELSE 1 END',
+                [RadicarCaso::HOSPITALARIO, ...$urgentes],
+            ))
+            ->orderByDesc('codrad');
         $this->limitarPorEstadosDelRol($query, $request);
 
-        // Filtros de la grilla: fecha de creación y servicio asignado. Se
-        // aplican aquí y no en el navegador porque la grilla solo carga las
+        // Filtros de la grilla: fecha de creación, servicio asignado y ámbito.
+        // Se aplican aquí y no en el navegador porque la grilla solo carga las
         // más recientes: filtrando allá no se alcanzarían las antiguas.
         $query
             ->when($filtros['desde'] !== '', fn ($q) => $q->whereDate('created_at', '>=', $filtros['desde']))
             ->when($filtros['hasta'] !== '', fn ($q) => $q->whereDate('created_at', '<=', $filtros['hasta']))
             ->when($filtros['servicio'] === 'sin', fn ($q) => $q->whereNull('codservicio'))
-            ->when(ctype_digit($filtros['servicio']), fn ($q) => $q->where('codservicio', (int) $filtros['servicio']));
+            ->when(ctype_digit($filtros['servicio']), fn ($q) => $q->where('codservicio', (int) $filtros['servicio']))
+            ->when($filtros['ambito'] !== '', fn ($q) => $q->where('ambito', $filtros['ambito']));
 
         $casos = $query->limit($this->topeGrillaCasos($filtros))
-            ->get(['codrad', 'Ndocumento', 'estRad', 'convenio', 'codservicio', 'created_at']);
+            ->get(['codrad', 'Ndocumento', 'estRad', 'convenio', 'codservicio', 'ambito', 'created_at']);
 
         // Nombre del servicio asignado de cada fila. Sin el filtro de sede: el
         // caso ya es de la sede activa, y su servicio también.
@@ -383,11 +396,17 @@ class RadicarCasoController extends Controller
             ->get(['id', 'CodCupsHuv', 'Nombre'])
             ->keyBy('id');
 
-        return $casos->map(function ($caso) use ($pacientes, $estados, $convenios, $adjuntos, $anexados, $cups, $servicios) {
+        return $casos->map(function ($caso) use ($pacientes, $estados, $convenios, $adjuntos, $anexados, $cups, $servicios, $urgentes) {
             $p = $pacientes->get($caso->Ndocumento);
+            $ambito = $caso->ambito ?? RadicarCaso::AMBULATORIO;
 
             return [
                 'codrad' => $caso->codrad,
+                'ambito' => $ambito,
+                // Hospitalaria en Solicitud Cotización: la grilla la pone de
+                // primera y en negrilla.
+                'urgente' => $ambito === RadicarCaso::HOSPITALARIO
+                    && in_array((string) $caso->estRad, $urgentes, true),
                 'fecha' => optional($caso->created_at)->format('Y-m-d'),
                 'paciente' => $p
                     ? trim(implode(' ', array_filter([$p->name, $p->Apellido1, $p->apellido2])))
@@ -421,10 +440,11 @@ class RadicarCasoController extends Controller
 
     /**
      * Filtros de la Grilla de Radicaciones del Historial, saneados: fechas
-     * aaaa-mm-dd válidas (o vacías) y servicio '' (todos), 'sin' (sin servicio
-     * asignado) o el código de un servicio. Lo que no cumple se ignora.
+     * aaaa-mm-dd válidas (o vacías); servicio '' (todos), 'sin' (sin servicio
+     * asignado) o el código de un servicio; y ámbito '' (todos), 'ambulatorio'
+     * u 'hospitalario'. Lo que no cumple se ignora.
      *
-     * @return array{desde: string, hasta: string, servicio: string}
+     * @return array{desde: string, hasta: string, servicio: string, ambito: string}
      */
     private function filtrosGrillaCasos(Request $request): array
     {
@@ -435,11 +455,13 @@ class RadicarCasoController extends Controller
         };
 
         $servicio = trim((string) $request->query('grid_servicio', ''));
+        $ambito = trim((string) $request->query('grid_ambito', ''));
 
         return [
             'desde' => $fecha('grid_desde'),
             'hasta' => $fecha('grid_hasta'),
             'servicio' => $servicio === 'sin' || ctype_digit($servicio) ? $servicio : '',
+            'ambito' => array_key_exists($ambito, RadicarCaso::AMBITOS) ? $ambito : '',
         ];
     }
 
@@ -448,13 +470,33 @@ class RadicarCasoController extends Controller
      * filtros, hasta 2000, para que el rango pedido salga completo (y completo
      * se exporte a Excel).
      *
-     * @param  array{desde: string, hasta: string, servicio: string}  $filtros
+     * @param  array{desde: string, hasta: string, servicio: string, ambito: string}  $filtros
      */
     private function topeGrillaCasos(array $filtros): int
     {
-        return $filtros['desde'] !== '' || $filtros['hasta'] !== '' || $filtros['servicio'] !== ''
+        return $filtros['desde'] !== '' || $filtros['hasta'] !== ''
+            || $filtros['servicio'] !== '' || $filtros['ambito'] !== ''
             ? 2000
             : 200;
+    }
+
+    /**
+     * Ids (como texto, igual que RadicarCaso.estRad) de los estados "Solicitud
+     * Cotización". Se buscan por nombre, sin tildes ni mayúsculas, porque el id
+     * cambia entre la base local y la del servidor.
+     *
+     * @return list<string>
+     */
+    private function estadosSolicitudCotizacion(): array
+    {
+        return EstRadicado::all(['id', 'Nombre'])
+            ->filter(fn (EstRadicado $e) => str_starts_with(
+                strtolower(trim(\Illuminate\Support\Str::ascii((string) $e->Nombre))),
+                'solicitud cotizacion',
+            ))
+            ->map(fn (EstRadicado $e) => (string) $e->id)
+            ->values()
+            ->all();
     }
 
     /**
@@ -896,6 +938,13 @@ class RadicarCasoController extends Controller
             'ObservacionCCX' => 'observación CCX',
         ]);
 
+        // Ámbito según la pestaña desde la que se radica: Radicado
+        // Hospitalario → hospitalario; Nueva Radicación → ambulatorio. El
+        // middleware ya comprobó que el rol tiene permiso sobre esa pestaña.
+        $data['ambito'] = $request->input('pestana') === 'hospitalario'
+            ? RadicarCaso::HOSPITALARIO
+            : RadicarCaso::AMBULATORIO;
+
         // Sin copago no se guarda ningún valor asociado.
         if (! $request->boolean('copago')) {
             $data['copago'] = false;
@@ -954,7 +1003,9 @@ class RadicarCasoController extends Controller
         $this->completarNombrePaquete($caso);
 
         return to_route('tools.radicar-solicitud')
-            ->with('success', 'Caso radicado correctamente en la '.Sede::nombre($caso->sede).". Caso N° {$caso->codrad}.")
+            ->with('success', 'Caso radicado correctamente en la '.Sede::nombre($caso->sede)
+                .', ámbito '.RadicarCaso::AMBITOS[$caso->ambito ?? RadicarCaso::AMBULATORIO]
+                .". Caso N° {$caso->codrad}.")
             ->with('casoRadicado', $caso->codrad);
     }
 
@@ -1302,7 +1353,7 @@ class RadicarCasoController extends Controller
         $codrads = $programaciones->pluck('codrad')->filter()->unique();
 
         $casos = RadicarCaso::whereIn('codrad', $codrads)
-            ->get(['codrad', 'Ndocumento', 'Codesp', 'codMed', 'paquete'])
+            ->get(['codrad', 'Ndocumento', 'Codesp', 'codMed', 'paquete', 'ambito'])
             ->keyBy('codrad');
 
         $pacientes = User::whereIn('Numero_D', $casos->pluck('Ndocumento')->filter()->unique())
@@ -1338,6 +1389,7 @@ class RadicarCasoController extends Controller
             return [
                 'id' => $prog->id,
                 'codrad' => $prog->codrad,
+                'ambito' => $caso?->ambito ?? RadicarCaso::AMBULATORIO,
                 'paciente' => $this->nombreUsuario($pac) ?? '—',
                 'documento' => $caso?->Ndocumento ?? '—',
                 'especialidad' => $caso ? ($especialidades[$caso->Codesp] ?? '—') : '—',
@@ -1525,6 +1577,9 @@ class RadicarCasoController extends Controller
         $estadoF = trim((string) $request->query('estado', ''));
         $documentoF = trim((string) $request->query('documento', ''));
         $consecutivoF = trim((string) $request->query('consecutivo', ''));
+        // Ámbito: 'ambulatorio' u 'hospitalario'; cualquier otro valor no filtra.
+        $ambitoF = trim((string) $request->query('ambito', ''));
+        $ambitoF = array_key_exists($ambitoF, RadicarCaso::AMBITOS) ? $ambitoF : '';
 
         // Los dos períodos se validan porque se comparan como fecha en SQL: una
         // fecha mal formada no daba error, solo un informe incoherente.
@@ -1571,6 +1626,7 @@ class RadicarCasoController extends Controller
                     ->select('codrad'),
             ))
             ->when($consecutivoF !== '', fn ($q) => $q->where('codrad', (int) $consecutivoF))
+            ->when($ambitoF !== '', fn ($q) => $q->where('ambito', $ambitoF))
             ->when($documentoF !== '', fn ($q) => $q->where('Ndocumento', $documentoF))
             ->when($estadoF !== '', fn ($q) => $q->where('estRad', $estadoF))
             ->when($espF !== '', fn ($q) => $q->where('Codesp', $espF))
@@ -1741,6 +1797,7 @@ class RadicarCasoController extends Controller
 
             return [
                 'codrad' => $caso->codrad,
+                'ambito' => $caso->ambito ?? RadicarCaso::AMBULATORIO,
                 'fechaRecibido' => optional($caso->created_at)->format('Y-m-d'),
                 'documento' => $caso->Ndocumento ?? '—',
                 'paciente' => $pac
@@ -1970,6 +2027,7 @@ class RadicarCasoController extends Controller
             'codestsecundario' => EstRadisecundario::find($plano)?->Nombre,
             'estcod' => Motivo::find($plano)?->Nombre,
             'codservicio' => Serasignado::withoutGlobalScope('sede')->whereKey($plano)->value('nombre'),
+            'ambito' => RadicarCaso::AMBITOS[$plano] ?? $plano,
             'Codesp' => Especialidad::where('espcodser', $plano)->value('Nombre'),
             'codsubesp' => SubEspecialidad::where('cod_SubEspecialidad', $plano)->value('Nombre'),
             'convenio' => Convenio::where('nit_Convenio', $plano)->value('nombre'),
@@ -2348,6 +2406,7 @@ class RadicarCasoController extends Controller
                 : '—',
             'tipo_Docu' => $paciente?->tipo_Docu ?? '',
             'Ndocumento' => $caso->Ndocumento,
+            'ambito' => $caso->ambito ?? RadicarCaso::AMBULATORIO,
             'telefonos' => $paciente
                 ? trim(implode(' / ', array_filter([$paciente->Telefono1, $paciente->telefono2])))
                 : '',
