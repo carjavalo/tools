@@ -38,6 +38,7 @@ import {
     FilePlus2,
     FileSpreadsheet,
     FileText,
+    Hospital,
     LoaderCircle,
     Lock,
     MapPin,
@@ -324,6 +325,10 @@ type RadicarForm = {
     ObservacionCCX: string;
     procedimientos: ProcRow[];
 };
+
+/** Pestañas de la vista, en el orden en que se muestran. */
+const PESTANAS = ['nueva', 'hospitalario', 'historial', 'informes'] as const;
+type Pestana = (typeof PESTANAS)[number];
 
 const breadcrumbs: BreadcrumbItem[] = [
     { title: 'Inicio', href: dashboard().url },
@@ -1081,7 +1086,31 @@ export default function RadicarSolicitud({
     const { flash, auth } = usePage<SharedData>().props;
     const esSuperAdmin = auth?.user?.rol === 'Super Admin';
     const accionesRadicar = usePermisosVista('radicar-solicitud');
-    const [tab, setTab] = useState<'nueva' | 'historial' | 'informes'>('nueva');
+    // La pestaña activa se recuerda en la sesión del navegador: al radicar la
+    // página se recarga, y sin esto quien radica desde Radicado Hospitalario
+    // volvía a caer en Nueva Radicación.
+    const [tab, setTabState] = useState<Pestana>(() => {
+        try {
+            const guardada = sessionStorage.getItem('radicar-solicitud.tab');
+            if (
+                guardada &&
+                (PESTANAS as readonly string[]).includes(guardada)
+            ) {
+                return guardada as Pestana;
+            }
+        } catch {
+            // Sin acceso al almacenamiento: se arranca en Nueva Radicación.
+        }
+        return 'nueva';
+    });
+    const setTab = (t: Pestana) => {
+        setTabState(t);
+        try {
+            sessionStorage.setItem('radicar-solicitud.tab', t);
+        } catch {
+            // Sin almacenamiento solo se pierde recordarla.
+        }
+    };
     const [paciente, setPaciente] = useState<PacienteInfo | null>(null);
     const [acuerdos, setAcuerdos] = useState<CupsOpt[]>([]);
     const [convenios, setConvenios] = useState<ConvenioOpt[]>([]);
@@ -1571,6 +1600,8 @@ export default function RadicarSolicitud({
         e.preventDefault();
         form.transform((data) => ({
             ...data,
+            // Con ella el servidor sabe qué pestaña radica y qué permiso aplica.
+            pestana: tab === 'hospitalario' ? 'hospitalario' : 'nueva',
             // Se envían los renglones con algún dato; el Código CUPS es obligatorio,
             // por eso un renglón con autorización pero sin CUPS se marca como error.
             procedimientos: data.procedimientos
@@ -2943,9 +2974,13 @@ export default function RadicarSolicitud({
     // configuración guardada, se permite (igual que el backend). El Super
     // Admin ve todas las pestañas, grillas y botones sin excepción.
     const permisosUsuario = auth?.permisos ?? {};
-    const tabPermitida = (key: 'nueva' | 'historial' | 'informes') =>
+    // Radicado Hospitalario se asigna expresamente en el Gestor de Permisos:
+    // sin asignar no aparece. Las demás pestañas, sin configurar, se permiten.
+    const tabPermitida = (key: Pestana) =>
         esSuperAdmin ||
-        permisosUsuario[`radicar-solicitud-${key}`]?.ver !== false;
+        (key === 'hospitalario'
+            ? permisosUsuario['radicar-solicitud-hospitalario']?.ver === true
+            : permisosUsuario[`radicar-solicitud-${key}`]?.ver !== false);
 
     // Botón "Modificar radicado": si su sub-vista está configurada en el
     // Gestor de Permisos, esa configuración manda por sí sola; sin
@@ -3006,6 +3041,11 @@ export default function RadicarSolicitud({
 
     const tabs = [
         { key: 'nueva' as const, label: 'NUEVA RADICACIÓN', icon: FilePlus2 },
+        {
+            key: 'hospitalario' as const,
+            label: 'RADICADO HOSPITALARIO',
+            icon: Hospital,
+        },
         {
             key: 'historial' as const,
             label: 'HISTORIAL / BÚSQUEDA',
@@ -3099,798 +3139,853 @@ export default function RadicarSolicitud({
                             Contacta al administrador.
                         </p>
                     )}
-                    {tab === 'nueva' && tabPermitida('nueva') && (
-                        <div className="p-4 md:p-6">
-                            {/* Encabezado de la sección */}
-                            <div className="mb-4 flex flex-col gap-3 border-b pb-4 sm:flex-row sm:items-center sm:justify-between">
-                                <div className="flex items-center gap-3">
-                                    <div
-                                        className="flex size-10 items-center justify-center rounded-xl text-white"
-                                        style={{ backgroundColor: BRAND }}
-                                    >
-                                        <FilePlus2 className="size-5" />
+                    {/* Nueva Radicación y su réplica Radicado Hospitalario:
+                        el mismo formulario; solo cambia el permiso. */}
+                    {(tab === 'nueva' || tab === 'hospitalario') &&
+                        tabPermitida(tab) && (
+                            <div className="p-4 md:p-6">
+                                {/* Encabezado de la sección */}
+                                <div className="mb-4 flex flex-col gap-3 border-b pb-4 sm:flex-row sm:items-center sm:justify-between">
+                                    <div className="flex items-center gap-3">
+                                        <div
+                                            className="flex size-10 items-center justify-center rounded-xl text-white"
+                                            style={{ backgroundColor: BRAND }}
+                                        >
+                                            <FilePlus2 className="size-5" />
+                                        </div>
+                                        <h1 className="text-lg font-bold tracking-tight text-foreground">
+                                            Radicación de Casos{' '}
+                                            <span className="text-muted-foreground">
+                                                (Multi-CUPS /
+                                                Multi-Autorización)
+                                            </span>
+                                        </h1>
                                     </div>
-                                    <h1 className="text-lg font-bold tracking-tight text-foreground">
-                                        Radicación de Casos{' '}
-                                        <span className="text-muted-foreground">
-                                            (Multi-CUPS / Multi-Autorización)
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-sm font-medium text-[#2d3e83] dark:text-white">
+                                            Caso N°
                                         </span>
-                                    </h1>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                    <span className="text-sm font-medium text-[#2d3e83] dark:text-white">
-                                        Caso N°
-                                    </span>
-                                    <Input
-                                        readOnly
-                                        value={casoCreado ?? ''}
-                                        className="w-28 border-[#2d3e83]/40 text-center font-mono font-semibold"
-                                        placeholder="—"
-                                    />
-                                </div>
-                            </div>
-
-                            {/* Banner de éxito */}
-                            {casoCreado && (
-                                <div className="mb-4 flex flex-col items-center justify-center gap-1 rounded-xl border border-green-200 bg-green-50 py-4 text-center dark:border-green-900 dark:bg-green-950">
-                                    <div className="flex items-center gap-2 font-semibold text-green-700 dark:text-green-300">
-                                        <CheckCircle2 className="size-5" />
-                                        Caso Radicado Correctamente
-                                    </div>
-                                    <div className="text-2xl font-bold text-green-700 dark:text-green-300">
-                                        #{casoCreado}
-                                    </div>
-                                </div>
-                            )}
-
-                            {flash?.error && (
-                                <div className="mb-4 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-200">
-                                    <X className="size-5 shrink-0" />
-                                    {flash.error}
-                                </div>
-                            )}
-
-                            <form onSubmit={submit} className="grid gap-5">
-                                {/* Fila 1 */}
-                                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-                                    <Field label="Tipo Documento">
                                         <Input
-                                            value={paciente?.tipo_Docu ?? ''}
                                             readOnly
+                                            value={casoCreado ?? ''}
+                                            className="w-28 border-[#2d3e83]/40 text-center font-mono font-semibold"
                                             placeholder="—"
-                                            className="bg-muted/40"
                                         />
-                                    </Field>
-
-                                    <Field
-                                        label="Identificación (Cédula) *"
-                                        action={
-                                            <button
-                                                type="button"
-                                                onClick={openCrearUsuario}
-                                                title="Crear un paciente nuevo, o editar el existente si la cédula ya está registrada"
-                                                className="inline-flex size-5 items-center justify-center rounded-md bg-[#2d3e83]/10 text-[#2d3e83] transition-colors hover:bg-[#2d3e83]/20 dark:bg-white/10 dark:text-white"
-                                            >
-                                                <UserPlus className="size-3.5" />
-                                            </button>
-                                        }
-                                    >
-                                        <div className="relative">
-                                            <Input
-                                                value={form.data.Ndocumento}
-                                                onChange={(e) =>
-                                                    form.setData(
-                                                        'Ndocumento',
-                                                        e.target.value,
-                                                    )
-                                                }
-                                                maxLength={20}
-                                                placeholder="N° de documento"
-                                                className="pr-9"
-                                            />
-                                            <Search className="pointer-events-none absolute top-1/2 right-3 size-4 -translate-y-1/2 text-muted-foreground" />
-                                        </div>
-                                        {form.errors.Ndocumento && (
-                                            <span className="text-xs text-red-600">
-                                                {form.errors.Ndocumento}
-                                            </span>
-                                        )}
-                                    </Field>
-
-                                    <Field label="Nombre del Paciente">
-                                        <Input
-                                            value={paciente?.nombre ?? ''}
-                                            readOnly
-                                            placeholder="Se completa al buscar…"
-                                            className="bg-muted/40"
-                                        />
-                                    </Field>
-
-                                    <Field label="Fecha Recibido (Manual)">
-                                        <Input
-                                            type="date"
-                                            value={today}
-                                            readOnly
-                                            className="bg-muted/40"
-                                        />
-                                    </Field>
+                                    </div>
                                 </div>
 
-                                {/* Fila 2 — Paciente */}
-                                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-                                    <Field
-                                        label="Especialidad *"
-                                        action={
-                                            <button
-                                                type="button"
-                                                onClick={openCrearEspecialidad}
-                                                title="Crear una especialidad nueva si no aparece en la lista"
-                                                className="inline-flex size-5 items-center justify-center rounded-md bg-[#2d3e83]/10 text-[#2d3e83] transition-colors hover:bg-[#2d3e83]/20 dark:bg-white/10 dark:text-white"
-                                            >
-                                                <Plus className="size-3.5" />
-                                            </button>
-                                        }
-                                    >
-                                        <div className="relative" ref={espRef}>
-                                            <Input
-                                                value={espQuery}
-                                                onChange={(e) => {
-                                                    const val = e.target.value;
-                                                    setEspQuery(val);
-                                                    setEspOpen(true);
-                                                    if (form.data.Codesp) {
-                                                        form.setData(
-                                                            'Codesp',
-                                                            '',
-                                                        );
-                                                        form.setData(
-                                                            'codsubesp',
-                                                            '',
-                                                        );
-                                                    }
-                                                    // Si el texto coincide exactamente con un
-                                                    // código, seleccionarla automáticamente.
-                                                    const exact =
-                                                        especialidadesList.find(
-                                                            (sp) =>
-                                                                sp.espcodser &&
-                                                                String(
-                                                                    sp.espcodser,
-                                                                ).toLowerCase() ===
-                                                                    val
-                                                                        .trim()
-                                                                        .toLowerCase(),
-                                                        );
-                                                    if (exact)
-                                                        selectEspecialidad(
-                                                            exact,
-                                                        );
-                                                }}
-                                                onFocus={() => setEspOpen(true)}
-                                                onKeyDown={(e) => {
-                                                    if (e.key === 'Escape') {
-                                                        setEspOpen(false);
-                                                    } else if (
-                                                        e.key === 'Enter'
-                                                    ) {
-                                                        e.preventDefault();
-                                                        if (
-                                                            espFiltered.length >
-                                                            0
-                                                        )
-                                                            selectEspecialidad(
-                                                                espFiltered[0],
-                                                            );
-                                                    }
-                                                }}
-                                                placeholder="Digite el código o nombre…"
-                                                className="pr-9"
-                                                autoComplete="off"
-                                            />
-                                            <ChevronDown className="pointer-events-none absolute top-1/2 right-3 size-4 -translate-y-1/2 text-muted-foreground" />
-                                            {espOpen && (
-                                                <ul className="absolute z-50 mt-1 max-h-60 w-full overflow-auto rounded-md border bg-popover py-1 text-popover-foreground shadow-md">
-                                                    {espFiltered.length ===
-                                                        0 && (
-                                                        <li className="px-3 py-2 text-sm text-muted-foreground">
-                                                            Sin coincidencias
-                                                        </li>
-                                                    )}
-                                                    {espFiltered.map((e) => (
-                                                        <li key={e.id}>
-                                                            <button
-                                                                type="button"
-                                                                onClick={() =>
-                                                                    selectEspecialidad(
-                                                                        e,
-                                                                    )
-                                                                }
-                                                                className="flex w-full items-start gap-2 px-3 py-2 text-left text-sm hover:bg-accent hover:text-accent-foreground"
-                                                            >
-                                                                <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs font-semibold text-foreground">
-                                                                    {
-                                                                        e.espcodser
-                                                                    }
-                                                                </span>
-                                                                <span>
-                                                                    {e.Nombre}
-                                                                </span>
-                                                            </button>
-                                                        </li>
-                                                    ))}
-                                                </ul>
-                                            )}
+                                {/* Banner de éxito */}
+                                {casoCreado && (
+                                    <div className="mb-4 flex flex-col items-center justify-center gap-1 rounded-xl border border-green-200 bg-green-50 py-4 text-center dark:border-green-900 dark:bg-green-950">
+                                        <div className="flex items-center gap-2 font-semibold text-green-700 dark:text-green-300">
+                                            <CheckCircle2 className="size-5" />
+                                            Caso Radicado Correctamente
                                         </div>
-                                        {form.errors.Codesp && (
-                                            <span className="text-xs text-red-600">
-                                                {form.errors.Codesp}
-                                            </span>
-                                        )}
-                                    </Field>
-                                    <Field
-                                        label="Médico *"
-                                        action={
-                                            <button
-                                                type="button"
-                                                onClick={openCrearMedico}
-                                                title="Crear un médico nuevo si no aparece en la lista"
-                                                className="inline-flex size-5 items-center justify-center rounded-md bg-[#2d3e83]/10 text-[#2d3e83] transition-colors hover:bg-[#2d3e83]/20 dark:bg-white/10 dark:text-white"
-                                            >
-                                                <UserPlus className="size-3.5" />
-                                            </button>
-                                        }
-                                    >
-                                        <Select
-                                            value={form.data.codMed}
-                                            onValueChange={(v) =>
-                                                form.setData('codMed', v)
+                                        <div className="text-2xl font-bold text-green-700 dark:text-green-300">
+                                            #{casoCreado}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {flash?.error && (
+                                    <div className="mb-4 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-200">
+                                        <X className="size-5 shrink-0" />
+                                        {flash.error}
+                                    </div>
+                                )}
+
+                                <form onSubmit={submit} className="grid gap-5">
+                                    {/* Fila 1 */}
+                                    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                                        <Field label="Tipo Documento">
+                                            <Input
+                                                value={
+                                                    paciente?.tipo_Docu ?? ''
+                                                }
+                                                readOnly
+                                                placeholder="—"
+                                                className="bg-muted/40"
+                                            />
+                                        </Field>
+
+                                        <Field
+                                            label="Identificación (Cédula) *"
+                                            action={
+                                                <button
+                                                    type="button"
+                                                    onClick={openCrearUsuario}
+                                                    title="Crear un paciente nuevo, o editar el existente si la cédula ya está registrada"
+                                                    className="inline-flex size-5 items-center justify-center rounded-md bg-[#2d3e83]/10 text-[#2d3e83] transition-colors hover:bg-[#2d3e83]/20 dark:bg-white/10 dark:text-white"
+                                                >
+                                                    <UserPlus className="size-3.5" />
+                                                </button>
                                             }
                                         >
-                                            <SelectTrigger>
-                                                <SelectValue placeholder="Seleccione…" />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {medicosList.length === 0 && (
-                                                    <div className="px-2 py-1.5 text-xs text-muted-foreground">
-                                                        No hay médicos
-                                                        registrados.
-                                                    </div>
+                                            <div className="relative">
+                                                <Input
+                                                    value={form.data.Ndocumento}
+                                                    onChange={(e) =>
+                                                        form.setData(
+                                                            'Ndocumento',
+                                                            e.target.value,
+                                                        )
+                                                    }
+                                                    maxLength={20}
+                                                    placeholder="N° de documento"
+                                                    className="pr-9"
+                                                />
+                                                <Search className="pointer-events-none absolute top-1/2 right-3 size-4 -translate-y-1/2 text-muted-foreground" />
+                                            </div>
+                                            {form.errors.Ndocumento && (
+                                                <span className="text-xs text-red-600">
+                                                    {form.errors.Ndocumento}
+                                                </span>
+                                            )}
+                                        </Field>
+
+                                        <Field label="Nombre del Paciente">
+                                            <Input
+                                                value={paciente?.nombre ?? ''}
+                                                readOnly
+                                                placeholder="Se completa al buscar…"
+                                                className="bg-muted/40"
+                                            />
+                                        </Field>
+
+                                        <Field label="Fecha Recibido (Manual)">
+                                            <Input
+                                                type="date"
+                                                value={today}
+                                                readOnly
+                                                className="bg-muted/40"
+                                            />
+                                        </Field>
+                                    </div>
+
+                                    {/* Fila 2 — Paciente */}
+                                    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                                        <Field
+                                            label="Especialidad *"
+                                            action={
+                                                <button
+                                                    type="button"
+                                                    onClick={
+                                                        openCrearEspecialidad
+                                                    }
+                                                    title="Crear una especialidad nueva si no aparece en la lista"
+                                                    className="inline-flex size-5 items-center justify-center rounded-md bg-[#2d3e83]/10 text-[#2d3e83] transition-colors hover:bg-[#2d3e83]/20 dark:bg-white/10 dark:text-white"
+                                                >
+                                                    <Plus className="size-3.5" />
+                                                </button>
+                                            }
+                                        >
+                                            <div
+                                                className="relative"
+                                                ref={espRef}
+                                            >
+                                                <Input
+                                                    value={espQuery}
+                                                    onChange={(e) => {
+                                                        const val =
+                                                            e.target.value;
+                                                        setEspQuery(val);
+                                                        setEspOpen(true);
+                                                        if (form.data.Codesp) {
+                                                            form.setData(
+                                                                'Codesp',
+                                                                '',
+                                                            );
+                                                            form.setData(
+                                                                'codsubesp',
+                                                                '',
+                                                            );
+                                                        }
+                                                        // Si el texto coincide exactamente con un
+                                                        // código, seleccionarla automáticamente.
+                                                        const exact =
+                                                            especialidadesList.find(
+                                                                (sp) =>
+                                                                    sp.espcodser &&
+                                                                    String(
+                                                                        sp.espcodser,
+                                                                    ).toLowerCase() ===
+                                                                        val
+                                                                            .trim()
+                                                                            .toLowerCase(),
+                                                            );
+                                                        if (exact)
+                                                            selectEspecialidad(
+                                                                exact,
+                                                            );
+                                                    }}
+                                                    onFocus={() =>
+                                                        setEspOpen(true)
+                                                    }
+                                                    onKeyDown={(e) => {
+                                                        if (
+                                                            e.key === 'Escape'
+                                                        ) {
+                                                            setEspOpen(false);
+                                                        } else if (
+                                                            e.key === 'Enter'
+                                                        ) {
+                                                            e.preventDefault();
+                                                            if (
+                                                                espFiltered.length >
+                                                                0
+                                                            )
+                                                                selectEspecialidad(
+                                                                    espFiltered[0],
+                                                                );
+                                                        }
+                                                    }}
+                                                    placeholder="Digite el código o nombre…"
+                                                    className="pr-9"
+                                                    autoComplete="off"
+                                                />
+                                                <ChevronDown className="pointer-events-none absolute top-1/2 right-3 size-4 -translate-y-1/2 text-muted-foreground" />
+                                                {espOpen && (
+                                                    <ul className="absolute z-50 mt-1 max-h-60 w-full overflow-auto rounded-md border bg-popover py-1 text-popover-foreground shadow-md">
+                                                        {espFiltered.length ===
+                                                            0 && (
+                                                            <li className="px-3 py-2 text-sm text-muted-foreground">
+                                                                Sin
+                                                                coincidencias
+                                                            </li>
+                                                        )}
+                                                        {espFiltered.map(
+                                                            (e) => (
+                                                                <li key={e.id}>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() =>
+                                                                            selectEspecialidad(
+                                                                                e,
+                                                                            )
+                                                                        }
+                                                                        className="flex w-full items-start gap-2 px-3 py-2 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+                                                                    >
+                                                                        <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs font-semibold text-foreground">
+                                                                            {
+                                                                                e.espcodser
+                                                                            }
+                                                                        </span>
+                                                                        <span>
+                                                                            {
+                                                                                e.Nombre
+                                                                            }
+                                                                        </span>
+                                                                    </button>
+                                                                </li>
+                                                            ),
+                                                        )}
+                                                    </ul>
                                                 )}
-                                                {medicosList.map((m) => (
-                                                    <SelectItem
-                                                        key={m.id}
-                                                        value={String(m.id)}
-                                                    >
-                                                        {[
-                                                            m.name,
-                                                            m.Apellido1,
-                                                            m.apellido2,
-                                                        ]
-                                                            .filter(Boolean)
-                                                            .join(' ')}
-                                                    </SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
-                                        {form.errors.codMed && (
-                                            <span className="text-xs text-red-600">
-                                                {form.errors.codMed}
-                                            </span>
-                                        )}
-                                    </Field>
-                                    <Field label="Teléfonos">
-                                        <Input
-                                            value={paciente?.telefonos ?? ''}
-                                            readOnly
-                                            placeholder="—"
-                                            className="bg-muted/40"
-                                        />
-                                    </Field>
-                                    {/* Servicio que tramita la radicación.
+                                            </div>
+                                            {form.errors.Codesp && (
+                                                <span className="text-xs text-red-600">
+                                                    {form.errors.Codesp}
+                                                </span>
+                                            )}
+                                        </Field>
+                                        <Field
+                                            label="Médico *"
+                                            action={
+                                                <button
+                                                    type="button"
+                                                    onClick={openCrearMedico}
+                                                    title="Crear un médico nuevo si no aparece en la lista"
+                                                    className="inline-flex size-5 items-center justify-center rounded-md bg-[#2d3e83]/10 text-[#2d3e83] transition-colors hover:bg-[#2d3e83]/20 dark:bg-white/10 dark:text-white"
+                                                >
+                                                    <UserPlus className="size-3.5" />
+                                                </button>
+                                            }
+                                        >
+                                            <Select
+                                                value={form.data.codMed}
+                                                onValueChange={(v) =>
+                                                    form.setData('codMed', v)
+                                                }
+                                            >
+                                                <SelectTrigger>
+                                                    <SelectValue placeholder="Seleccione…" />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    {medicosList.length ===
+                                                        0 && (
+                                                        <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                                                            No hay médicos
+                                                            registrados.
+                                                        </div>
+                                                    )}
+                                                    {medicosList.map((m) => (
+                                                        <SelectItem
+                                                            key={m.id}
+                                                            value={String(m.id)}
+                                                        >
+                                                            {[
+                                                                m.name,
+                                                                m.Apellido1,
+                                                                m.apellido2,
+                                                            ]
+                                                                .filter(Boolean)
+                                                                .join(' ')}
+                                                        </SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                            {form.errors.codMed && (
+                                                <span className="text-xs text-red-600">
+                                                    {form.errors.codMed}
+                                                </span>
+                                            )}
+                                        </Field>
+                                        <Field label="Teléfonos">
+                                            <Input
+                                                value={
+                                                    paciente?.telefonos ?? ''
+                                                }
+                                                readOnly
+                                                placeholder="—"
+                                                className="bg-muted/40"
+                                            />
+                                        </Field>
+                                        {/* Servicio que tramita la radicación.
                                         Solo los activos de la sede por la
                                         que se ingresó (Gestión Servicios). */}
-                                    <Field label="Servicio Asignado *">
-                                        <Select
-                                            value={form.data.codservicio}
-                                            onValueChange={(v) =>
-                                                form.setData('codservicio', v)
-                                            }
-                                        >
-                                            <SelectTrigger>
-                                                <SelectValue placeholder="Seleccione…" />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {servicios.length === 0 && (
-                                                    <div className="px-2 py-1.5 text-xs text-muted-foreground">
-                                                        No hay servicios activos
-                                                        en esta sede. Créelos en
-                                                        Gestión Servicios.
-                                                    </div>
-                                                )}
-                                                {servicios.map((s) => (
-                                                    <SelectItem
-                                                        key={s.codigo}
-                                                        value={String(s.codigo)}
-                                                    >
-                                                        {s.nombre}
-                                                    </SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
-                                        {form.errors.codservicio && (
-                                            <span className="text-xs text-red-600">
-                                                {form.errors.codservicio}
-                                            </span>
-                                        )}
-                                    </Field>
-                                </div>
+                                        <Field label="Servicio Asignado *">
+                                            <Select
+                                                value={form.data.codservicio}
+                                                onValueChange={(v) =>
+                                                    form.setData(
+                                                        'codservicio',
+                                                        v,
+                                                    )
+                                                }
+                                            >
+                                                <SelectTrigger>
+                                                    <SelectValue placeholder="Seleccione…" />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    {servicios.length === 0 && (
+                                                        <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                                                            No hay servicios
+                                                            activos en esta
+                                                            sede. Créelos en
+                                                            Gestión Servicios.
+                                                        </div>
+                                                    )}
+                                                    {servicios.map((s) => (
+                                                        <SelectItem
+                                                            key={s.codigo}
+                                                            value={String(
+                                                                s.codigo,
+                                                            )}
+                                                        >
+                                                            {s.nombre}
+                                                        </SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                            {form.errors.codservicio && (
+                                                <span className="text-xs text-red-600">
+                                                    {form.errors.codservicio}
+                                                </span>
+                                            )}
+                                        </Field>
+                                    </div>
 
-                                {/* Fila 3 */}
-                                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-                                    <Field label="ERP / EPS Aseguradora">
-                                        <Input
-                                            value={paciente?.eps ?? ''}
-                                            readOnly
-                                            placeholder="—"
-                                            className="bg-muted/40"
-                                        />
-                                    </Field>
-                                    <Field label="Convenio *">
-                                        <Select
-                                            value={form.data.convenio}
-                                            onValueChange={(v) =>
-                                                form.setData('convenio', v)
-                                            }
-                                            disabled={convenios.length === 0}
-                                        >
-                                            <SelectTrigger>
-                                                <SelectValue
-                                                    placeholder={
-                                                        paciente
-                                                            ? convenios.length ===
-                                                              0
-                                                                ? 'La EPS no tiene convenios'
-                                                                : 'Seleccione…'
-                                                            : '—'
-                                                    }
-                                                />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {convenios.map((c) => (
-                                                    <SelectItem
-                                                        key={c.id}
-                                                        value={c.nit_Convenio}
-                                                    >
-                                                        {[
-                                                            c.nombre,
-                                                            c.regimen,
-                                                            c.tarifa
-                                                                ? `Tarifa ${c.tarifa}`
-                                                                : '',
-                                                        ]
-                                                            .filter(Boolean)
-                                                            .join(' · ')}
-                                                    </SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
-                                        {form.errors.convenio && (
-                                            <span className="text-xs text-red-600">
-                                                {form.errors.convenio}
-                                            </span>
-                                        )}
-                                    </Field>
-                                    <Field label="Estado Actual *">
-                                        <Select
-                                            value={form.data.estRad}
-                                            onValueChange={(v) =>
-                                                form.setData('estRad', v)
-                                            }
-                                        >
-                                            <SelectTrigger>
-                                                <SelectValue placeholder="Seleccione…" />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {estados.map((s) => (
-                                                    <SelectItem
-                                                        key={s.id}
-                                                        value={String(s.id)}
-                                                    >
-                                                        {s.Nombre}
-                                                    </SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
-                                        {form.errors.estRad && (
-                                            <span className="text-xs text-red-600">
-                                                {form.errors.estRad}
-                                            </span>
-                                        )}
-                                    </Field>
-                                    <Field label="Entrega al Servicio *">
-                                        <Input
-                                            type="date"
-                                            value={form.data.fentregapro}
-                                            readOnly
-                                            className="bg-muted/40"
-                                        />
-                                        {form.errors.fentregapro && (
-                                            <span className="text-xs text-red-600">
-                                                {form.errors.fentregapro}
-                                            </span>
-                                        )}
-                                    </Field>
-                                    {/*
+                                    {/* Fila 3 */}
+                                    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                                        <Field label="ERP / EPS Aseguradora">
+                                            <Input
+                                                value={paciente?.eps ?? ''}
+                                                readOnly
+                                                placeholder="—"
+                                                className="bg-muted/40"
+                                            />
+                                        </Field>
+                                        <Field label="Convenio *">
+                                            <Select
+                                                value={form.data.convenio}
+                                                onValueChange={(v) =>
+                                                    form.setData('convenio', v)
+                                                }
+                                                disabled={
+                                                    convenios.length === 0
+                                                }
+                                            >
+                                                <SelectTrigger>
+                                                    <SelectValue
+                                                        placeholder={
+                                                            paciente
+                                                                ? convenios.length ===
+                                                                  0
+                                                                    ? 'La EPS no tiene convenios'
+                                                                    : 'Seleccione…'
+                                                                : '—'
+                                                        }
+                                                    />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    {convenios.map((c) => (
+                                                        <SelectItem
+                                                            key={c.id}
+                                                            value={
+                                                                c.nit_Convenio
+                                                            }
+                                                        >
+                                                            {[
+                                                                c.nombre,
+                                                                c.regimen,
+                                                                c.tarifa
+                                                                    ? `Tarifa ${c.tarifa}`
+                                                                    : '',
+                                                            ]
+                                                                .filter(Boolean)
+                                                                .join(' · ')}
+                                                        </SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                            {form.errors.convenio && (
+                                                <span className="text-xs text-red-600">
+                                                    {form.errors.convenio}
+                                                </span>
+                                            )}
+                                        </Field>
+                                        <Field label="Estado Actual *">
+                                            <Select
+                                                value={form.data.estRad}
+                                                onValueChange={(v) =>
+                                                    form.setData('estRad', v)
+                                                }
+                                            >
+                                                <SelectTrigger>
+                                                    <SelectValue placeholder="Seleccione…" />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    {estados.map((s) => (
+                                                        <SelectItem
+                                                            key={s.id}
+                                                            value={String(s.id)}
+                                                        >
+                                                            {s.Nombre}
+                                                        </SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                            {form.errors.estRad && (
+                                                <span className="text-xs text-red-600">
+                                                    {form.errors.estRad}
+                                                </span>
+                                            )}
+                                        </Field>
+                                        <Field label="Entrega al Servicio *">
+                                            <Input
+                                                type="date"
+                                                value={form.data.fentregapro}
+                                                readOnly
+                                                className="bg-muted/40"
+                                            />
+                                            {form.errors.fentregapro && (
+                                                <span className="text-xs text-red-600">
+                                                    {form.errors.fentregapro}
+                                                </span>
+                                            )}
+                                        </Field>
+                                        {/*
                                         Estado QX no se diligencia en
                                         esta vista: lo registra otro rol desde
                                         el seguimiento del caso.
                                     */}
-                                </div>
+                                    </div>
 
-                                {/* Fila 4 */}
-                                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-                                    {/*
+                                    {/* Fila 4 */}
+                                    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                                        {/*
                                         Fecha Recibido no se
                                         diligencia en esta vista: la registra
                                         otro rol desde el seguimiento del caso.
                                     */}
-                                    <Field label="Fecha Autorización *">
-                                        <Input
-                                            type="date"
-                                            value={form.data.fecAutorizacion}
-                                            onChange={(e) =>
-                                                form.setData(
-                                                    'fecAutorizacion',
-                                                    e.target.value,
-                                                )
-                                            }
-                                        />
-                                        {form.errors.fecAutorizacion && (
-                                            <span className="text-xs text-red-600">
-                                                {form.errors.fecAutorizacion}
-                                            </span>
-                                        )}
-                                    </Field>
-                                    <Field label="Fecha Vencimiento Autorización *">
-                                        <Input
-                                            type="date"
-                                            value={
-                                                form.data.fechavenautorizacion
-                                            }
-                                            onChange={(e) =>
-                                                form.setData(
-                                                    'fechavenautorizacion',
-                                                    e.target.value,
-                                                )
-                                            }
-                                        />
-                                        {form.errors.fechavenautorizacion && (
-                                            <span className="text-xs text-red-600">
-                                                {
-                                                    form.errors
+                                        <Field label="Fecha Autorización *">
+                                            <Input
+                                                type="date"
+                                                value={
+                                                    form.data.fecAutorizacion
+                                                }
+                                                onChange={(e) =>
+                                                    form.setData(
+                                                        'fecAutorizacion',
+                                                        e.target.value,
+                                                    )
+                                                }
+                                            />
+                                            {form.errors.fecAutorizacion && (
+                                                <span className="text-xs text-red-600">
+                                                    {
+                                                        form.errors
+                                                            .fecAutorizacion
+                                                    }
+                                                </span>
+                                            )}
+                                        </Field>
+                                        <Field label="Fecha Vencimiento Autorización *">
+                                            <Input
+                                                type="date"
+                                                value={
+                                                    form.data
                                                         .fechavenautorizacion
                                                 }
-                                            </span>
-                                        )}
-                                    </Field>
+                                                onChange={(e) =>
+                                                    form.setData(
+                                                        'fechavenautorizacion',
+                                                        e.target.value,
+                                                    )
+                                                }
+                                            />
+                                            {form.errors
+                                                .fechavenautorizacion && (
+                                                <span className="text-xs text-red-600">
+                                                    {
+                                                        form.errors
+                                                            .fechavenautorizacion
+                                                    }
+                                                </span>
+                                            )}
+                                        </Field>
 
-                                    <Field label="Copago">
-                                        <div className="flex items-center gap-3">
-                                            <label className="flex h-9 cursor-pointer items-center gap-2 text-sm">
-                                                <Checkbox
-                                                    checked={form.data.copago}
-                                                    onCheckedChange={(v) => {
-                                                        const marcado =
-                                                            v === true;
-                                                        form.setData(
-                                                            'copago',
-                                                            marcado,
-                                                        );
-                                                        // Al desmarcar no queda
-                                                        // un valor colgado.
-                                                        if (!marcado) {
+                                        <Field label="Copago">
+                                            <div className="flex items-center gap-3">
+                                                <label className="flex h-9 cursor-pointer items-center gap-2 text-sm">
+                                                    <Checkbox
+                                                        checked={
+                                                            form.data.copago
+                                                        }
+                                                        onCheckedChange={(
+                                                            v,
+                                                        ) => {
+                                                            const marcado =
+                                                                v === true;
+                                                            form.setData(
+                                                                'copago',
+                                                                marcado,
+                                                            );
+                                                            // Al desmarcar no queda
+                                                            // un valor colgado.
+                                                            if (!marcado) {
+                                                                form.setData(
+                                                                    'valor_copago',
+                                                                    '',
+                                                                );
+                                                            }
+                                                        }}
+                                                    />
+                                                    <span className="text-foreground">
+                                                        Aplica
+                                                    </span>
+                                                </label>
+                                                {form.data.copago && (
+                                                    <Input
+                                                        type="number"
+                                                        min="0"
+                                                        step="0.01"
+                                                        value={
+                                                            form.data
+                                                                .valor_copago
+                                                        }
+                                                        onChange={(e) =>
                                                             form.setData(
                                                                 'valor_copago',
-                                                                '',
-                                                            );
+                                                                e.target.value,
+                                                            )
                                                         }
-                                                    }}
-                                                />
-                                                <span className="text-foreground">
-                                                    Aplica
+                                                        placeholder="Valor"
+                                                        className="flex-1"
+                                                    />
+                                                )}
+                                            </div>
+                                            {form.errors.valor_copago && (
+                                                <span className="text-xs text-red-600">
+                                                    {form.errors.valor_copago}
                                                 </span>
-                                            </label>
-                                            {form.data.copago && (
-                                                <Input
-                                                    type="number"
-                                                    min="0"
-                                                    step="0.01"
-                                                    value={
-                                                        form.data.valor_copago
-                                                    }
-                                                    onChange={(e) =>
-                                                        form.setData(
-                                                            'valor_copago',
-                                                            e.target.value,
-                                                        )
-                                                    }
-                                                    placeholder="Valor"
-                                                    className="flex-1"
-                                                />
+                                            )}
+                                        </Field>
+
+                                        <Field label="Paquete (PDF, máx. 30 MB)">
+                                            <Input
+                                                type="file"
+                                                accept="application/pdf"
+                                                onChange={(e) =>
+                                                    form.setData(
+                                                        'paquete',
+                                                        e.target.files?.[0] ??
+                                                            null,
+                                                    )
+                                                }
+                                                className="cursor-pointer file:mr-2 file:cursor-pointer file:rounded file:border-0 file:bg-muted file:px-2 file:py-0.5 file:text-xs"
+                                            />
+                                            {form.data.paquete && (
+                                                <span className="truncate text-xs text-muted-foreground">
+                                                    {form.data.paquete.name}
+                                                </span>
+                                            )}
+                                            {form.errors.paquete && (
+                                                <span className="text-xs text-red-600">
+                                                    {form.errors.paquete}
+                                                </span>
+                                            )}
+                                        </Field>
+                                    </div>
+
+                                    {/* Bloque de procedimientos / autorizaciones */}
+                                    <div className="rounded-xl border bg-muted/30 p-4">
+                                        <div className="mb-1 text-xs font-bold tracking-wide text-[#2d3e83] uppercase dark:text-white">
+                                            Bloque de procedimientos y
+                                            autorizaciones EPS
+                                        </div>
+                                        <div className="mb-3 text-xs text-muted-foreground">
+                                            Digite el código o el nombre del
+                                            procedimiento para buscarlo en la
+                                            tabla de CUPS.
+                                            {paciente?.eps
+                                                ? ` EPS del paciente: ${paciente.eps}.`
+                                                : ''}
+                                        </div>
+                                        <div className="grid gap-3">
+                                            {form.data.procedimientos.map(
+                                                (proc, i) => {
+                                                    const errores =
+                                                        form.errors as Record<
+                                                            string,
+                                                            string
+                                                        >;
+                                                    const cupsError =
+                                                        errores[
+                                                            `procedimientos.${i}.cusv_id`
+                                                        ];
+                                                    const autorizacionError =
+                                                        errores[
+                                                            `procedimientos.${i}.N_Autorizacion`
+                                                        ];
+                                                    return (
+                                                        <div key={i}>
+                                                            <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
+                                                                <CupsCombobox
+                                                                    selectedLabel={
+                                                                        cupsDe(
+                                                                            proc.cusv_id,
+                                                                        )
+                                                                            ?.CodCupsHuv ??
+                                                                        (proc.cusv_id
+                                                                            ? cupsNombre(
+                                                                                  proc.cusv_id,
+                                                                              )
+                                                                            : '')
+                                                                    }
+                                                                    onSelect={(
+                                                                        c,
+                                                                    ) => {
+                                                                        setCupsCatalogo(
+                                                                            (
+                                                                                prev,
+                                                                            ) => ({
+                                                                                ...prev,
+                                                                                [String(
+                                                                                    c.id,
+                                                                                )]:
+                                                                                    c,
+                                                                            }),
+                                                                        );
+                                                                        setProc(
+                                                                            i,
+                                                                            'cusv_id',
+                                                                            String(
+                                                                                c.id,
+                                                                            ),
+                                                                        );
+                                                                    }}
+                                                                />
+                                                                <Input
+                                                                    value={cupsNombre(
+                                                                        proc.cusv_id,
+                                                                    )}
+                                                                    readOnly
+                                                                    placeholder="Descripción del procedimiento"
+                                                                    className="flex-1 bg-muted/40"
+                                                                />
+                                                                <Input
+                                                                    value={
+                                                                        cupsDe(
+                                                                            proc.cusv_id,
+                                                                        )
+                                                                            ?.descrip_Normativa ??
+                                                                        ''
+                                                                    }
+                                                                    readOnly
+                                                                    placeholder="Descripción normativa"
+                                                                    className="flex-1 bg-muted/40"
+                                                                />
+                                                                <Input
+                                                                    value={
+                                                                        proc.N_Autorizacion
+                                                                    }
+                                                                    onChange={(
+                                                                        e,
+                                                                    ) =>
+                                                                        setProc(
+                                                                            i,
+                                                                            'N_Autorizacion',
+                                                                            e
+                                                                                .target
+                                                                                .value,
+                                                                        )
+                                                                    }
+                                                                    maxLength={
+                                                                        20
+                                                                    }
+                                                                    placeholder="N° Autorización EPS *"
+                                                                    className="lg:w-48"
+                                                                />
+                                                                <Button
+                                                                    type="button"
+                                                                    variant="destructive"
+                                                                    size="icon"
+                                                                    className="shrink-0"
+                                                                    title="Quitar"
+                                                                    disabled={
+                                                                        form
+                                                                            .data
+                                                                            .procedimientos
+                                                                            .length ===
+                                                                        1
+                                                                    }
+                                                                    onClick={() =>
+                                                                        removeProc(
+                                                                            i,
+                                                                        )
+                                                                    }
+                                                                >
+                                                                    <X className="size-4" />
+                                                                </Button>
+                                                            </div>
+                                                            {cupsInfo(
+                                                                proc.cusv_id,
+                                                            ) && (
+                                                                <span className="mt-1 block text-xs text-muted-foreground">
+                                                                    {cupsInfo(
+                                                                        proc.cusv_id,
+                                                                    )}
+                                                                </span>
+                                                            )}
+                                                            {cupsError && (
+                                                                <span className="mt-1 block text-xs text-red-600">
+                                                                    {cupsError}
+                                                                </span>
+                                                            )}
+                                                            {autorizacionError && (
+                                                                <span className="mt-1 block text-xs text-red-600">
+                                                                    {
+                                                                        autorizacionError
+                                                                    }
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    );
+                                                },
                                             )}
                                         </div>
-                                        {form.errors.valor_copago && (
-                                            <span className="text-xs text-red-600">
-                                                {form.errors.valor_copago}
-                                            </span>
-                                        )}
-                                    </Field>
-
-                                    <Field label="Paquete (PDF, máx. 30 MB)">
-                                        <Input
-                                            type="file"
-                                            accept="application/pdf"
-                                            onChange={(e) =>
-                                                form.setData(
-                                                    'paquete',
-                                                    e.target.files?.[0] ?? null,
-                                                )
-                                            }
-                                            className="cursor-pointer file:mr-2 file:cursor-pointer file:rounded file:border-0 file:bg-muted file:px-2 file:py-0.5 file:text-xs"
-                                        />
-                                        {form.data.paquete && (
-                                            <span className="truncate text-xs text-muted-foreground">
-                                                {form.data.paquete.name}
-                                            </span>
-                                        )}
-                                        {form.errors.paquete && (
-                                            <span className="text-xs text-red-600">
-                                                {form.errors.paquete}
-                                            </span>
-                                        )}
-                                    </Field>
-                                </div>
-
-                                {/* Bloque de procedimientos / autorizaciones */}
-                                <div className="rounded-xl border bg-muted/30 p-4">
-                                    <div className="mb-1 text-xs font-bold tracking-wide text-[#2d3e83] uppercase dark:text-white">
-                                        Bloque de procedimientos y
-                                        autorizaciones EPS
-                                    </div>
-                                    <div className="mb-3 text-xs text-muted-foreground">
-                                        Digite el código o el nombre del
-                                        procedimiento para buscarlo en la tabla
-                                        de CUPS.
-                                        {paciente?.eps
-                                            ? ` EPS del paciente: ${paciente.eps}.`
-                                            : ''}
-                                    </div>
-                                    <div className="grid gap-3">
-                                        {form.data.procedimientos.map(
-                                            (proc, i) => {
-                                                const errores =
-                                                    form.errors as Record<
-                                                        string,
-                                                        string
-                                                    >;
-                                                const cupsError =
-                                                    errores[
-                                                        `procedimientos.${i}.cusv_id`
-                                                    ];
-                                                const autorizacionError =
-                                                    errores[
-                                                        `procedimientos.${i}.N_Autorizacion`
-                                                    ];
-                                                return (
-                                                    <div key={i}>
-                                                        <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
-                                                            <CupsCombobox
-                                                                selectedLabel={
-                                                                    cupsDe(
-                                                                        proc.cusv_id,
-                                                                    )
-                                                                        ?.CodCupsHuv ??
-                                                                    (proc.cusv_id
-                                                                        ? cupsNombre(
-                                                                              proc.cusv_id,
-                                                                          )
-                                                                        : '')
-                                                                }
-                                                                onSelect={(
-                                                                    c,
-                                                                ) => {
-                                                                    setCupsCatalogo(
-                                                                        (
-                                                                            prev,
-                                                                        ) => ({
-                                                                            ...prev,
-                                                                            [String(
-                                                                                c.id,
-                                                                            )]:
-                                                                                c,
-                                                                        }),
-                                                                    );
-                                                                    setProc(
-                                                                        i,
-                                                                        'cusv_id',
-                                                                        String(
-                                                                            c.id,
-                                                                        ),
-                                                                    );
-                                                                }}
-                                                            />
-                                                            <Input
-                                                                value={cupsNombre(
-                                                                    proc.cusv_id,
-                                                                )}
-                                                                readOnly
-                                                                placeholder="Descripción del procedimiento"
-                                                                className="flex-1 bg-muted/40"
-                                                            />
-                                                            <Input
-                                                                value={
-                                                                    cupsDe(
-                                                                        proc.cusv_id,
-                                                                    )
-                                                                        ?.descrip_Normativa ??
-                                                                    ''
-                                                                }
-                                                                readOnly
-                                                                placeholder="Descripción normativa"
-                                                                className="flex-1 bg-muted/40"
-                                                            />
-                                                            <Input
-                                                                value={
-                                                                    proc.N_Autorizacion
-                                                                }
-                                                                onChange={(e) =>
-                                                                    setProc(
-                                                                        i,
-                                                                        'N_Autorizacion',
-                                                                        e.target
-                                                                            .value,
-                                                                    )
-                                                                }
-                                                                maxLength={20}
-                                                                placeholder="N° Autorización EPS *"
-                                                                className="lg:w-48"
-                                                            />
-                                                            <Button
-                                                                type="button"
-                                                                variant="destructive"
-                                                                size="icon"
-                                                                className="shrink-0"
-                                                                title="Quitar"
-                                                                disabled={
-                                                                    form.data
-                                                                        .procedimientos
-                                                                        .length ===
-                                                                    1
-                                                                }
-                                                                onClick={() =>
-                                                                    removeProc(
-                                                                        i,
-                                                                    )
-                                                                }
-                                                            >
-                                                                <X className="size-4" />
-                                                            </Button>
-                                                        </div>
-                                                        {cupsInfo(
-                                                            proc.cusv_id,
-                                                        ) && (
-                                                            <span className="mt-1 block text-xs text-muted-foreground">
-                                                                {cupsInfo(
-                                                                    proc.cusv_id,
-                                                                )}
-                                                            </span>
-                                                        )}
-                                                        {cupsError && (
-                                                            <span className="mt-1 block text-xs text-red-600">
-                                                                {cupsError}
-                                                            </span>
-                                                        )}
-                                                        {autorizacionError && (
-                                                            <span className="mt-1 block text-xs text-red-600">
-                                                                {
-                                                                    autorizacionError
-                                                                }
-                                                            </span>
-                                                        )}
-                                                    </div>
-                                                );
-                                            },
+                                        <Button
+                                            type="button"
+                                            onClick={addProc}
+                                            className="mt-3 gap-2"
+                                            style={{ backgroundColor: BRAND }}
+                                        >
+                                            <Plus className="size-4" />
+                                            Agregar otro CUPS / Autorización
+                                        </Button>
+                                        {form.errors.procedimientos && (
+                                            <p className="mt-2 text-xs text-red-600">
+                                                {form.errors.procedimientos}
+                                            </p>
                                         )}
                                     </div>
-                                    <Button
-                                        type="button"
-                                        onClick={addProc}
-                                        className="mt-3 gap-2"
-                                        style={{ backgroundColor: BRAND }}
-                                    >
-                                        <Plus className="size-4" />
-                                        Agregar otro CUPS / Autorización
-                                    </Button>
-                                    {form.errors.procedimientos && (
-                                        <p className="mt-2 text-xs text-red-600">
-                                            {form.errors.procedimientos}
-                                        </p>
-                                    )}
-                                </div>
 
-                                {/* Observaciones */}
-                                <div className="grid gap-4">
-                                    <Field label="OB TFX *">
-                                        <Input
-                                            value={form.data.ObservacionTFX}
-                                            onChange={(e) =>
-                                                form.setData(
-                                                    'ObservacionTFX',
-                                                    e.target.value,
-                                                )
-                                            }
-                                            className="sm:max-w-sm"
-                                        />
-                                        {form.errors.ObservacionTFX && (
-                                            <span className="text-xs text-red-600">
-                                                {form.errors.ObservacionTFX}
-                                            </span>
-                                        )}
-                                    </Field>
-                                    <Field label="Observación CCX *">
-                                        <Textarea
-                                            value={form.data.ObservacionCCX}
-                                            onChange={(e) =>
-                                                form.setData(
-                                                    'ObservacionCCX',
-                                                    e.target.value,
-                                                )
-                                            }
-                                            rows={3}
-                                            placeholder="Información adicional"
-                                        />
-                                        {/* Primera entrada del campo. Queda
+                                    {/* Observaciones */}
+                                    <div className="grid gap-4">
+                                        <Field label="OB TFX *">
+                                            <Input
+                                                value={form.data.ObservacionTFX}
+                                                onChange={(e) =>
+                                                    form.setData(
+                                                        'ObservacionTFX',
+                                                        e.target.value,
+                                                    )
+                                                }
+                                                className="sm:max-w-sm"
+                                            />
+                                            {form.errors.ObservacionTFX && (
+                                                <span className="text-xs text-red-600">
+                                                    {form.errors.ObservacionTFX}
+                                                </span>
+                                            )}
+                                        </Field>
+                                        <Field label="Observación CCX *">
+                                            <Textarea
+                                                value={form.data.ObservacionCCX}
+                                                onChange={(e) =>
+                                                    form.setData(
+                                                        'ObservacionCCX',
+                                                        e.target.value,
+                                                    )
+                                                }
+                                                rows={3}
+                                                placeholder="Información adicional"
+                                            />
+                                            {/* Primera entrada del campo. Queda
                                             firmada con quien radica y, de ahí
                                             en adelante, solo se le puede
                                             anexar texto desde el Historial. */}
-                                        <span className="text-[11px] text-muted-foreground">
-                                            Queda firmado con su nombre. Después
-                                            de radicar solo se le puede anexar
-                                            texto: nadie podrá modificarlo ni
-                                            borrarlo.
-                                        </span>
-                                        {form.errors.ObservacionCCX && (
-                                            <span className="text-xs text-red-600">
-                                                {form.errors.ObservacionCCX}
+                                            <span className="text-[11px] text-muted-foreground">
+                                                Queda firmado con su nombre.
+                                                Después de radicar solo se le
+                                                puede anexar texto: nadie podrá
+                                                modificarlo ni borrarlo.
                                             </span>
-                                        )}
-                                    </Field>
-                                </div>
+                                            {form.errors.ObservacionCCX && (
+                                                <span className="text-xs text-red-600">
+                                                    {form.errors.ObservacionCCX}
+                                                </span>
+                                            )}
+                                        </Field>
+                                    </div>
 
-                                {/* Botón guardar (requiere permiso de crear) */}
-                                {accionesRadicar.crear ? (
-                                    <Button
-                                        type="submit"
-                                        disabled={form.processing}
-                                        className="h-12 w-full gap-2 text-base font-semibold text-white hover:opacity-95"
-                                        style={{ backgroundColor: '#0f766e' }}
-                                    >
-                                        {form.processing ? (
-                                            <LoaderCircle className="size-5 animate-spin" />
-                                        ) : (
-                                            <Save className="size-5" />
-                                        )}
-                                        Guardar y Registrar Caso
-                                    </Button>
-                                ) : (
-                                    <p className="rounded-lg border bg-muted/40 px-4 py-3 text-center text-sm text-muted-foreground">
-                                        Tu rol no tiene permiso para registrar
-                                        casos.
-                                    </p>
-                                )}
-                            </form>
-                        </div>
-                    )}
+                                    {/* Botón guardar (requiere permiso de crear) */}
+                                    {accionesRadicar.crear ? (
+                                        <Button
+                                            type="submit"
+                                            disabled={form.processing}
+                                            className="h-12 w-full gap-2 text-base font-semibold text-white hover:opacity-95"
+                                            style={{
+                                                backgroundColor: '#0f766e',
+                                            }}
+                                        >
+                                            {form.processing ? (
+                                                <LoaderCircle className="size-5 animate-spin" />
+                                            ) : (
+                                                <Save className="size-5" />
+                                            )}
+                                            Guardar y Registrar Caso
+                                        </Button>
+                                    ) : (
+                                        <p className="rounded-lg border bg-muted/40 px-4 py-3 text-center text-sm text-muted-foreground">
+                                            Tu rol no tiene permiso para
+                                            registrar casos.
+                                        </p>
+                                    )}
+                                </form>
+                            </div>
+                        )}
 
                     {tab === 'historial' && tabPermitida('historial') && (
                         <div className="p-4 md:p-6">

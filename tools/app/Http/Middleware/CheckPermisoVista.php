@@ -73,6 +73,10 @@ class CheckPermisoVista
             $tab = match (true) {
                 $sub === 'buscar-caso' => 'radicar-solicitud-historial',
                 $sub === 'informe' => 'radicar-solicitud-informes',
+                // Radicar: el mismo endpoint sirve a Nueva Radicación y a su
+                // réplica Radicado Hospitalario; la pestaña dice cuál permiso
+                // aplica.
+                $sub === null && $request->isMethod('POST') && $request->input('pestana') === 'hospitalario' => 'radicar-solicitud-hospitalario',
                 $sub === null && $request->isMethod('POST') => 'radicar-solicitud-nueva',
                 // PUT /tools/radicar-solicitud/{caso}: botón Modificar Radicado.
                 $sub !== null && ctype_digit($sub) && $request->isMethod('PUT') => 'radicar-solicitud-modificar',
@@ -101,6 +105,12 @@ class CheckPermisoVista
                     ->first();
 
                 if ($permisoTab && ! $permisoTab->ver) {
+                    return $this->denegar($request, 'ver');
+                }
+
+                // Las pestañas que se asignan expresamente (Radicado
+                // Hospitalario) no se permiten sin fila guardada.
+                if (! $permisoTab && in_array($tab, Permiso::VISTAS_OPT_IN, true)) {
                     return $this->denegar($request, 'ver');
                 }
             }

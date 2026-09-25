@@ -28,6 +28,9 @@ class Permiso extends Model
         ['key' => 'radicar-solicitud-nueva', 'titulo' => 'Pestaña Nueva Radicación', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver']],
         ['key' => 'radicar-solicitud-historial', 'titulo' => 'Pestaña Historial / Búsqueda', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver']],
         ['key' => 'radicar-solicitud-informes', 'titulo' => 'Pestaña Informes', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver']],
+        // Réplica de Nueva Radicación con su propio permiso. Viene apagada:
+        // el Super Admin la asigna a los roles que la necesiten.
+        ['key' => 'radicar-solicitud-hospitalario', 'titulo' => 'Pestaña Radicado Hospitalario', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver']],
         ['key' => 'radicar-solicitud-modificar', 'titulo' => 'Botón Modificar Radicado (Historial)', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver']],
         ['key' => 'radicar-solicitud-cotizaciones', 'titulo' => 'Formulario Cotizaciones de Conceptos No Convenidos (Historial)', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver']],
         // Versión reducida del formulario Aplicar Modificaciones: solo Estado
@@ -83,6 +86,7 @@ class Permiso extends Model
      * @var list<string>
      */
     public const VISTAS_OPT_IN = [
+        'radicar-solicitud-hospitalario',
         'radicar-solicitud-programados',
         'radicar-solicitud-ver-programados',
         'radicar-solicitud-ver-programados-hemo',

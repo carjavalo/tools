@@ -4,6 +4,7 @@ use App\Models\Convenio;
 use App\Models\CotizacionCaso;
 use App\Models\Cups;
 use App\Models\Eps;
+use App\Models\Permiso;
 use App\Models\ProgramacionCaso;
 use App\Models\RadicarCaso;
 use App\Models\Role;
@@ -431,4 +432,51 @@ test('nueva radicacion ofrece solo los servicios activos de la sede activa', fun
             ->has('servicios', 1)
             ->where('servicios.0.nombre', 'Cartago activo')
         );
+});
+
+test('la pestaña Radicado Hospitalario va despues de Informes y viene apagada', function () {
+    $claves = collect(Permiso::VISTAS)->pluck('key')->values();
+
+    expect($claves->search('radicar-solicitud-hospitalario'))
+        ->toBe($claves->search('radicar-solicitud-informes') + 1)
+        ->and(Permiso::VISTAS_OPT_IN)->toContain('radicar-solicitud-hospitalario');
+});
+
+test('radicar desde Radicado Hospitalario exige que la pestaña este asignada', function () {
+    $role = Role::create(['Nombre' => 'Radicador Hosp', 'Estado' => true]);
+    $usuario = User::factory()->create(['rol' => 'Radicador Hosp']);
+    Permiso::create(['role_id' => $role->id, 'vista' => 'radicar-solicitud', 'ver' => true, 'crear' => true]);
+
+    // Sin asignar: se rechaza, aunque Nueva Radicación sí esté permitida.
+    $this->actingAs($usuario)->withSession(['sede' => Sede::CALI])
+        ->post('/tools/radicar-solicitud', [...payloadRadicacion('7201'), 'pestana' => 'hospitalario'])
+        ->assertRedirect(route('dashboard'));
+    $this->assertDatabaseMissing('RadicarCaso', ['Ndocumento' => '7201']);
+
+    // Desde Nueva Radicación el mismo rol sí radica.
+    $this->actingAs($usuario)->withSession(['sede' => Sede::CALI])
+        ->post('/tools/radicar-solicitud', [...payloadRadicacion('7202'), 'pestana' => 'nueva'])
+        ->assertRedirect(route('tools.radicar-solicitud'));
+    $this->assertDatabaseHas('RadicarCaso', ['Ndocumento' => '7202']);
+
+    // Asignada: radica igual que Nueva Radicación.
+    Permiso::create(['role_id' => $role->id, 'vista' => 'radicar-solicitud-hospitalario', 'ver' => true]);
+    $this->actingAs($usuario)->withSession(['sede' => Sede::CALI])
+        ->post('/tools/radicar-solicitud', [...payloadRadicacion('7203'), 'pestana' => 'hospitalario'])
+        ->assertRedirect(route('tools.radicar-solicitud'));
+    $this->assertDatabaseHas('RadicarCaso', ['Ndocumento' => '7203', 'sede' => Sede::CALI]);
+});
+
+test('Radicado Hospitalario funciona aunque Nueva Radicacion este apagada', function () {
+    $role = Role::create(['Nombre' => 'Solo Hosp', 'Estado' => true]);
+    $usuario = User::factory()->create(['rol' => 'Solo Hosp']);
+    Permiso::create(['role_id' => $role->id, 'vista' => 'radicar-solicitud', 'ver' => true, 'crear' => true]);
+    Permiso::create(['role_id' => $role->id, 'vista' => 'radicar-solicitud-nueva', 'ver' => false]);
+    Permiso::create(['role_id' => $role->id, 'vista' => 'radicar-solicitud-hospitalario', 'ver' => true]);
+
+    $this->actingAs($usuario)->withSession(['sede' => Sede::CALI])
+        ->post('/tools/radicar-solicitud', [...payloadRadicacion('7204'), 'pestana' => 'hospitalario'])
+        ->assertRedirect(route('tools.radicar-solicitud'));
+
+    $this->assertDatabaseHas('RadicarCaso', ['Ndocumento' => '7204']);
 });
