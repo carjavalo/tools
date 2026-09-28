@@ -50,12 +50,14 @@ WHERE NOT EXISTS (
 );
 
 
--- PASO 3 -- Verificación (una sola consulta: phpMyAdmin muestra la última).
+-- PASO 3 -- Verificación: UNA fila con 2 columnas, las dos deben decir OK.
+-- Se arma con el nombre de la base delante de `migrations`: algunas versiones
+-- de MySQL, al mezclarla con information_schema en la misma consulta, la
+-- buscaban allí y respondían "Tabla desconocida 'migrations'".
 
-SELECT 'RadicarCaso.ambito' AS `cambio`, IF(COUNT(*) = 1, 'OK', 'FALTA') AS `resultado`
-FROM information_schema.`COLUMNS`
-WHERE `TABLE_SCHEMA` = DATABASE() AND `TABLE_NAME` = 'RadicarCaso' AND `COLUMN_NAME` = 'ambito'
-UNION ALL
-SELECT 'migración registrada', IF(COUNT(*) = 1, 'OK', 'FALTA')
-FROM `migrations`
-WHERE `migration` = '2026_09_25_000001_add_ambito_to_radicar_caso_table';
+SET @verificacion := CONCAT(
+  'SELECT ',
+  '(SELECT IF(COUNT(*) = 1, ''OK'', ''FALTA'') FROM information_schema.`COLUMNS` WHERE `TABLE_SCHEMA` = DATABASE() AND `TABLE_NAME` = ''RadicarCaso'' AND `COLUMN_NAME` = ''ambito'') AS `radicar_ambito`, ',
+  '(SELECT IF(COUNT(*) = 1, ''OK'', ''FALTA'') FROM `', DATABASE(), '`.`migrations` WHERE `migration` = ''2026_09_25_000001_add_ambito_to_radicar_caso_table'') AS `migracion_registrada`'
+);
+PREPARE verificar FROM @verificacion; EXECUTE verificar; DEALLOCATE PREPARE verificar;

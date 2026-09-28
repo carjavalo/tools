@@ -185,6 +185,8 @@ interface PageProps {
     // filtro no puede quedar recortado a los estados del rol.
     estadosFiltro: Option[];
     defaultEstadoId: number | null;
+    // Tamaño máximo del PDF del paquete, en MB.
+    paqueteMaxMb: number;
     // Servicios activos de la sede activa (campo Servicio Asignado).
     servicios: { codigo: number; nombre: string }[];
     today: string;
@@ -1126,6 +1128,7 @@ export default function RadicarSolicitud({
     subespecialidadesFiltro,
     estadosFiltro,
     defaultEstadoId,
+    paqueteMaxMb,
     servicios,
     today,
     puedeGestionarCotizaciones,
@@ -1660,6 +1663,31 @@ export default function RadicarSolicitud({
             'procedimientos',
             form.data.procedimientos.filter((_, idx) => idx !== i),
         );
+
+    /**
+     * Revisa el PDF del paquete apenas se escoge. Si pasa del tope, avisa y
+     * limpia el campo: subir un archivo que el servidor va a rechazar solo
+     * haría esperar la carga completa para nada. Devuelve el archivo, null si
+     * no se escogió ninguno, o undefined si se rechazó.
+     */
+    const paqueteValido = (
+        input: HTMLInputElement,
+        avisar: (mensaje: string) => void,
+    ): File | null | undefined => {
+        const archivo = input.files?.[0] ?? null;
+        if (!archivo) return null;
+
+        if (archivo.size > paqueteMaxMb * 1024 * 1024) {
+            const pesa = (archivo.size / (1024 * 1024)).toFixed(1);
+            avisar(
+                `El paquete pesa ${pesa} MB y el máximo permitido es ${paqueteMaxMb} MB.`,
+            );
+            input.value = '';
+            return undefined;
+        }
+
+        return archivo;
+    };
 
     const submit = (e: FormEvent) => {
         e.preventDefault();
@@ -3794,17 +3822,32 @@ export default function RadicarSolicitud({
                                             )}
                                         </Field>
 
-                                        <Field label="Paquete (PDF, máx. 30 MB)">
+                                        <Field
+                                            label={`Paquete (PDF, máx. ${paqueteMaxMb} MB)`}
+                                        >
                                             <Input
                                                 type="file"
                                                 accept="application/pdf"
-                                                onChange={(e) =>
+                                                onChange={(e) => {
+                                                    const archivo =
+                                                        paqueteValido(
+                                                            e.target,
+                                                            (m) =>
+                                                                form.setError(
+                                                                    'paquete',
+                                                                    m,
+                                                                ),
+                                                        );
+                                                    if (archivo !== undefined) {
+                                                        form.clearErrors(
+                                                            'paquete',
+                                                        );
+                                                    }
                                                     form.setData(
                                                         'paquete',
-                                                        e.target.files?.[0] ??
-                                                            null,
-                                                    )
-                                                }
+                                                        archivo ?? null,
+                                                    );
+                                                }}
                                                 className="cursor-pointer file:mr-2 file:cursor-pointer file:rounded file:border-0 file:bg-muted file:px-2 file:py-0.5 file:text-xs"
                                             />
                                             {form.data.paquete && (
@@ -7882,16 +7925,23 @@ export default function RadicarSolicitud({
                             </div>
                         </div>
                         <div className="grid gap-2 sm:col-span-2">
-                            <Label>Paquete (PDF, máx. 30 MB)</Label>
+                            <Label>Paquete (PDF, máx. {paqueteMaxMb} MB)</Label>
                             <Input
                                 type="file"
                                 accept="application/pdf"
-                                onChange={(e) =>
+                                onChange={(e) => {
+                                    const archivo = paqueteValido(
+                                        e.target,
+                                        setModifError,
+                                    );
+                                    if (archivo !== undefined) {
+                                        setModifError(null);
+                                    }
                                     setModif((prev) => ({
                                         ...prev,
-                                        paquete: e.target.files?.[0] ?? null,
-                                    }))
-                                }
+                                        paquete: archivo ?? null,
+                                    }));
+                                }}
                                 className="cursor-pointer file:mr-2 file:cursor-pointer file:rounded file:border-0 file:bg-muted file:px-2 file:py-0.5 file:text-xs"
                             />
                             <span className="text-xs text-muted-foreground">

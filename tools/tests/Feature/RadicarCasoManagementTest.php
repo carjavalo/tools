@@ -1022,7 +1022,7 @@ test('modificar el radicado y subir el PDF no exige la Fecha Recibido Serv', fun
         ->and($caso->paquete)->not->toBeNull();
 });
 
-test('el paquete rechaza archivos que no sean PDF o pasen de 30 MB', function () {
+test('el paquete acepta PDF de hasta 100 MB y rechaza los que no sean PDF o pasen de 100 MB', function () {
     Storage::fake('public');
     $admin = User::factory()->create();
     $cups = Cups::create(['Nombre' => 'Proc', 'Estado' => true]);
@@ -1042,10 +1042,10 @@ test('el paquete rechaza archivos que no sean PDF o pasen de 30 MB', function ()
 
     $this->actingAs($admin)
         ->putJson("/tools/radicar-solicitud/{$caso->codrad}", $base + [
-            'paquete' => UploadedFile::fake()->create('grande.pdf', 31 * 1024, 'application/pdf'),
+            'paquete' => UploadedFile::fake()->create('grande.pdf', 101 * 1024, 'application/pdf'),
         ])
         ->assertStatus(422)
-        ->assertJsonValidationErrors(['paquete']);
+        ->assertJsonValidationErrors(['paquete' => 'El paquete no puede superar 100 MB.']);
 
     $this->actingAs($admin)
         ->putJson("/tools/radicar-solicitud/{$caso->codrad}", $base + [
@@ -1055,6 +1055,15 @@ test('el paquete rechaza archivos que no sean PDF o pasen de 30 MB', function ()
         ->assertJsonValidationErrors(['paquete']);
 
     expect($caso->refresh()->paquete)->toBeNull();
+
+    // Antes el tope era 30 MB: uno de 50 MB ahora sí se acepta.
+    $this->actingAs($admin)
+        ->putJson("/tools/radicar-solicitud/{$caso->codrad}", $base + [
+            'paquete' => UploadedFile::fake()->create('escaneo-grande.pdf', 50 * 1024, 'application/pdf'),
+        ])
+        ->assertOk();
+
+    expect($caso->refresh()->paquete)->not->toBeNull();
 });
 
 test('las fechas del caso llegan como Y-m-d y no en formato ISO', function () {

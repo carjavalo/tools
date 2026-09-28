@@ -49,6 +49,13 @@ class RadicarCasoController extends Controller
     /** Filas de trazabilidad que como máximo entran a un informe. */
     private const TOPE_FILAS_INFORME = 5000;
 
+    /**
+     * Tamaño máximo del PDF del paquete, en MB. El PHP del servidor debe
+     * aceptar al menos esto (upload_max_filesize y post_max_size, ver
+     * public/.user.ini); si no, el archivo ni siquiera llega a la validación.
+     */
+    public const PAQUETE_MAX_MB = 100;
+
     private const CAMPOS_TRAZABLES = [
         'Codesp' => 'Especialidad',
         'codsubesp' => 'Subespecialidad',
@@ -147,6 +154,9 @@ class RadicarCasoController extends Controller
             // filas visibles que nadie podría filtrar.
             'estadosFiltro' => EstRadicado::orderBy('Nombre')->get(['id', 'Nombre']),
             'defaultEstadoId' => $defaultEstadoId,
+            // Tope del PDF del paquete, para la etiqueta y el aviso previo del
+            // formulario (el servidor lo valida igual).
+            'paqueteMaxMb' => self::PAQUETE_MAX_MB,
             // Servicio Asignado de Nueva Radicación: solo los activos de la
             // sede activa (el modelo filtra por sede, también al Super Admin:
             // la radicación nace en la sede por la que se ingresó).
@@ -915,6 +925,7 @@ class RadicarCasoController extends Controller
             'procedimientos.*.cusv_id' => ['required', 'integer', 'exists:cups,id'],
             'procedimientos.*.N_Autorizacion' => ['required', 'string', 'max:20'],
         ], [
+            ...$this->mensajesPaquete(),
             'Ndocumento.exists' => 'El paciente no está registrado. Créelo con el botón + antes de radicar.',
             'date_format' => 'La :attribute no es válida: revise el año, debe tener 4 dígitos.',
             'procedimientos.required' => 'Debe agregar al menos un procedimiento (CUPS).',
@@ -1060,6 +1071,7 @@ class RadicarCasoController extends Controller
             'procedimientos.*.N_Autorizacion' => ['nullable', 'string', 'max:20'],
         ], [
             'date_format' => 'La :attribute no es válida: revise el año, debe tener 4 dígitos.',
+            ...$this->mensajesPaquete(),
             'procedimientos.required' => 'Debe conservar al menos un procedimiento (CUPS).',
             'procedimientos.min' => 'Debe conservar al menos un procedimiento (CUPS).',
             'procedimientos.*.cusv_id.required' => 'Seleccione el código CUPS.',
@@ -2234,14 +2246,28 @@ class RadicarCasoController extends Controller
     }
 
     /**
-     * Regla de validación del PDF del paquete. 30 MB expresados en kilobytes,
-     * que es la unidad que espera la regla 'max' de Laravel para archivos.
+     * Regla de validación del PDF del paquete. El tope va en kilobytes, que es
+     * la unidad que espera la regla 'max' de Laravel para archivos.
      *
      * @return array<int, string>
      */
     private function reglasPaquete(): array
     {
-        return ['nullable', 'file', 'mimes:pdf', 'max:'.(30 * 1024)];
+        return ['nullable', 'file', 'mimes:pdf', 'max:'.(self::PAQUETE_MAX_MB * 1024)];
+    }
+
+    /**
+     * Mensajes de la validación del paquete, iguales al radicar y al modificar.
+     *
+     * @return array<string, string>
+     */
+    private function mensajesPaquete(): array
+    {
+        return [
+            'paquete.max' => 'El paquete no puede superar '.self::PAQUETE_MAX_MB.' MB.',
+            'paquete.mimes' => 'El paquete debe ser un archivo PDF.',
+            'paquete.uploaded' => 'No se pudo subir el paquete: revise que no supere '.self::PAQUETE_MAX_MB.' MB.',
+        ];
     }
 
     /**

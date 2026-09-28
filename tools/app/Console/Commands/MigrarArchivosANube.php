@@ -109,7 +109,7 @@ class MigrarArchivosANube extends Command
 
                 try {
                     // Se transmite con el manejador del origen para no cargar
-                    // en memoria PDF que pueden llegar a 30 MB.
+                    // en memoria PDF que pueden llegar a 100 MB.
                     $manejador = $discoOrigen->readStream($ruta);
                     Almacenamiento::disco()->put($ruta, $manejador);
 

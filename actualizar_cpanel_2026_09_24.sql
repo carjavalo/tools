@@ -136,39 +136,25 @@ WHERE NOT EXISTS (
 
 
 -- ---------------------------------------------------------------------------
--- 6) Verificación: una sola consulta (phpMyAdmin muestra solo la última).
---    Todas las filas deben decir OK.
+-- 6) Verificación: UNA fila con 6 columnas, todas deben decir OK.
+--    Se arma con el nombre de la base delante de `migrations`: algunas
+--    versiones de MySQL, al mezclarla con information_schema en la misma
+--    consulta, la buscaban allí y respondían "Tabla desconocida 'migrations'".
 -- ---------------------------------------------------------------------------
 
-SELECT 'programacion_caso.codestsecundario' AS `cambio`,
-  IF(COUNT(*) = 1, 'OK', 'FALTA') AS `resultado`
-FROM information_schema.`COLUMNS`
-WHERE `TABLE_SCHEMA` = DATABASE() AND `TABLE_NAME` = 'programacion_caso' AND `COLUMN_NAME` = 'codestsecundario'
-UNION ALL
-SELECT 'users.rol = varchar(120)', IF(MAX(`COLUMN_TYPE`) = 'varchar(120)', 'OK', 'FALTA')
-FROM information_schema.`COLUMNS`
-WHERE `TABLE_SCHEMA` = DATABASE() AND `TABLE_NAME` = 'users' AND `COLUMN_NAME` = 'rol'
-UNION ALL
-SELECT 'auditoria.rol = varchar(120)', IF(MAX(`COLUMN_TYPE`) = 'varchar(120)', 'OK', 'FALTA')
-FROM information_schema.`COLUMNS`
-WHERE `TABLE_SCHEMA` = DATABASE() AND `TABLE_NAME` = 'auditoria' AND `COLUMN_NAME` = 'rol'
-UNION ALL
-SELECT 'serasignado: codigo, sede, nombre, descripcion, estado', IF(COUNT(*) = 5, 'OK', 'FALTA')
-FROM information_schema.`COLUMNS`
-WHERE `TABLE_SCHEMA` = DATABASE() AND `TABLE_NAME` = 'serasignado'
-  AND `COLUMN_NAME` IN ('codigo', 'sede', 'nombre', 'descripcion', 'estado')
-UNION ALL
-SELECT 'RadicarCaso.codservicio', IF(COUNT(*) = 1, 'OK', 'FALTA')
-FROM information_schema.`COLUMNS`
-WHERE `TABLE_SCHEMA` = DATABASE() AND `TABLE_NAME` = 'RadicarCaso' AND `COLUMN_NAME` = 'codservicio'
-UNION ALL
-SELECT 'migraciones registradas (6)', IF(COUNT(*) = 6, 'OK', 'FALTA')
-FROM `migrations`
-WHERE `migration` IN (
-  '2026_09_22_000001_add_codestsecundario_to_programacion_caso_table',
-  '2026_09_23_000001_widen_rol_columns',
-  '2026_09_23_000002_create_serasignado_table',
-  '2026_09_23_000003_add_estado_to_serasignado_table',
-  '2026_09_24_000001_add_sede_to_serasignado_table',
-  '2026_09_24_000002_add_codservicio_to_radicar_caso_table'
+SET @verificacion := CONCAT(
+  'SELECT ',
+  '(SELECT IF(COUNT(*) = 1, ''OK'', ''FALTA'') FROM information_schema.`COLUMNS` WHERE `TABLE_SCHEMA` = DATABASE() AND `TABLE_NAME` = ''programacion_caso'' AND `COLUMN_NAME` = ''codestsecundario'') AS `programacion_estado_qx`, ',
+  '(SELECT IF(MAX(`COLUMN_TYPE`) = ''varchar(120)'', ''OK'', ''FALTA'') FROM information_schema.`COLUMNS` WHERE `TABLE_SCHEMA` = DATABASE() AND `TABLE_NAME` = ''users'' AND `COLUMN_NAME` = ''rol'') AS `users_rol_120`, ',
+  '(SELECT IF(MAX(`COLUMN_TYPE`) = ''varchar(120)'', ''OK'', ''FALTA'') FROM information_schema.`COLUMNS` WHERE `TABLE_SCHEMA` = DATABASE() AND `TABLE_NAME` = ''auditoria'' AND `COLUMN_NAME` = ''rol'') AS `auditoria_rol_120`, ',
+  '(SELECT IF(COUNT(*) = 5, ''OK'', ''FALTA'') FROM information_schema.`COLUMNS` WHERE `TABLE_SCHEMA` = DATABASE() AND `TABLE_NAME` = ''serasignado'' AND `COLUMN_NAME` IN (''codigo'', ''sede'', ''nombre'', ''descripcion'', ''estado'')) AS `serasignado_completa`, ',
+  '(SELECT IF(COUNT(*) = 1, ''OK'', ''FALTA'') FROM information_schema.`COLUMNS` WHERE `TABLE_SCHEMA` = DATABASE() AND `TABLE_NAME` = ''RadicarCaso'' AND `COLUMN_NAME` = ''codservicio'') AS `radicar_codservicio`, ',
+  '(SELECT IF(COUNT(*) = 6, ''OK'', ''FALTA'') FROM `', DATABASE(), '`.`migrations` WHERE `migration` IN (',
+    '''2026_09_22_000001_add_codestsecundario_to_programacion_caso_table'', ',
+    '''2026_09_23_000001_widen_rol_columns'', ',
+    '''2026_09_23_000002_create_serasignado_table'', ',
+    '''2026_09_23_000003_add_estado_to_serasignado_table'', ',
+    '''2026_09_24_000001_add_sede_to_serasignado_table'', ',
+    '''2026_09_24_000002_add_codservicio_to_radicar_caso_table'')) AS `migraciones_6`'
 );
+PREPARE verificar FROM @verificacion; EXECUTE verificar; DEALLOCATE PREPARE verificar;
