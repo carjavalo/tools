@@ -3199,6 +3199,56 @@ export default function RadicarSolicitud({
         permisosUsuario['radicar-solicitud-subir-paquete']?.ver === true;
 
     /**
+     * Versión compacta del botón "Subir paquete", junto al "Ver PDF" del
+     * detalle del caso. Es para los roles que no tienen ninguno de los dos
+     * formularios Aplicar Modificaciones (completo ni Hemo).
+     */
+    const botonPaqueteCompacto = () =>
+        caso && (
+            <>
+                <input
+                    type="file"
+                    accept="application/pdf"
+                    className="hidden"
+                    onChange={(e) => subirPaquete(e.target)}
+                />
+                <button
+                    type="button"
+                    disabled={subiendoPaquete}
+                    onClick={(e) =>
+                        (
+                            e.currentTarget
+                                .previousElementSibling as HTMLInputElement | null
+                        )?.click()
+                    }
+                    title={`${caso.paqueteUrl ? 'Reemplazar' : 'Subir'} el PDF del paquete (máx. ${paqueteMaxMb} MB)`}
+                    className="inline-flex items-center gap-1.5 rounded-md bg-[#2d3e83]/10 px-2.5 py-1 text-xs font-medium text-[#2d3e83] transition-colors hover:bg-[#2d3e83]/20 disabled:opacity-60 dark:bg-white/10 dark:text-white"
+                >
+                    {subiendoPaquete ? (
+                        <LoaderCircle className="size-3.5 animate-spin" />
+                    ) : (
+                        <Upload className="size-3.5" />
+                    )}
+                    {subiendoPaquete
+                        ? 'Subiendo…'
+                        : caso.paqueteUrl
+                          ? 'Cambiar paquete'
+                          : 'Subir paquete'}
+                </button>
+                {paqueteError && (
+                    <span className="w-full text-xs font-normal text-red-600 dark:text-red-400">
+                        {paqueteError}
+                    </span>
+                )}
+                {paqueteOk && !paqueteError && (
+                    <span className="w-full text-xs font-normal text-green-700 dark:text-green-400">
+                        Paquete guardado.
+                    </span>
+                )}
+            </>
+        );
+
+    /**
      * Campo "Subir paquete": lo comparten el formulario Aplicar Modificaciones
      * y el Hemo. Cada uno lleva su propio input oculto; el botón abre el que
      * tiene al lado, así no chocan cuando el rol ve los dos formularios.
@@ -4885,29 +4935,40 @@ export default function RadicarSolicitud({
                                             <Dato
                                                 label="Paquete"
                                                 value={
-                                                    caso.paqueteUrl ? (
-                                                        // Se abre en una
-                                                        // pestaña aparte: el
-                                                        // visor del navegador
-                                                        // da toda la pantalla
-                                                        // y permite
-                                                        // seleccionar y
-                                                        // copiar el texto.
-                                                        <a
-                                                            href={
-                                                                caso.paqueteUrl
-                                                            }
-                                                            target="_blank"
-                                                            rel="noreferrer"
-                                                            title={`Abrir ${caso.paquete} en una pestaña nueva`}
-                                                            className="inline-flex items-center gap-1.5 rounded-md bg-[#2d3e83]/10 px-2.5 py-1 text-xs font-medium text-[#2d3e83] transition-colors hover:bg-[#2d3e83]/20 dark:bg-white/10 dark:text-white"
-                                                        >
-                                                            <Eye className="size-3.5" />
-                                                            Ver PDF
-                                                        </a>
-                                                    ) : (
-                                                        '—'
-                                                    )
+                                                    <span className="inline-flex flex-wrap items-center gap-2">
+                                                        {caso.paqueteUrl ? (
+                                                            // Se abre en una
+                                                            // pestaña aparte: el
+                                                            // visor del navegador
+                                                            // da toda la pantalla
+                                                            // y permite
+                                                            // seleccionar y
+                                                            // copiar el texto.
+                                                            <a
+                                                                href={
+                                                                    caso.paqueteUrl
+                                                                }
+                                                                target="_blank"
+                                                                rel="noreferrer"
+                                                                title={`Abrir ${caso.paquete} en una pestaña nueva`}
+                                                                className="inline-flex items-center gap-1.5 rounded-md bg-[#2d3e83]/10 px-2.5 py-1 text-xs font-medium text-[#2d3e83] transition-colors hover:bg-[#2d3e83]/20 dark:bg-white/10 dark:text-white"
+                                                            >
+                                                                <Eye className="size-3.5" />
+                                                                Ver PDF
+                                                            </a>
+                                                        ) : (
+                                                            '—'
+                                                        )}
+                                                        {/* Sin ninguno de los dos
+                                                        formularios (completo o
+                                                        Hemo), el botón Subir
+                                                        paquete va aquí, junto
+                                                        al PDF. */}
+                                                        {puedeSubirPaquete &&
+                                                            !puedeAplicarModificaciones &&
+                                                            !puedeAplicarModificacionesHemo &&
+                                                            botonPaqueteCompacto()}
+                                                    </span>
                                                 }
                                             />
                                         </div>
