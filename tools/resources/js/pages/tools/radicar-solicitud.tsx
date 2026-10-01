@@ -1218,7 +1218,6 @@ export default function RadicarSolicitud({
     const [subiendoPaquete, setSubiendoPaquete] = useState(false);
     const [paqueteOk, setPaqueteOk] = useState(false);
     const [paqueteError, setPaqueteError] = useState<string | null>(null);
-    const paqueteInputRef = useRef<HTMLInputElement>(null);
     // Formulario básico: estado propio para que, cuando un rol tenga los dos
     // formularios, lo que se escriba en uno no se mezcle con el otro ni sus
     // avisos de guardado se enciendan a la vez.
@@ -3198,6 +3197,72 @@ export default function RadicarSolicitud({
     const puedeSubirPaquete =
         esSuperAdmin ||
         permisosUsuario['radicar-solicitud-subir-paquete']?.ver === true;
+
+    /**
+     * Campo "Subir paquete": lo comparten el formulario Aplicar Modificaciones
+     * y el Hemo. Cada uno lleva su propio input oculto; el botón abre el que
+     * tiene al lado, así no chocan cuando el rol ve los dos formularios.
+     */
+    const campoPaquete = () =>
+        caso && (
+            <Field label={`Paquete (PDF, máx. ${paqueteMaxMb} MB)`}>
+                <input
+                    type="file"
+                    accept="application/pdf"
+                    className="hidden"
+                    onChange={(e) => subirPaquete(e.target)}
+                />
+                <Button
+                    type="button"
+                    variant="outline"
+                    disabled={subiendoPaquete}
+                    onClick={(e) =>
+                        (
+                            e.currentTarget
+                                .previousElementSibling as HTMLInputElement | null
+                        )?.click()
+                    }
+                    title={
+                        caso.paqueteUrl
+                            ? 'Reemplazar el PDF del paquete del caso'
+                            : 'Subir el PDF del paquete del caso'
+                    }
+                    className="w-full justify-start gap-2 text-[#2d3e83] dark:text-white"
+                >
+                    {subiendoPaquete ? (
+                        <LoaderCircle className="size-4 animate-spin" />
+                    ) : (
+                        <Upload className="size-4" />
+                    )}
+                    {subiendoPaquete
+                        ? 'Subiendo…'
+                        : caso.paqueteUrl
+                          ? 'Cambiar paquete'
+                          : 'Subir paquete'}
+                </Button>
+                <span className="text-xs text-muted-foreground">
+                    {paqueteError ? (
+                        <span className="text-red-600 dark:text-red-400">
+                            {paqueteError}
+                        </span>
+                    ) : caso.paqueteUrl ? (
+                        <>
+                            {paqueteOk ? 'Paquete guardado: ' : 'Actual: '}
+                            <a
+                                href={caso.paqueteUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="underline"
+                            >
+                                {caso.paquete}
+                            </a>
+                        </>
+                    ) : (
+                        'Sin archivo adjunto.'
+                    )}
+                </span>
+            </Field>
+        );
     const hayAccionesProgramados =
         puedeVerRadicadoProgramado ||
         puedeEditarProgramacion ||
@@ -5529,81 +5594,8 @@ export default function RadicarSolicitud({
                                                     campos de programación. Se
                                                     sube aparte, sin aplicar el
                                                     resto del formulario. */}
-                                                {puedeSubirPaquete && (
-                                                    <Field
-                                                        label={`Paquete (PDF, máx. ${paqueteMaxMb} MB)`}
-                                                    >
-                                                        <input
-                                                            ref={
-                                                                paqueteInputRef
-                                                            }
-                                                            type="file"
-                                                            accept="application/pdf"
-                                                            className="hidden"
-                                                            onChange={(e) =>
-                                                                subirPaquete(
-                                                                    e.target,
-                                                                )
-                                                            }
-                                                        />
-                                                        <Button
-                                                            type="button"
-                                                            variant="outline"
-                                                            disabled={
-                                                                subiendoPaquete
-                                                            }
-                                                            onClick={() =>
-                                                                paqueteInputRef.current?.click()
-                                                            }
-                                                            title={
-                                                                caso.paqueteUrl
-                                                                    ? 'Reemplazar el PDF del paquete del caso'
-                                                                    : 'Subir el PDF del paquete del caso'
-                                                            }
-                                                            className="w-full justify-start gap-2 text-[#2d3e83] dark:text-white"
-                                                        >
-                                                            {subiendoPaquete ? (
-                                                                <LoaderCircle className="size-4 animate-spin" />
-                                                            ) : (
-                                                                <Upload className="size-4" />
-                                                            )}
-                                                            {subiendoPaquete
-                                                                ? 'Subiendo…'
-                                                                : caso.paqueteUrl
-                                                                  ? 'Cambiar paquete'
-                                                                  : 'Subir paquete'}
-                                                        </Button>
-                                                        <span className="text-xs text-muted-foreground">
-                                                            {paqueteError ? (
-                                                                <span className="text-red-600 dark:text-red-400">
-                                                                    {
-                                                                        paqueteError
-                                                                    }
-                                                                </span>
-                                                            ) : caso.paqueteUrl ? (
-                                                                <>
-                                                                    {paqueteOk
-                                                                        ? 'Paquete guardado: '
-                                                                        : 'Actual: '}
-                                                                    <a
-                                                                        href={
-                                                                            caso.paqueteUrl
-                                                                        }
-                                                                        target="_blank"
-                                                                        rel="noreferrer"
-                                                                        className="underline"
-                                                                    >
-                                                                        {
-                                                                            caso.paquete
-                                                                        }
-                                                                    </a>
-                                                                </>
-                                                            ) : (
-                                                                'Sin archivo adjunto.'
-                                                            )}
-                                                        </span>
-                                                    </Field>
-                                                )}
+                                                {puedeSubirPaquete &&
+                                                    campoPaquete()}
                                                 <ObservacionesCcx
                                                     className="lg:col-span-3"
                                                     registrado={
@@ -5959,6 +5951,13 @@ export default function RadicarSolicitud({
                                                             </Field>
                                                         </>
                                                     )}
+                                                    {/* Paquete en el formulario
+                                                        Hemo: de último, tras
+                                                        Estado QX y la
+                                                        programación. */}
+                                                    {f.key === 'hemo' &&
+                                                        puedeSubirPaquete &&
+                                                        campoPaquete()}
                                                     <ObservacionesCcx
                                                         className="md:col-span-2 lg:col-span-3"
                                                         registrado={
