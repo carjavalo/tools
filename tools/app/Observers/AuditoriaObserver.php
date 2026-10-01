@@ -15,6 +15,7 @@ use App\Models\EstRadisecundario;
 use App\Models\Motivo;
 use App\Models\Permiso;
 use App\Models\RadicarCaso;
+use App\Models\QuirofanoQx;
 use App\Models\Regimen;
 use App\Models\Role;
 use App\Models\SeguimientoCaso;
@@ -60,6 +61,7 @@ class AuditoriaObserver
             EstRadisecundario::class,
             Motivo::class,
             Serasignado::class,
+            QuirofanoQx::class,
             Eps::class,
             Convenio::class,
             Regimen::class,

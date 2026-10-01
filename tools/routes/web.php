@@ -109,6 +109,10 @@ Route::prefix('tools')->name('tools.')->group(function () {
         Route::post('gestion-servicios', [App\Http\Controllers\ServicioManagementController::class, 'store'])->name('gestion-servicios.store');
         Route::put('gestion-servicios/{servicio}', [App\Http\Controllers\ServicioManagementController::class, 'update'])->whereNumber('servicio')->name('gestion-servicios.update');
         Route::delete('gestion-servicios/{servicio}', [App\Http\Controllers\ServicioManagementController::class, 'destroy'])->whereNumber('servicio')->name('gestion-servicios.destroy');
+        Route::get('gestion-quirofano-qx', [App\Http\Controllers\QuirofanoQxController::class, 'index'])->name('gestion-quirofano-qx');
+        Route::post('gestion-quirofano-qx', [App\Http\Controllers\QuirofanoQxController::class, 'store'])->name('gestion-quirofano-qx.store');
+        Route::put('gestion-quirofano-qx/{quirofano}', [App\Http\Controllers\QuirofanoQxController::class, 'update'])->whereNumber('quirofano')->name('gestion-quirofano-qx.update');
+        Route::delete('gestion-quirofano-qx/{quirofano}', [App\Http\Controllers\QuirofanoQxController::class, 'destroy'])->whereNumber('quirofano')->name('gestion-quirofano-qx.destroy');
 
         // Gestión de Roles (CRUD)
         Route::get('gestion-roles', [App\Http\Controllers\RoleManagementController::class, 'index'])->name('gestion-roles');

@@ -18,6 +18,7 @@ import {
     CalendarClock,
     ClipboardCheck,
     ClipboardList,
+    DoorOpen,
     FilePlus2,
     Flag,
     FlagTriangleRight,
@@ -68,6 +69,11 @@ const mainNavItems: NavItem[] = [
                 title: 'Gestión Servicios',
                 href: '/tools/gestion-servicios',
                 icon: BriefcaseMedical,
+            },
+            {
+                title: 'Gestión Quirófanos QX',
+                href: '/tools/gestion-quirofano-qx',
+                icon: DoorOpen,
             },
             {
                 title: 'Gestión de Roles',

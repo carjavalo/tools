@@ -67,6 +67,7 @@ class Permiso extends Model
         ['key' => 'radicar-solicitud-subir-paquete', 'titulo' => 'Asignar subir paquete', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver']],
         ['key' => 'gestion-usuarios', 'titulo' => 'Gestión de Usuarios', 'grupo' => 'Herramientas', 'acciones' => ['ver', 'crear', 'editar', 'borrar']],
         ['key' => 'gestion-servicios', 'titulo' => 'Gestión Servicios', 'grupo' => 'Herramientas', 'acciones' => ['ver', 'crear', 'editar', 'borrar']],
+        ['key' => 'gestion-quirofano-qx', 'titulo' => 'Gestión Quirófanos QX', 'grupo' => 'Herramientas', 'acciones' => ['ver', 'crear', 'editar', 'borrar']],
         ['key' => 'gestion-roles', 'titulo' => 'Gestión de Roles', 'grupo' => 'Herramientas', 'acciones' => ['ver', 'crear', 'editar', 'borrar']],
         ['key' => 'gestion-eps', 'titulo' => 'Gestión de EPS', 'grupo' => 'Herramientas', 'acciones' => ['ver', 'crear', 'editar', 'borrar']],
         ['key' => 'gestion-convenios', 'titulo' => 'Gestión Convenios', 'grupo' => 'Herramientas', 'acciones' => ['ver', 'crear', 'editar', 'borrar']],

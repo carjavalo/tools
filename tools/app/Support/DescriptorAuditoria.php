@@ -37,6 +37,7 @@ class DescriptorAuditoria
         'EstRadisecundario' => 'el estado QX',
         'Motivo' => 'el motivo',
         'Serasignado' => 'el servicio',
+        'QuirofanoQx' => 'el quirófano',
         'Eps' => 'la EPS',
         'Convenio' => 'el convenio',
         'Regimen' => 'el régimen',
