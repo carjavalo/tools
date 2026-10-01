@@ -70,6 +70,20 @@ class CheckPermisoVista
                 return $this->denegar($request, 'ver');
             }
 
+            // Botón "Subir paquete" (Aplicar Modificaciones): se rige solo por
+            // su sub-vista y hay que asignarla expresamente al rol.
+            if ($sub !== null && ctype_digit($sub) && $sub4 === 'paquete' && $request->isMethod('POST')) {
+                $permisoPaquete = Permiso::where('role_id', $role->id)
+                    ->where('vista', 'radicar-solicitud-subir-paquete')
+                    ->first();
+
+                if (! $permisoPaquete || ! $permisoPaquete->ver) {
+                    return $this->denegar($request, 'ver');
+                }
+
+                return $next($request);
+            }
+
             $tab = match (true) {
                 $sub === 'buscar-caso' => 'radicar-solicitud-historial',
                 $sub === 'informe' => 'radicar-solicitud-informes',

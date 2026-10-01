@@ -966,6 +966,56 @@ test('el paquete se sube, se reemplaza y borra el archivo anterior', function ()
     expect($caso->refresh()->paquete)->toBe($segundo);
 });
 
+test('el botón Subir paquete reemplaza el PDF y solo lo usa el rol asignado', function () {
+    Storage::fake('public');
+    $rol = Role::create(['Nombre' => 'Sube Paquete', 'Estado' => true]);
+    $usuario = User::factory()->create(['rol' => 'Sube Paquete']);
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud', 'ver' => true]);
+    $caso = RadicarCaso::create(['Ndocumento' => '9700', 'estRad' => '1']);
+
+    // Sin asignar "Asignar subir paquete" no se permite.
+    $this->actingAs($usuario)
+        ->postJson("/tools/radicar-solicitud/{$caso->codrad}/paquete", [
+            'paquete' => UploadedFile::fake()->create('uno.pdf', 64, 'application/pdf'),
+        ])
+        ->assertForbidden();
+
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud-subir-paquete', 'ver' => true]);
+
+    $this->actingAs($usuario)
+        ->postJson("/tools/radicar-solicitud/{$caso->codrad}/paquete", [
+            'paquete' => UploadedFile::fake()->create('uno.pdf', 64, 'application/pdf'),
+        ])
+        ->assertOk()
+        ->assertJsonPath('ok', true);
+
+    $primero = $caso->refresh()->paquete;
+    Storage::disk('public')->assertExists($primero);
+
+    $this->actingAs($usuario)
+        ->postJson("/tools/radicar-solicitud/{$caso->codrad}/paquete", [
+            'paquete' => UploadedFile::fake()->create('dos.pdf', 64, 'application/pdf'),
+        ])
+        ->assertOk();
+
+    $segundo = $caso->refresh()->paquete;
+    expect($segundo)->not->toBe($primero);
+    Storage::disk('public')->assertExists($segundo);
+    Storage::disk('public')->assertMissing($primero);
+
+    // Sin archivo, o con uno que no es PDF, se rechaza.
+    $this->actingAs($usuario)
+        ->postJson("/tools/radicar-solicitud/{$caso->codrad}/paquete", [])
+        ->assertUnprocessable();
+    $this->actingAs($usuario)
+        ->postJson("/tools/radicar-solicitud/{$caso->codrad}/paquete", [
+            'paquete' => UploadedFile::fake()->create('foto.png', 10, 'image/png'),
+        ])
+        ->assertUnprocessable();
+
+    expect(Permiso::VISTAS_OPT_IN)->toContain('radicar-solicitud-subir-paquete');
+});
+
 test('el paquete se guarda con el radicado y el documento del paciente en el nombre', function () {
     Storage::fake('public');
     $admin = User::factory()->create();

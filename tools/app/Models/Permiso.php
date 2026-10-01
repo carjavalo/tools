@@ -56,6 +56,10 @@ class Permiso extends Model
         // "Grilla ver programados".
         ['key' => 'radicar-solicitud-ver-programados', 'titulo' => 'Botón Ver programados (Formulario Aplicar Modificaciones)', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver']],
         ['key' => 'radicar-solicitud-ver-programados-hemo', 'titulo' => 'Botón Ver programados Hemo (Formulario Aplicar Modificaciones Hemo)', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver']],
+        // Botón "Subir paquete" del formulario Aplicar Modificaciones: deja
+        // subir o reemplazar el PDF del paquete de un caso ya radicado (el
+        // mismo de Nueva Radicación / Radicado Hospitalario). Viene apagado.
+        ['key' => 'radicar-solicitud-subir-paquete', 'titulo' => 'Asignar subir paquete', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver']],
         ['key' => 'gestion-usuarios', 'titulo' => 'Gestión de Usuarios', 'grupo' => 'Herramientas', 'acciones' => ['ver', 'crear', 'editar', 'borrar']],
         ['key' => 'gestion-servicios', 'titulo' => 'Gestión Servicios', 'grupo' => 'Herramientas', 'acciones' => ['ver', 'crear', 'editar', 'borrar']],
         ['key' => 'gestion-roles', 'titulo' => 'Gestión de Roles', 'grupo' => 'Herramientas', 'acciones' => ['ver', 'crear', 'editar', 'borrar']],
@@ -90,6 +94,7 @@ class Permiso extends Model
         'radicar-solicitud-programados',
         'radicar-solicitud-ver-programados',
         'radicar-solicitud-ver-programados-hemo',
+        'radicar-solicitud-subir-paquete',
     ];
 
     /**

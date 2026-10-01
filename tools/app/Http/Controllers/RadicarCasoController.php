@@ -2224,6 +2224,46 @@ class RadicarCasoController extends Controller
     }
 
     /**
+     * Sube o reemplaza el PDF del paquete de un caso ya radicado (botón
+     * "Subir paquete" del formulario Aplicar Modificaciones). Es para cuando
+     * la radicación quedó con el documento pendiente. El permiso lo valida el
+     * middleware con la sub-vista "Asignar subir paquete".
+     */
+    public function subirPaquete(Request $request, RadicarCaso $caso): JsonResponse
+    {
+        $request->validate([
+            'paquete' => ['required', ...array_slice($this->reglasPaquete(), 1)],
+        ], [
+            'paquete.required' => 'Seleccione el PDF del paquete.',
+            ...$this->mensajesPaquete(),
+        ]);
+
+        $paqueteAnterior = $caso->paquete;
+        $nuevo = $this->guardarPaquete($request, $paqueteAnterior, $caso->codrad, $caso->Ndocumento);
+
+        // Igual que al modificar el radicado: el cambio y su rastro en la
+        // bitácora van juntos.
+        try {
+            DB::transaction(function () use ($caso, $nuevo, $request) {
+                $antes = $caso->getRawOriginal();
+                $caso->update(['paquete' => $nuevo]);
+                $this->registrarCambios($caso, $antes, $request, 'modificacion');
+            });
+        } catch (\Throwable $e) {
+            $this->limpiarPaquete($nuevo, $paqueteAnterior);
+
+            throw $e;
+        }
+
+        $this->limpiarPaquete($paqueteAnterior, $caso->paquete);
+
+        return response()->json([
+            'ok' => true,
+            'caso' => $this->casoDetalle($caso->fresh()),
+        ]);
+    }
+
+    /**
      * Muestra el PDF adjunto a una cotización dentro del navegador.
      *
      * Existe por la misma razón que verPaquete: el adjunto se entrega por una
