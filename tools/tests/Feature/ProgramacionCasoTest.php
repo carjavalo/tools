@@ -51,6 +51,66 @@ test('la grilla de Hemo solo trae lo programado por Hemodinamia y la de cirugía
         ->and($idsCx)->toBe(collect([$cx->id, $viejo->id])->sort()->values()->all());
 });
 
+test('la grilla Cvascular solo trae lo programado para Cirugía Cardio Vascular', function () {
+    $admin = User::factory()->create();
+    $programados = EstRadisecundario::create(['Nombre' => 'Programados', 'Estado' => true]);
+    $hemo = EstRadisecundario::create(['Nombre' => 'Programado x Hemodinamia', 'Estado' => true]);
+    $cv = EstRadisecundario::create(['Nombre' => 'Programado Cirugia Cardio Vascular', 'Estado' => true]);
+
+    $cx = ProgramacionCaso::create(['codrad' => RadicarCaso::create(['Ndocumento' => '4300', 'estRad' => '1'])->codrad, 'codestsecundario' => (string) $programados->id]);
+    $hm = ProgramacionCaso::create(['codrad' => RadicarCaso::create(['Ndocumento' => '4301', 'estRad' => '1'])->codrad, 'codestsecundario' => (string) $hemo->id]);
+    $cvp = ProgramacionCaso::create(['codrad' => RadicarCaso::create(['Ndocumento' => '4302', 'estRad' => '1'])->codrad, 'codestsecundario' => (string) $cv->id]);
+
+    $ids = fn (string $url) => collect($this->actingAs($admin)->getJson($url)->assertOk()->json('rows'))->pluck('id')->all();
+
+    expect($ids('/tools/radicar-solicitud/programados?tipo=cvascular'))->toBe([$cvp->id])
+        ->and($ids('/tools/radicar-solicitud/programados?tipo=hemo'))->toBe([$hm->id])
+        ->and($ids('/tools/radicar-solicitud/programados'))->toBe([$cx->id]);
+});
+
+test('el formulario Cvascular programa y su botón da la grilla sin el formulario', function () {
+    $rol = Role::create(['Nombre' => 'Consulta Cvascular', 'Estado' => true]);
+    $usuario = User::factory()->create(['rol' => 'Consulta Cvascular']);
+    $cv = EstRadisecundario::create(['Nombre' => 'Programado Cirugia Cardio Vascular', 'Estado' => true]);
+    $caso = RadicarCaso::create(['Ndocumento' => '4310', 'estRad' => '1']);
+
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud', 'ver' => true]);
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud-seguimiento', 'ver' => false]);
+
+    // Sin el formulario Cvascular ni su botón: no entra ni guarda.
+    $this->actingAs($usuario)
+        ->getJson('/tools/radicar-solicitud/programados?tipo=cvascular')
+        ->assertForbidden();
+    $this->actingAs($usuario)
+        ->postJson("/tools/radicar-solicitud/{$caso->codrad}/seguimiento", ['codestsecundario' => (string) $cv->id])
+        ->assertForbidden();
+
+    // Con el formulario Cvascular: guarda la programación y ve su grilla.
+    $form = Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud-seguimiento-cvascular', 'ver' => true]);
+    $this->actingAs($usuario)
+        ->postJson("/tools/radicar-solicitud/{$caso->codrad}/seguimiento", ['codestsecundario' => (string) $cv->id])
+        ->assertOk();
+    expect(ProgramacionCaso::where('codrad', $caso->codrad)->value('codestsecundario'))->toBe((string) $cv->id);
+    $this->actingAs($usuario)
+        ->getJson('/tools/radicar-solicitud/programados?tipo=cvascular')
+        ->assertOk()
+        ->assertJsonCount(1, 'rows');
+
+    // Solo con el botón "Ver prog Cvascular" (p. ej. los médicos): ve la
+    // grilla Cvascular, pero no la de Hemo.
+    $form->delete();
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud-ver-programados-cvascular', 'ver' => true]);
+    $this->actingAs($usuario)
+        ->getJson('/tools/radicar-solicitud/programados?tipo=cvascular')
+        ->assertOk();
+    $this->actingAs($usuario)
+        ->getJson('/tools/radicar-solicitud/programados?tipo=hemo')
+        ->assertForbidden();
+
+    expect(Permiso::VISTAS_OPT_IN)->toContain('radicar-solicitud-ver-programados-cvascular')
+        ->and(Permiso::VISTAS_OPT_IN)->toContain('radicar-solicitud-seguimiento-cvascular');
+});
+
 test('los botones Ver programados se asignan en el Gestor y vienen apagados', function () {
     $claves = collect(Permiso::VISTAS)->pluck('key');
 

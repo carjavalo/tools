@@ -66,7 +66,7 @@ class CheckPermisoVista
 
             // Grilla "Ver programados": la consulta quien tiene el formulario
             // que lleva el botón o el botón suelto asignado en el Gestor.
-            if ($sub === 'programados' && ! $this->puedeVerProgramados($role->id, $request->query('tipo') === 'hemo')) {
+            if ($sub === 'programados' && ! $this->puedeVerProgramados($role->id, (string) $request->query('tipo', ''))) {
                 return $this->denegar($request, 'ver');
             }
 
@@ -192,6 +192,7 @@ class CheckPermisoVista
                 'radicar-solicitud-seguimiento',
                 'radicar-solicitud-seguimiento-basico',
                 'radicar-solicitud-seguimiento-hemo',
+                'radicar-solicitud-seguimiento-cvascular',
             ])
             ->get()
             ->keyBy('vista');
@@ -199,10 +200,12 @@ class CheckPermisoVista
         $completo = $permisos->get('radicar-solicitud-seguimiento');
         $basico = $permisos->get('radicar-solicitud-seguimiento-basico');
         $hemo = $permisos->get('radicar-solicitud-seguimiento-hemo');
+        $cvascular = $permisos->get('radicar-solicitud-seguimiento-cvascular');
 
         return (! $completo || $completo->ver)
             || ($basico && $basico->ver)
-            || ($hemo && $hemo->ver);
+            || ($hemo && $hemo->ver)
+            || ($cvascular && $cvascular->ver);
     }
 
     /**
@@ -211,11 +214,16 @@ class CheckPermisoVista
      * como siempre) y la de Hemo con el formulario Hemo. En los dos casos
      * también la abre el botón suelto, que hay que asignar expresamente.
      */
-    private function puedeVerProgramados(int $roleId, bool $hemo): bool
+    private function puedeVerProgramados(int $roleId, string $tipo): bool
     {
-        [$formulario, $boton] = $hemo
-            ? ['radicar-solicitud-seguimiento-hemo', 'radicar-solicitud-ver-programados-hemo']
-            : ['radicar-solicitud-seguimiento', 'radicar-solicitud-ver-programados'];
+        // Hemo y Cvascular se asignan expresamente; la de cirugía no.
+        $hemo = in_array($tipo, ['hemo', 'cvascular'], true);
+
+        [$formulario, $boton] = match ($tipo) {
+            'hemo' => ['radicar-solicitud-seguimiento-hemo', 'radicar-solicitud-ver-programados-hemo'],
+            'cvascular' => ['radicar-solicitud-seguimiento-cvascular', 'radicar-solicitud-ver-programados-cvascular'],
+            default => ['radicar-solicitud-seguimiento', 'radicar-solicitud-ver-programados'],
+        };
 
         $permisos = Permiso::where('role_id', $roleId)
             ->whereIn('vista', [$formulario, $boton])

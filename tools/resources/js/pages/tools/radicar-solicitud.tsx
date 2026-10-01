@@ -805,6 +805,15 @@ const EMPTY_SEG_HEMO = {
     observaciones_prg: '',
 };
 
+/**
+ * Formulario Cvascular del Historial: copia del Hemo para Cirugía Cardio
+ * Vascular (Estado QX "Programado Cirugia Cardio Vascular").
+ */
+const EMPTY_SEG_CVASCULAR = { ...EMPTY_SEG_HEMO };
+
+/** Qué grilla muestra el modal "Ver programados". */
+type TipoProgramados = 'cirugia' | 'hemo' | 'cvascular';
+
 const EMPTY_INF = {
     fechaInicial: '',
     fechaFinal: '',
@@ -1183,7 +1192,7 @@ export default function RadicarSolicitud({
     // la programación de cirugía ('especialista'). Así el mismo modal sirve a
     // los dos selectores sin pisarse.
     const [medicoDestino, setMedicoDestino] = useState<
-        'codMed' | 'especialista' | 'especialistaHemo'
+        'codMed' | 'especialista' | 'especialistaHemo' | 'especialistaCvascular'
     >('codMed');
     // Lista de médicos del selector: parte de la prop del servidor y crece
     // cuando se crea uno desde el modal, sin recargar la página.
@@ -1230,6 +1239,15 @@ export default function RadicarSolicitud({
     const [aplicandoHemo, setAplicandoHemo] = useState(false);
     const [segHemoOk, setSegHemoOk] = useState(false);
     const [segHemoError, setSegHemoError] = useState<string | null>(null);
+    // Formulario Cvascular: copia del Hemo, con su propio estado.
+    const [segCvascular, setSegCvascular] = useState({
+        ...EMPTY_SEG_CVASCULAR,
+    });
+    const [aplicandoCvascular, setAplicandoCvascular] = useState(false);
+    const [segCvascularOk, setSegCvascularOk] = useState(false);
+    const [segCvascularError, setSegCvascularError] = useState<string | null>(
+        null,
+    );
     const [borrarOpen, setBorrarOpen] = useState(false);
     const [borrarError, setBorrarError] = useState<string | null>(null);
     // El servidor dejó de reconocer la sesión (401 o 419). Se avisa en un
@@ -1240,10 +1258,10 @@ export default function RadicarSolicitud({
     // Estado QX = Programados, con sus datos de programación de cirugía.
     const [programadosOpen, setProgramadosOpen] = useState(false);
     // Qué grilla muestra el modal: la de cirugía (formulario completo) o la de
-    // Hemodinamia (formulario Hemo, Estado QX "Programado x Hemodinamia").
-    const [programadosTipo, setProgramadosTipo] = useState<'cirugia' | 'hemo'>(
-        'cirugia',
-    );
+    // Hemodinamia (formulario Hemo, Estado QX "Programado x Hemodinamia") o la
+    // de Cirugía Cardio Vascular (formulario Cvascular).
+    const [programadosTipo, setProgramadosTipo] =
+        useState<TipoProgramados>('cirugia');
     const [programadosRows, setProgramadosRows] = useState<ProgramadoRow[]>([]);
     const [programadosLoading, setProgramadosLoading] = useState(false);
     const [programadosError, setProgramadosError] = useState<string | null>(
@@ -1816,7 +1834,10 @@ export default function RadicarSolicitud({
     // modal de crear médico, pero el médico creado queda seleccionado en el
     // campo de programación, no en el de Nueva Radicación.
     const openCrearEspecialista = (
-        destino: 'especialista' | 'especialistaHemo' = 'especialista',
+        destino:
+            | 'especialista'
+            | 'especialistaHemo'
+            | 'especialistaCvascular' = 'especialista',
     ) => {
         setUserErrors({});
         setEditandoId(null);
@@ -1946,6 +1967,11 @@ export default function RadicarSolicitud({
                         );
                     } else if (medicoDestino === 'especialistaHemo') {
                         setSegHemoField(
+                            'especialista_medico_id',
+                            String(medico.id),
+                        );
+                    } else if (medicoDestino === 'especialistaCvascular') {
+                        setSegCvascularField(
                             'especialista_medico_id',
                             String(medico.id),
                         );
@@ -2092,6 +2118,24 @@ export default function RadicarSolicitud({
         [estadosSecundarios, segHemo.codestsecundario],
     );
 
+    // Formulario Cvascular: igual que el Hemo.
+    const setSegCvascularField = (campo: string, valor: string) =>
+        setSegCvascular((prev) => ({ ...prev, [campo]: valor }));
+
+    const setEstadoQxCvascular = (valor: string) =>
+        setSegCvascular((prev) => ({ ...prev, ...cambiosEstadoQx(valor) }));
+
+    const segCvascularEsProgramado = useMemo(
+        () =>
+            esEstadoProgramado(
+                estadosSecundarios.find(
+                    (s) =>
+                        String(s.id) === String(segCvascular.codestsecundario),
+                )?.Nombre,
+            ),
+        [estadosSecundarios, segCvascular.codestsecundario],
+    );
+
     // Trae la grilla desde el servidor. Se usa al abrir el modal y después de
     // editar o borrar una fila: como el orden depende de la fecha programada,
     // corregirla puede mover la fila de sitio y solo el servidor sabe dónde.
@@ -2099,9 +2143,9 @@ export default function RadicarSolicitud({
         setProgramadosLoading(true);
         setProgramadosError(null);
         const url =
-            tipo === 'hemo'
-                ? '/tools/radicar-solicitud/programados?tipo=hemo'
-                : '/tools/radicar-solicitud/programados';
+            tipo === 'cirugia'
+                ? '/tools/radicar-solicitud/programados'
+                : `/tools/radicar-solicitud/programados?tipo=${tipo}`;
         fetch(url, {
             headers: { Accept: 'application/json' },
         })
@@ -2135,7 +2179,7 @@ export default function RadicarSolicitud({
     };
 
     // Abre el modal "Ver Programados" y trae la grilla desde el servidor.
-    const abrirProgramados = (tipo: 'cirugia' | 'hemo' = 'cirugia') => {
+    const abrirProgramados = (tipo: TipoProgramados = 'cirugia') => {
         setProgramadosTipo(tipo);
         // Sin esto se veían un instante las filas de la otra grilla.
         setProgramadosRows([]);
@@ -2810,6 +2854,17 @@ export default function RadicarSolicitud({
         );
     };
 
+    const aplicarModificacionCvascular = (e: FormEvent) => {
+        e.preventDefault();
+        enviarSeguimiento(
+            segCvascular,
+            () => setSegCvascular({ ...EMPTY_SEG_CVASCULAR }),
+            setAplicandoCvascular,
+            setSegCvascularOk,
+            setSegCvascularError,
+        );
+    };
+
     const borrarCaso = () => {
         if (!caso) return;
         setBorrando(true);
@@ -3168,6 +3223,12 @@ export default function RadicarSolicitud({
         esSuperAdmin ||
         permisosUsuario['radicar-solicitud-seguimiento-hemo']?.ver === true;
 
+    // Formulario Cvascular (Historial): copia del Hemo, misma regla.
+    const puedeAplicarModificacionesCvascular =
+        esSuperAdmin ||
+        permisosUsuario['radicar-solicitud-seguimiento-cvascular']?.ver ===
+            true;
+
     // Botones de cada fila del modal "Ver programados". Se rigen por la
     // sub-vista "Grilla ver programados" del Gestor de Permisos: "ver" habilita
     // el botón Ver radicado y es la llave de los otros dos, tal como en el
@@ -3192,6 +3253,14 @@ export default function RadicarSolicitud({
     const puedeBotonProgramadosHemo =
         esSuperAdmin ||
         permisosUsuario['radicar-solicitud-ver-programados-hemo']?.ver === true;
+    const puedeBotonProgramadosCvascular =
+        esSuperAdmin ||
+        permisosUsuario['radicar-solicitud-ver-programados-cvascular']?.ver ===
+            true;
+    const hayBotonesProgramados =
+        puedeBotonProgramados ||
+        puedeBotonProgramadosHemo ||
+        puedeBotonProgramadosCvascular;
     // Botón "Subir paquete" del formulario Aplicar Modificaciones: hay que
     // asignarlo en el Gestor de Permisos ("Asignar subir paquete").
     const puedeSubirPaquete =
@@ -3367,8 +3436,7 @@ export default function RadicarSolicitud({
                                 </button>
                             );
                         })}
-                        {(puedeBotonProgramados ||
-                            puedeBotonProgramadosHemo) && (
+                        {hayBotonesProgramados && (
                             <div className="my-auto ml-auto flex flex-wrap gap-2 py-1">
                                 {puedeBotonProgramados && (
                                     <Button
@@ -3396,6 +3464,21 @@ export default function RadicarSolicitud({
                                         Ver programados Hemo
                                     </Button>
                                 )}
+                                {puedeBotonProgramadosCvascular && (
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() =>
+                                            abrirProgramados('cvascular')
+                                        }
+                                        title="Ver las radicaciones programadas para Cirugía Cardio Vascular"
+                                        className="gap-2 text-[#2d3e83] dark:text-white"
+                                    >
+                                        <CalendarClock className="size-4" />
+                                        Ver prog Cvascular
+                                    </Button>
+                                )}
                             </div>
                         )}
                         {/* Todo lo de esta vista es de la sede activa: lo
@@ -3404,7 +3487,7 @@ export default function RadicarSolicitud({
                         {auth.sede && (
                             <span
                                 title="Lo que se radique quedará en esta sede y solo se muestran sus radicaciones. Para trabajar en la otra, ingresa por su opción en el inicio."
-                                className={`my-auto inline-flex${puedeBotonProgramados || puedeBotonProgramadosHemo ? '' : 'ml-auto'} items-center gap-1.5 rounded-full bg-[#2d3e83]/10 px-3 py-1 text-xs font-semibold text-[#2d3e83] dark:bg-white/10 dark:text-white`}
+                                className={`my-auto inline-flex ${hayBotonesProgramados ? '' : 'ml-auto'} items-center gap-1.5 rounded-full bg-[#2d3e83]/10 px-3 py-1 text-xs font-semibold text-[#2d3e83] dark:bg-white/10 dark:text-white`}
                             >
                                 <MapPin className="size-3.5" />
                                 {auth.sede.nombre}
@@ -4967,6 +5050,7 @@ export default function RadicarSolicitud({
                                                         {puedeSubirPaquete &&
                                                             !puedeAplicarModificaciones &&
                                                             !puedeAplicarModificacionesHemo &&
+                                                            !puedeAplicarModificacionesCvascular &&
                                                             botonPaqueteCompacto()}
                                                     </span>
                                                 }
@@ -5728,6 +5812,12 @@ export default function RadicarSolicitud({
                                                     [campo]: valor,
                                                 })),
                                             estadoQx: null,
+                                            sufijo: '',
+                                            tipoProgramados:
+                                                'cirugia' as TipoProgramados,
+                                            tituloProgramados: '',
+                                            destinoEspecialista:
+                                                'especialista' as const,
                                             onSubmit: aplicarModificacionBasica,
                                             ocupado: aplicandoBasico,
                                             ok: segBasicoOk,
@@ -5746,10 +5836,43 @@ export default function RadicarSolicitud({
                                                 esProgramado:
                                                     segHemoEsProgramado,
                                             },
+                                            sufijo: 'Hemo',
+                                            tipoProgramados:
+                                                'hemo' as TipoProgramados,
+                                            tituloProgramados:
+                                                'Ver las radicaciones programadas por Hemodinamia',
+                                            destinoEspecialista:
+                                                'especialistaHemo' as const,
                                             onSubmit: aplicarModificacionHemo,
                                             ocupado: aplicandoHemo,
                                             ok: segHemoOk,
                                             error: segHemoError,
+                                        },
+                                        {
+                                            key: 'cvascular',
+                                            visible:
+                                                puedeAplicarModificacionesCvascular,
+                                            titulo: 'Formulario Cvascular — recepción del servicio',
+                                            valores: segCvascular,
+                                            setCampo: setSegCvascularField,
+                                            estadoQx: {
+                                                valores: segCvascular,
+                                                onChange: setEstadoQxCvascular,
+                                                esProgramado:
+                                                    segCvascularEsProgramado,
+                                            },
+                                            sufijo: 'Cvascular',
+                                            tipoProgramados:
+                                                'cvascular' as TipoProgramados,
+                                            tituloProgramados:
+                                                'Ver las radicaciones programadas para Cirugía Cardio Vascular',
+                                            destinoEspecialista:
+                                                'especialistaCvascular' as const,
+                                            onSubmit:
+                                                aplicarModificacionCvascular,
+                                            ocupado: aplicandoCvascular,
+                                            ok: segCvascularOk,
+                                            error: segCvascularError,
                                         },
                                     ]
                                         .filter((f) => f.visible)
@@ -5892,7 +6015,9 @@ export default function RadicarSolicitud({
                                                     {f.estadoQx
                                                         ?.esProgramado && (
                                                         <>
-                                                            <Field label="Fecha y Hora de Programación Hemo">
+                                                            <Field
+                                                                label={`Fecha y Hora de Programación ${f.sufijo}`}
+                                                            >
                                                                 <FechaHora24
                                                                     value={
                                                                         f
@@ -5917,7 +6042,7 @@ export default function RadicarSolicitud({
                                                                         type="button"
                                                                         onClick={() =>
                                                                             openCrearEspecialista(
-                                                                                'especialistaHemo',
+                                                                                f.destinoEspecialista,
                                                                             )
                                                                         }
                                                                         title="Crear un médico nuevo si no aparece en la lista"
@@ -5986,7 +6111,7 @@ export default function RadicarSolicitud({
                                                                 </Select>
                                                             </Field>
                                                             <Field
-                                                                label="Observaciones Hemo"
+                                                                label={`Observaciones ${f.sufijo}`}
                                                                 className="lg:col-span-2"
                                                             >
                                                                 <Textarea
@@ -6012,11 +6137,12 @@ export default function RadicarSolicitud({
                                                             </Field>
                                                         </>
                                                     )}
-                                                    {/* Paquete en el formulario
-                                                        Hemo: de último, tras
-                                                        Estado QX y la
+                                                    {/* Paquete en los
+                                                        formularios Hemo y
+                                                        Cvascular: de último,
+                                                        tras Estado QX y la
                                                         programación. */}
-                                                    {f.key === 'hemo' &&
+                                                    {f.estadoQx !== null &&
                                                         puedeSubirPaquete &&
                                                         campoPaquete()}
                                                     <ObservacionesCcx
@@ -6060,14 +6186,19 @@ export default function RadicarSolicitud({
                                                             variant="outline"
                                                             onClick={() =>
                                                                 abrirProgramados(
-                                                                    'hemo',
+                                                                    f.tipoProgramados,
                                                                 )
                                                             }
-                                                            title="Ver las radicaciones programadas por Hemodinamia"
+                                                            title={
+                                                                f.tituloProgramados
+                                                            }
                                                             className="h-11 gap-2 text-[#2d3e83] dark:text-white"
                                                         >
                                                             <CalendarClock className="size-5" />
-                                                            Ver programados
+                                                            {f.key ===
+                                                            'cvascular'
+                                                                ? 'Ver prog Cvascular'
+                                                                : 'Ver programados'}
                                                         </Button>
                                                     )}
                                                 </div>
@@ -7423,12 +7554,16 @@ export default function RadicarSolicitud({
                             <CalendarClock className="size-5 text-[#2d3e83] dark:text-white" />
                             {programadosTipo === 'hemo'
                                 ? 'Radicaciones programadas por Hemodinamia'
-                                : 'Radicaciones programadas para cirugía'}
+                                : programadosTipo === 'cvascular'
+                                  ? 'Radicaciones programadas para Cirugía Cardio Vascular'
+                                  : 'Radicaciones programadas para cirugía'}
                         </DialogTitle>
                         <DialogDescription>
                             {programadosTipo === 'hemo'
                                 ? 'Casos programados con Estado QX en “Programado x Hemodinamia”.'
-                                : 'Casos con Estado QX en “Programados”.'}{' '}
+                                : programadosTipo === 'cvascular'
+                                  ? 'Casos programados con Estado QX en “Programado Cirugia Cardio Vascular”.'
+                                  : 'Casos con Estado QX en “Programados”.'}{' '}
                             Se ordenan por fecha y hora de programación, de la
                             más reciente a la más antigua.
                         </DialogDescription>

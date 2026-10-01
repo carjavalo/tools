@@ -1324,10 +1324,33 @@ class RadicarCasoController extends Controller
      */
     private function estadosQxHemodinamia(): array
     {
+        return $this->estadosQxQueContienen('hemodinamia');
+    }
+
+    /**
+     * Ids de los Estados QX de Cirugía Cardio Vascular ("Programado Cirugia
+     * Cardio Vascular"). Se buscan por nombre, sin espacios, para que valga
+     * "Cardio Vascular" o "Cardiovascular".
+     *
+     * @return list<string>
+     */
+    private function estadosQxCardiovascular(): array
+    {
+        return $this->estadosQxQueContienen('cardiovascular');
+    }
+
+    /**
+     * Ids de los Estados QX cuyo nombre —sin tildes, mayúsculas ni espacios—
+     * contiene el texto dado.
+     *
+     * @return list<string>
+     */
+    private function estadosQxQueContienen(string $texto): array
+    {
         return EstRadisecundario::all(['id', 'Nombre'])
             ->filter(fn (EstRadisecundario $e) => str_contains(
-                strtolower(\Illuminate\Support\Str::ascii((string) $e->Nombre)),
-                'hemodinamia',
+                str_replace(' ', '', strtolower(\Illuminate\Support\Str::ascii((string) $e->Nombre))),
+                $texto,
             ))
             ->map(fn (EstRadisecundario $e) => (string) $e->id)
             ->values()
@@ -1342,20 +1365,27 @@ class RadicarCasoController extends Controller
      * por fila— para no multiplicar el acceso a la base.
      *
      * Con ?tipo=hemo trae solo las programaciones hechas con Estado QX
-     * "Programado x Hemodinamia" (formulario Hemo); sin él, las demás
-     * (cirugía), incluidas las anteriores a que se guardara el Estado QX.
+     * "Programado x Hemodinamia" (formulario Hemo); con ?tipo=cvascular, las
+     * de "Programado Cirugia Cardio Vascular" (formulario Cvascular); sin él,
+     * las demás (cirugía), incluidas las anteriores a que se guardara el
+     * Estado QX.
      */
     public function programados(Request $request): JsonResponse
     {
         $hemodinamia = $this->estadosQxHemodinamia();
+        $cardiovascular = $this->estadosQxCardiovascular();
+        $propias = array_values(array_unique([...$hemodinamia, ...$cardiovascular]));
 
         $programaciones = ProgramacionCaso::query()
             ->when(
-                $request->query('tipo') === 'hemo',
-                fn ($q) => $q->whereIn('codestsecundario', $hemodinamia),
+                $request->query('tipo'),
+                fn ($q, $tipo) => $q->whereIn(
+                    'codestsecundario',
+                    $tipo === 'cvascular' ? $cardiovascular : ($tipo === 'hemo' ? $hemodinamia : []),
+                ),
                 fn ($q) => $q->where(fn ($q) => $q
                     ->whereNull('codestsecundario')
-                    ->orWhereNotIn('codestsecundario', $hemodinamia)),
+                    ->orWhereNotIn('codestsecundario', $propias)),
             )
             ->orderByDesc('fecha_programacion')
             ->orderByDesc('id')
