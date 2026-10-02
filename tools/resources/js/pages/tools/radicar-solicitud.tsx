@@ -149,6 +149,9 @@ interface ProgramadoRow {
     // que se muestra en la grilla.
     fechaProgramacionInput: string | null;
     especialistaId: number | null;
+    // Quirófano donde se atenderá ('—' si no se indicó).
+    quirofano: string;
+    quirofanoId: number | null;
     paqueteUrl: string | null;
     cotizaciones: { id: number; tercero: string; url: string }[];
     observaciones: string;
@@ -190,6 +193,8 @@ interface PageProps {
     paqueteMaxMb: number;
     // Servicios activos de la sede activa (campo Servicio Asignado).
     servicios: { codigo: number; nombre: string }[];
+    // Quirófanos activos (Gestión Quirófanos QX) para la programación.
+    quirofanos: { id: number; nombre: string }[];
     today: string;
     puedeGestionarCotizaciones: boolean;
     muestraGrillaCasos: boolean;
@@ -431,6 +436,8 @@ const EMPTY_SEG = {
     // médicos, así que aquí va su id.
     fecha_programacion: '',
     especialista_medico_id: '',
+    // Quirófano (catálogo quirofanoQx) donde se atenderá: va su id.
+    quirofano_id: '',
     observaciones_prg: '',
 };
 
@@ -1140,6 +1147,7 @@ export default function RadicarSolicitud({
     defaultEstadoId,
     paqueteMaxMb,
     servicios,
+    quirofanos,
     today,
     puedeGestionarCotizaciones,
     muestraGrillaCasos,
@@ -1274,6 +1282,8 @@ export default function RadicarSolicitud({
     // en el navegador junto con el texto: la grilla ya llega completa.
     const [programadosDesde, setProgramadosDesde] = useState('');
     const [programadosHasta, setProgramadosHasta] = useState('');
+    // Filtro por quirófano: '' = todos, 'sin' = sin quirófano, o el id.
+    const [programadosQuirofano, setProgramadosQuirofano] = useState('');
     // Aviso de lo último que se hizo sobre una fila (editar o borrar). Vive
     // aparte del error para que un guardado bueno no borre un mensaje de fallo
     // anterior ni al revés.
@@ -1293,6 +1303,7 @@ export default function RadicarSolicitud({
     const [progEdit, setProgEdit] = useState({
         fecha_programacion: '',
         especialista_medico_id: '',
+        quirofano_id: '',
         observaciones_prg: '',
     });
     const [progEditSaving, setProgEditSaving] = useState(false);
@@ -2093,6 +2104,7 @@ export default function RadicarSolicitud({
                 : {
                       fecha_programacion: '',
                       especialista_medico_id: '',
+                      quirofano_id: '',
                       observaciones_prg: '',
                   }),
         };
@@ -2187,6 +2199,7 @@ export default function RadicarSolicitud({
         setProgramadosFiltro('');
         setProgramadosDesde('');
         setProgramadosHasta('');
+        setProgramadosQuirofano('');
         setProgramadosOk(null);
         setProgObsAbiertas(new Set());
         cargarProgramados(tipo);
@@ -2221,6 +2234,7 @@ export default function RadicarSolicitud({
             especialista_medico_id: r.especialistaId
                 ? String(r.especialistaId)
                 : '',
+            quirofano_id: r.quirofanoId ? String(r.quirofanoId) : '',
             observaciones_prg: r.observaciones ?? '',
         });
         setProgEditError(null);
@@ -2311,7 +2325,8 @@ export default function RadicarSolicitud({
     const hayFiltroProgramados =
         programadosFiltro.trim() !== '' ||
         programadosDesde !== '' ||
-        programadosHasta !== '';
+        programadosHasta !== '' ||
+        programadosQuirofano !== '';
     // Con las fechas al revés ninguna fila puede coincidir: se dice por qué en
     // lugar del genérico "ningún registro coincide".
     const periodoProgramadosInvertido =
@@ -2324,11 +2339,26 @@ export default function RadicarSolicitud({
     // día de la Fecha y Hora Prog. con ambos extremos incluidos.
     const programadosFiltrados = useMemo(() => {
         const q = programadosFiltro.trim().toLowerCase();
-        if (q === '' && programadosDesde === '' && programadosHasta === '') {
+        if (
+            q === '' &&
+            programadosDesde === '' &&
+            programadosHasta === '' &&
+            programadosQuirofano === ''
+        ) {
             return programadosRows;
         }
 
         return programadosRows.filter((r) => {
+            if (programadosQuirofano === 'sin' && r.quirofanoId !== null) {
+                return false;
+            }
+            if (
+                programadosQuirofano !== '' &&
+                programadosQuirofano !== 'sin' &&
+                String(r.quirofanoId) !== programadosQuirofano
+            ) {
+                return false;
+            }
             if (programadosDesde !== '' || programadosHasta !== '') {
                 // 'AAAA-MM-DD HH:mm' → 'AAAA-MM-DD'. Una programación sin
                 // fecha no cae en ningún período.
@@ -2350,6 +2380,7 @@ export default function RadicarSolicitud({
                     r.paciente,
                     r.especialidad,
                     r.medico,
+                    r.quirofano,
                     nombreAmbito(r.ambito),
                 ]
                     .join(' ')
@@ -2362,7 +2393,20 @@ export default function RadicarSolicitud({
         programadosFiltro,
         programadosDesde,
         programadosHasta,
+        programadosQuirofano,
     ]);
+
+    // Opciones del filtro por quirófano: los que aparecen en la grilla (también
+    // los que hoy estén inactivos, que ya no salen en el formulario).
+    const quirofanosProgramados = useMemo(() => {
+        const vistos = new Map<number, string>();
+        programadosRows.forEach((r) => {
+            if (r.quirofanoId !== null) vistos.set(r.quirofanoId, r.quirofano);
+        });
+        return [...vistos.entries()]
+            .map(([id, nombre]) => ({ id, nombre }))
+            .sort((a, b) => a.nombre.localeCompare(b.nombre));
+    }, [programadosRows]);
 
     // Descarga en Excel lo que muestra la grilla (ya filtrado). La librería se
     // carga solo al pulsar, para no engordar la vista.
@@ -2380,6 +2424,7 @@ export default function RadicarSolicitud({
             Médico: r.medico,
             'Especialista Médico': r.especialista,
             'Fecha y Hora Programación': r.fechaProgramacion ?? '',
+            Quirófano: r.quirofano,
             Paquete: r.paqueteUrl ? 'Sí' : 'No',
             'Cotizaciones (PDF)': r.cotizaciones.length,
             'Cotizaciones (terceros)': r.cotizaciones
@@ -5713,6 +5758,56 @@ export default function RadicarSolicitud({
                                                                 </SelectContent>
                                                             </Select>
                                                         </Field>
+                                                        {/* Quirófano donde se
+                                                            atenderá: catálogo
+                                                            de Gestión
+                                                            Quirófanos QX. */}
+                                                        <Field label="Quirófano">
+                                                            <Select
+                                                                value={
+                                                                    seg.quirofano_id
+                                                                }
+                                                                onValueChange={(
+                                                                    v,
+                                                                ) =>
+                                                                    setSegField(
+                                                                        'quirofano_id',
+                                                                        v,
+                                                                    )
+                                                                }
+                                                            >
+                                                                <SelectTrigger>
+                                                                    <SelectValue placeholder="Seleccione…" />
+                                                                </SelectTrigger>
+                                                                <SelectContent>
+                                                                    {quirofanos.length ===
+                                                                        0 && (
+                                                                        <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                                                                            No
+                                                                            hay
+                                                                            quirófanos
+                                                                            activos.
+                                                                        </div>
+                                                                    )}
+                                                                    {quirofanos.map(
+                                                                        (q) => (
+                                                                            <SelectItem
+                                                                                key={
+                                                                                    q.id
+                                                                                }
+                                                                                value={String(
+                                                                                    q.id,
+                                                                                )}
+                                                                            >
+                                                                                {
+                                                                                    q.nombre
+                                                                                }
+                                                                            </SelectItem>
+                                                                        ),
+                                                                    )}
+                                                                </SelectContent>
+                                                            </Select>
+                                                        </Field>
                                                         <Field
                                                             label="Observaciones Prg"
                                                             className="lg:col-span-2"
@@ -7611,6 +7706,34 @@ export default function RadicarSolicitud({
                                 title="Filtra por la Fecha y Hora de Programación de la cirugía"
                             />
                         </Field>
+                        <Field label="Quirófano" className="lg:w-48">
+                            <Select
+                                value={programadosQuirofano || 'todos'}
+                                onValueChange={(v) =>
+                                    setProgramadosQuirofano(
+                                        v === 'todos' ? '' : v,
+                                    )
+                                }
+                            >
+                                <SelectTrigger title="Filtra por el quirófano de la programación">
+                                    <SelectValue placeholder="Todos" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="todos">Todos</SelectItem>
+                                    <SelectItem value="sin">
+                                        Sin quirófano
+                                    </SelectItem>
+                                    {quirofanosProgramados.map((q) => (
+                                        <SelectItem
+                                            key={q.id}
+                                            value={String(q.id)}
+                                        >
+                                            {q.nombre}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </Field>
                         <Button
                             type="button"
                             variant="outline"
@@ -7653,6 +7776,7 @@ export default function RadicarSolicitud({
                                     <th className="px-3 py-2">
                                         Fecha y Hora Prog.
                                     </th>
+                                    <th className="px-3 py-2">Quirófano</th>
                                     <th className="px-3 py-2">Paquete</th>
                                     <th className="px-3 py-2">Cotización</th>
                                     <th className="px-3 py-2">
@@ -7670,7 +7794,7 @@ export default function RadicarSolicitud({
                                     <tr>
                                         <td
                                             colSpan={
-                                                hayAccionesProgramados ? 11 : 10
+                                                hayAccionesProgramados ? 12 : 11
                                             }
                                             className="px-3 py-8 text-center text-muted-foreground"
                                         >
@@ -7684,8 +7808,8 @@ export default function RadicarSolicitud({
                                             <td
                                                 colSpan={
                                                     hayAccionesProgramados
-                                                        ? 11
-                                                        : 10
+                                                        ? 12
+                                                        : 11
                                                 }
                                                 className="px-3 py-8 text-center text-muted-foreground"
                                             >
@@ -7731,6 +7855,9 @@ export default function RadicarSolicitud({
                                             </td>
                                             <td className="px-3 py-2 whitespace-nowrap">
                                                 {r.fechaProgramacion ?? '—'}
+                                            </td>
+                                            <td className="px-3 py-2">
+                                                {r.quirofano}
                                             </td>
                                             <td className="px-3 py-2">
                                                 {r.paqueteUrl ? (
@@ -7957,6 +8084,48 @@ export default function RadicarSolicitud({
                                             {[m.name, m.Apellido1, m.apellido2]
                                                 .filter(Boolean)
                                                 .join(' ')}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </Field>
+                        <Field label="Quirófano">
+                            <Select
+                                value={progEdit.quirofano_id}
+                                onValueChange={(v) =>
+                                    setProgEdit((prev) => ({
+                                        ...prev,
+                                        quirofano_id: v,
+                                    }))
+                                }
+                            >
+                                <SelectTrigger>
+                                    <SelectValue placeholder="Seleccione…" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {/* Si el quirófano actual ya está
+                                        inactivo, se conserva como opción
+                                        para no perderlo al guardar. */}
+                                    {progEditRow?.quirofanoId &&
+                                        !quirofanos.some(
+                                            (q) =>
+                                                q.id ===
+                                                progEditRow.quirofanoId,
+                                        ) && (
+                                            <SelectItem
+                                                value={String(
+                                                    progEditRow.quirofanoId,
+                                                )}
+                                            >
+                                                {progEditRow.quirofano}
+                                            </SelectItem>
+                                        )}
+                                    {quirofanos.map((q) => (
+                                        <SelectItem
+                                            key={q.id}
+                                            value={String(q.id)}
+                                        >
+                                            {q.nombre}
                                         </SelectItem>
                                     ))}
                                 </SelectContent>

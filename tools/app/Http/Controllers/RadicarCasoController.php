@@ -13,6 +13,7 @@ use App\Models\EstRadisecundario;
 use App\Models\Motivo;
 use App\Models\Permiso;
 use App\Models\ProgramacionCaso;
+use App\Models\QuirofanoQx;
 use App\Models\RadicarCaso;
 use App\Models\Role;
 use App\Models\SeguimientoCaso;
@@ -163,6 +164,10 @@ class RadicarCasoController extends Controller
             'servicios' => Serasignado::where('estado', true)
                 ->orderBy('nombre')
                 ->get(['codigo', 'nombre']),
+            // Quirófanos activos para el campo Quirófano de la programación.
+            'quirofanos' => QuirofanoQx::where('estado', true)
+                ->orderBy('nombre')
+                ->get(['id', 'nombre']),
             'today' => now()->toDateString(),
             // Formulario de cotizaciones: administrable por rol en el Gestor de
             // Permisos (sub-vista radicar-solicitud-cotizaciones).
@@ -1210,6 +1215,8 @@ class RadicarCasoController extends Controller
             // El especialista se escoge del banco de médicos (users con rol
             // Medico); el modal de crear médico lo alimenta.
             'especialista_medico_id' => ['nullable', 'integer', Rule::exists('users', 'id')->where('rol', 'Medico')],
+            // Quirófano: del catálogo quirofanoQx (Gestión Quirófanos QX).
+            'quirofano_id' => ['nullable', 'integer', Rule::exists('quirofanoQx', 'id')],
             'observaciones_prg' => ['nullable', 'string', 'max:10000'],
             // Observaciones CCX es de solo-anexar: aquí llega únicamente el
             // texto nuevo, nunca el contenido completo del campo. Se limita a
@@ -1222,6 +1229,7 @@ class RadicarCasoController extends Controller
             'fecreci' => 'fecha recibido serv',
             'fecha_programacion' => 'fecha de programación',
             'especialista_medico_id' => 'especialista médico',
+            'quirofano_id' => 'quirófano',
             'observaciones_prg' => 'observaciones de programación',
             'ObservacionCCX' => 'observaciones CCX',
         ]);
@@ -1229,7 +1237,7 @@ class RadicarCasoController extends Controller
         // Los campos de programación viajan aparte: no son columnas del caso ni
         // del seguimiento, así que se sacan de $data antes de esas escrituras y
         // se guardan en programacion_caso solo si el Estado QX es "Programados".
-        $camposProgramacion = ['fecha_programacion', 'especialista_medico_id', 'observaciones_prg'];
+        $camposProgramacion = ['fecha_programacion', 'especialista_medico_id', 'quirofano_id', 'observaciones_prg'];
         $datosProgramacion = Arr::only($data, $camposProgramacion);
         $data = Arr::except($data, $camposProgramacion);
 
@@ -1416,13 +1424,16 @@ class RadicarCasoController extends Controller
 
         $especialidades = Especialidad::pluck('Nombre', 'espcodser');
 
+        $quirofanos = QuirofanoQx::whereIn('id', $programaciones->pluck('quirofano_id')->filter()->unique())
+            ->pluck('nombre', 'id');
+
         $adjuntosCotizacion = CotizacionCaso::whereIn('codrad', $codrads)
             ->whereNotNull('adjunto')
             ->orderBy('id')
             ->get(['id', 'codrad', 'tercero'])
             ->groupBy('codrad');
 
-        $rows = $programaciones->map(function (ProgramacionCaso $prog) use ($casos, $pacientes, $especialistas, $medicos, $especialidades, $adjuntosCotizacion) {
+        $rows = $programaciones->map(function (ProgramacionCaso $prog) use ($casos, $pacientes, $especialistas, $medicos, $especialidades, $quirofanos, $adjuntosCotizacion) {
             $caso = $casos->get($prog->codrad);
             $pac = $caso && $caso->Ndocumento ? $pacientes->get($caso->Ndocumento) : null;
             $esp = $prog->especialista_medico_id ? $especialistas->get($prog->especialista_medico_id) : null;
@@ -1443,6 +1454,8 @@ class RadicarCasoController extends Controller
                 // trabajan con el texto que se muestra en la grilla.
                 'fechaProgramacionInput' => optional($prog->fecha_programacion)->format('Y-m-d\TH:i'),
                 'especialistaId' => $prog->especialista_medico_id,
+                'quirofano' => $prog->quirofano_id ? ($quirofanos[$prog->quirofano_id] ?? '—') : '—',
+                'quirofanoId' => $prog->quirofano_id,
                 'paqueteUrl' => $caso && $caso->paquete
                     ? route('tools.radicar-solicitud.paquete', $caso->codrad)
                     : null,
@@ -1472,16 +1485,19 @@ class RadicarCasoController extends Controller
         $data = $request->validate([
             'fecha_programacion' => ['nullable', 'date'],
             'especialista_medico_id' => ['nullable', 'integer', Rule::exists('users', 'id')->where('rol', 'Medico')],
+            'quirofano_id' => ['nullable', 'integer', Rule::exists('quirofanoQx', 'id')],
             'observaciones_prg' => ['nullable', 'string', 'max:10000'],
         ], [], [
             'fecha_programacion' => 'fecha de programación',
             'especialista_medico_id' => 'especialista médico',
+            'quirofano_id' => 'quirófano',
             'observaciones_prg' => 'observaciones de programación',
         ]);
 
         $etiquetas = [
             'fecha_programacion' => 'Fecha y Hora de Programación',
             'especialista_medico_id' => 'Especialista Médico',
+            'quirofano_id' => 'Quirófano',
             'observaciones_prg' => 'Observaciones Prg',
         ];
 
@@ -1497,6 +1513,7 @@ class RadicarCasoController extends Controller
         $programacion->update([
             'fecha_programacion' => ($data['fecha_programacion'] ?? '') !== '' ? $data['fecha_programacion'] : null,
             'especialista_medico_id' => ($data['especialista_medico_id'] ?? '') !== '' ? $data['especialista_medico_id'] : null,
+            'quirofano_id' => ($data['quirofano_id'] ?? '') !== '' ? $data['quirofano_id'] : null,
             'observaciones_prg' => trim((string) ($data['observaciones_prg'] ?? '')) !== '' ? $data['observaciones_prg'] : null,
         ]);
 
@@ -1570,6 +1587,7 @@ class RadicarCasoController extends Controller
                 ? $valor->format('Y-m-d H:i')
                 : (string) $valor,
             'especialista_medico_id' => $this->nombreUsuario(User::find($valor)) ?? (string) $valor,
+            'quirofano_id' => QuirofanoQx::find($valor)?->nombre ?? (string) $valor,
             default => (string) $valor,
         };
     }

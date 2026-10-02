@@ -3,6 +3,7 @@
 use App\Models\EstRadisecundario;
 use App\Models\Permiso;
 use App\Models\ProgramacionCaso;
+use App\Models\QuirofanoQx;
 use App\Models\RadicarCaso;
 use App\Models\Role;
 use App\Models\TrazabilidadCaso;
@@ -109,6 +110,46 @@ test('el formulario Cvascular programa y su botón da la grilla sin el formulari
 
     expect(Permiso::VISTAS_OPT_IN)->toContain('radicar-solicitud-ver-programados-cvascular')
         ->and(Permiso::VISTAS_OPT_IN)->toContain('radicar-solicitud-seguimiento-cvascular');
+});
+
+test('la programación guarda el quirófano y la grilla lo muestra y lo deja editar', function () {
+    $admin = User::factory()->create();
+    $programados = EstRadisecundario::create(['Nombre' => 'Programados', 'Estado' => true]);
+    $sala1 = QuirofanoQx::create(['nombre' => 'Sala 1', 'estado' => true]);
+    $sala2 = QuirofanoQx::create(['nombre' => 'Sala 2', 'estado' => true]);
+    $caso = RadicarCaso::create(['Ndocumento' => '4400', 'estRad' => '1']);
+
+    $this->actingAs($admin)
+        ->postJson("/tools/radicar-solicitud/{$caso->codrad}/seguimiento", [
+            'codestsecundario' => (string) $programados->id,
+            'quirofano_id' => $sala1->id,
+        ])
+        ->assertOk();
+
+    $prog = ProgramacionCaso::where('codrad', $caso->codrad)->firstOrFail();
+    expect($prog->quirofano_id)->toBe($sala1->id);
+
+    $this->actingAs($admin)
+        ->getJson('/tools/radicar-solicitud/programados')
+        ->assertOk()
+        ->assertJsonPath('rows.0.quirofano', 'Sala 1')
+        ->assertJsonPath('rows.0.quirofanoId', $sala1->id);
+
+    // Un quirófano inexistente se rechaza.
+    $this->actingAs($admin)
+        ->postJson("/tools/radicar-solicitud/{$caso->codrad}/seguimiento", [
+            'codestsecundario' => (string) $programados->id,
+            'quirofano_id' => 99999,
+        ])
+        ->assertUnprocessable();
+
+    // Editar desde la grilla cambia el quirófano y deja rastro.
+    $this->actingAs($admin)
+        ->putJson("/tools/radicar-solicitud/programacion/{$prog->id}", ['quirofano_id' => $sala2->id])
+        ->assertOk();
+
+    expect($prog->refresh()->quirofano_id)->toBe($sala2->id)
+        ->and(TrazabilidadCaso::where('codrad', $caso->codrad)->where('etiqueta', 'Quirófano')->where('nuevo', 'Sala 2')->exists())->toBeTrue();
 });
 
 test('los botones Ver programados se asignan en el Gestor y vienen apagados', function () {

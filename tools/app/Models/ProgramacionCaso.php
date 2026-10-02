@@ -27,6 +27,8 @@ class ProgramacionCaso extends Model
         'codestsecundario',
         'fecha_programacion',
         'especialista_medico_id',
+        // Quirófano donde se atenderá (catálogo quirofanoQx).
+        'quirofano_id',
         'observaciones_prg',
         'user_id',
     ];
@@ -75,5 +77,13 @@ class ProgramacionCaso extends Model
     public function especialista(): BelongsTo
     {
         return $this->belongsTo(User::class, 'especialista_medico_id');
+    }
+
+    /**
+     * Quirófano donde se atenderá la cirugía programada.
+     */
+    public function quirofano(): BelongsTo
+    {
+        return $this->belongsTo(QuirofanoQx::class, 'quirofano_id');
     }
 }
