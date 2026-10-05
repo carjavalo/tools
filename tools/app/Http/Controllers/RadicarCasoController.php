@@ -1048,6 +1048,10 @@ class RadicarCasoController extends Controller
                     ->where(fn ($q) => $q->where('estado', true)
                         ->orWhere('codigo', (int) $caso->codservicio)),
             ],
+            // Especialidad: obligatoria también al modificar, para que las
+            // radicaciones anteriores al campo la completen. Mismas reglas que
+            // al radicar (store()).
+            'Codesp' => ['required', 'string', 'max:10'],
             'codMed' => ['required', 'string', 'max:20'],
             'estRad' => ['required', 'string', 'max:5'],
             // Copago: el valor solo se exige (y solo se guarda) si está marcado.
@@ -1082,6 +1086,7 @@ class RadicarCasoController extends Controller
             'procedimientos.*.cusv_id.required' => 'Seleccione el código CUPS.',
         ], [
             'codservicio' => 'servicio asignado',
+            'Codesp' => 'especialidad',
             'codMed' => 'médico',
             'estRad' => 'estado actual',
             'valor_copago' => 'valor del copago',
@@ -2549,6 +2554,8 @@ class RadicarCasoController extends Controller
                 : null,
             // Valores crudos para el modal de Modificar Radicado.
             'codMed' => $caso->codMed,
+            // Especialidad (código espcodser) para el select de Modificar Radicado.
+            'Codesp' => $caso->Codesp,
             // Valor crudo para el select de Modificar Radicado.
             'codservicio' => $caso->codservicio !== null ? (string) $caso->codservicio : null,
             // Si el servicio del caso ya no está activo, el select no lo trae en

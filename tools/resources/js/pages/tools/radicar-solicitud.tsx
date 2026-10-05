@@ -257,6 +257,8 @@ interface CasoDetalle {
     paquete: string | null;
     paqueteUrl: string | null;
     codMed: string | null;
+    // Especialidad (código espcodser) para el select de Modificar Radicado.
+    Codesp: string | null;
     codservicio: string | null;
     servicioInactivo: boolean;
     estRad: string | null;
@@ -1320,6 +1322,7 @@ export default function RadicarSolicitud({
     const [modifError, setModifError] = useState<string | null>(null);
     const [modif, setModif] = useState({
         codservicio: '',
+        Codesp: '',
         codMed: '',
         estRad: '',
         copago: false,
@@ -2460,6 +2463,7 @@ export default function RadicarSolicitud({
         setModif({
             // Vacío en las radicaciones anteriores al campo: hay que escogerlo.
             codservicio: caso.codservicio ?? '',
+            Codesp: caso.Codesp ?? '',
             codMed: caso.codMed ?? '',
             estRad: caso.estRad ?? '',
             copago: caso.copago ?? false,
@@ -2536,6 +2540,7 @@ export default function RadicarSolicitud({
         const fd = new FormData();
         fd.append('_method', 'PUT');
         fd.append('codservicio', modif.codservicio);
+        fd.append('Codesp', modif.Codesp);
         fd.append('codMed', modif.codMed);
         fd.append('estRad', modif.estRad);
         fd.append('copago', modif.copago ? '1' : '0');
@@ -8309,6 +8314,46 @@ export default function RadicarSolicitud({
                                 <p className="text-xs text-amber-600 dark:text-amber-400">
                                     Esta radicación no tiene servicio asignado:
                                     escójalo para poder guardar.
+                                </p>
+                            )}
+                        </div>
+                        {/* Especialidad: cualquiera de las registradas. Se
+                            guarda el código espcodser que usa el caso. */}
+                        <div className="grid gap-2 sm:col-span-2">
+                            <Label>Especialidad *</Label>
+                            <Select
+                                value={modif.Codesp}
+                                onValueChange={(v) =>
+                                    setModifField('Codesp', v)
+                                }
+                            >
+                                <SelectTrigger>
+                                    <SelectValue placeholder="Seleccione…" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {especialidadesList.filter(
+                                        (e) => e.espcodser,
+                                    ).length === 0 && (
+                                        <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                                            No hay especialidades registradas.
+                                        </div>
+                                    )}
+                                    {especialidadesList
+                                        .filter((e) => e.espcodser)
+                                        .map((e) => (
+                                            <SelectItem
+                                                key={e.id}
+                                                value={String(e.espcodser)}
+                                            >
+                                                {e.espcodser} — {e.Nombre}
+                                            </SelectItem>
+                                        ))}
+                                </SelectContent>
+                            </Select>
+                            {caso && !caso.Codesp && (
+                                <p className="text-xs text-amber-600 dark:text-amber-400">
+                                    Esta radicación no tiene especialidad:
+                                    escójala para poder guardar.
                                 </p>
                             )}
                         </div>
