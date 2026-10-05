@@ -58,9 +58,9 @@ class Permiso extends Model
         // consulta de cada grilla a quien no tiene el formulario que la lleva.
         // Vienen apagados; los botones de cada fila siguen rigiéndose por
         // "Grilla ver programados".
-        ['key' => 'radicar-solicitud-ver-programados', 'titulo' => 'Botón Ver programados (Formulario Aplicar Modificaciones)', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver']],
-        ['key' => 'radicar-solicitud-ver-programados-hemo', 'titulo' => 'Botón Ver programados Hemo (Formulario Aplicar Modificaciones Hemo)', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver']],
-        ['key' => 'radicar-solicitud-ver-programados-cvascular', 'titulo' => 'Botón Ver prog Cvascular (Formulario Aplicar Modificaciones Cvascular)', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver']],
+        ['key' => 'radicar-solicitud-ver-programados', 'titulo' => 'Botón Ver programados (Formulario Aplicar Modificaciones)', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver', 'editar', 'borrar']],
+        ['key' => 'radicar-solicitud-ver-programados-hemo', 'titulo' => 'Botón Ver programados Hemo (Formulario Aplicar Modificaciones Hemo)', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver', 'editar', 'borrar']],
+        ['key' => 'radicar-solicitud-ver-programados-cvascular', 'titulo' => 'Botón Ver prog Cvascular (Formulario Aplicar Modificaciones Cvascular)', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver', 'editar', 'borrar']],
         // Botón "Subir paquete" del formulario Aplicar Modificaciones: deja
         // subir o reemplazar el PDF del paquete de un caso ya radicado (el
         // mismo de Nueva Radicación / Radicado Hospitalario). Viene apagado.

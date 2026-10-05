@@ -152,6 +152,35 @@ test('la programación guarda el quirófano y la grilla lo muestra y lo deja edi
         ->and(TrazabilidadCaso::where('codrad', $caso->codrad)->where('etiqueta', 'Quirófano')->where('nuevo', 'Sala 2')->exists())->toBeTrue();
 });
 
+test('el botón Ver programados con editar y borrar deja manipular solo las programaciones de su grilla', function () {
+    $rol = Role::create(['Nombre' => 'Programador Cx', 'Estado' => true]);
+    $usuario = User::factory()->create(['rol' => 'Programador Cx']);
+    $programados = EstRadisecundario::create(['Nombre' => 'Programados', 'Estado' => true]);
+    $hemo = EstRadisecundario::create(['Nombre' => 'Programado x Hemodinamia', 'Estado' => true]);
+
+    $cx = ProgramacionCaso::create(['codrad' => RadicarCaso::create(['Ndocumento' => '4500', 'estRad' => '1'])->codrad, 'codestsecundario' => (string) $programados->id]);
+    $hm = ProgramacionCaso::create(['codrad' => RadicarCaso::create(['Ndocumento' => '4501', 'estRad' => '1'])->codrad, 'codestsecundario' => (string) $hemo->id]);
+
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud', 'ver' => true]);
+    $boton = Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud-ver-programados', 'ver' => true, 'editar' => false, 'borrar' => false]);
+
+    // Solo con "ver": no edita ni borra.
+    $this->actingAs($usuario)->putJson("/tools/radicar-solicitud/programacion/{$cx->id}", ['observaciones_prg' => 'x'])->assertForbidden();
+    $this->actingAs($usuario)->deleteJson("/tools/radicar-solicitud/programacion/{$cx->id}")->assertForbidden();
+
+    $boton->update(['editar' => true, 'borrar' => true]);
+
+    // Con editar y borrar: manipula las de cirugía, pero no las de Hemo.
+    $this->actingAs($usuario)->putJson("/tools/radicar-solicitud/programacion/{$cx->id}", ['observaciones_prg' => 'x'])->assertOk();
+    $this->actingAs($usuario)->putJson("/tools/radicar-solicitud/programacion/{$hm->id}", ['observaciones_prg' => 'x'])->assertForbidden();
+    $this->actingAs($usuario)->deleteJson("/tools/radicar-solicitud/programacion/{$hm->id}")->assertForbidden();
+    $this->actingAs($usuario)->deleteJson("/tools/radicar-solicitud/programacion/{$cx->id}")->assertOk();
+
+    expect(ProgramacionCaso::find($cx->id))->toBeNull()
+        ->and(collect(Permiso::VISTAS)->firstWhere('key', 'radicar-solicitud-ver-programados')['acciones'])
+        ->toBe(['ver', 'editar', 'borrar']);
+});
+
 test('los botones Ver programados se asignan en el Gestor y vienen apagados', function () {
     $claves = collect(Permiso::VISTAS)->pluck('key');
 

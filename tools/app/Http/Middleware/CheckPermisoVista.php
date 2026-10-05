@@ -3,6 +3,7 @@
 namespace App\Http\Middleware;
 
 use App\Models\Permiso;
+use App\Models\ProgramacionCaso;
 use App\Models\Role;
 use App\Models\User;
 use Closure;
@@ -51,13 +52,18 @@ class CheckPermisoVista
             // programación de cirugía. Se rigen por su propia sub-vista y cada
             // botón por su propia acción. Hay que asignarla expresamente: sin
             // fila guardada no se autoriza (el Super Admin ya pasó arriba).
+            // También autoriza el botón "Ver programados" de la grilla a la que
+            // pertenece la programación (cirugía, Hemo o Cvascular), si tiene
+            // asignada la misma acción.
             if ($sub === 'programacion') {
                 $accionGrilla = $request->isMethod('DELETE') ? 'borrar' : 'editar';
                 $permisoGrilla = Permiso::where('role_id', $role->id)
                     ->where('vista', 'radicar-solicitud-programados')
                     ->first();
 
-                if (! $permisoGrilla || ! $permisoGrilla->ver || ! $permisoGrilla->{$accionGrilla}) {
+                $porGrilla = $permisoGrilla && $permisoGrilla->ver && $permisoGrilla->{$accionGrilla};
+
+                if (! $porGrilla && ! $this->botonProgramadosPermite($role->id, $sub4, $accionGrilla)) {
                     return $this->denegar($request, $accionGrilla);
                 }
 
@@ -238,6 +244,34 @@ class CheckPermisoVista
             : (! $form || $form->ver);
 
         return $formularioPermitido || ($btn && $btn->ver);
+    }
+
+    /**
+     * ¿El botón "Ver programados" de la grilla de esta programación tiene la
+     * acción (editar o borrar) asignada al rol? Como el resto de la matriz,
+     * "ver" es la llave de las otras dos.
+     */
+    private function botonProgramadosPermite(int $roleId, ?string $programacionId, string $accion): bool
+    {
+        if ($programacionId === null || ! ctype_digit($programacionId)) {
+            return false;
+        }
+
+        $programacion = ProgramacionCaso::find($programacionId);
+        if (! $programacion) {
+            // Inexistente (o de la otra sede): que responda el controlador.
+            return true;
+        }
+
+        $boton = match ($programacion->tipoGrilla()) {
+            'hemo' => 'radicar-solicitud-ver-programados-hemo',
+            'cvascular' => 'radicar-solicitud-ver-programados-cvascular',
+            default => 'radicar-solicitud-ver-programados',
+        };
+
+        $permiso = Permiso::where('role_id', $roleId)->where('vista', $boton)->first();
+
+        return $permiso && $permiso->ver && $permiso->{$accion};
     }
 
     /**

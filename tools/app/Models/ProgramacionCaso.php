@@ -6,6 +6,7 @@ use App\Support\Sede;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Str;
 
 class ProgramacionCaso extends Model
 {
@@ -77,6 +78,26 @@ class ProgramacionCaso extends Model
     public function especialista(): BelongsTo
     {
         return $this->belongsTo(User::class, 'especialista_medico_id');
+    }
+
+    /**
+     * Grilla "Ver programados" a la que pertenece según su Estado QX:
+     * 'cvascular' (Cirugía Cardio Vascular), 'hemo' (Hemodinamia) o 'cirugia'
+     * (el resto, incluidas las anteriores a que se guardara el Estado QX). Se
+     * resuelve por el nombre, igual que el filtro de la grilla.
+     */
+    public function tipoGrilla(): string
+    {
+        $nombre = $this->codestsecundario
+            ? EstRadisecundario::find($this->codestsecundario)?->Nombre
+            : null;
+        $normalizado = str_replace(' ', '', strtolower(Str::ascii((string) $nombre)));
+
+        return match (true) {
+            str_contains($normalizado, 'cardiovascular') => 'cvascular',
+            str_contains($normalizado, 'hemodinamia') => 'hemo',
+            default => 'cirugia',
+        };
     }
 
     /**

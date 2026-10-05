@@ -3283,12 +3283,26 @@ export default function RadicarSolicitud({
     const programadosCfg = permisosUsuario['radicar-solicitud-programados'];
     const puedeVerRadicadoProgramado =
         esSuperAdmin || programadosCfg?.ver === true;
+    // Editar y borrar también los habilita el botón "Ver programados" de la
+    // grilla abierta (cirugía, Hemo o Cvascular) si tiene esa acción asignada.
+    const botonProgramadosCfg =
+        permisosUsuario[
+            programadosTipo === 'hemo'
+                ? 'radicar-solicitud-ver-programados-hemo'
+                : programadosTipo === 'cvascular'
+                  ? 'radicar-solicitud-ver-programados-cvascular'
+                  : 'radicar-solicitud-ver-programados'
+        ];
     const puedeEditarProgramacion =
         esSuperAdmin ||
-        (programadosCfg?.ver === true && programadosCfg?.editar === true);
+        (programadosCfg?.ver === true && programadosCfg?.editar === true) ||
+        (botonProgramadosCfg?.ver === true &&
+            botonProgramadosCfg?.editar === true);
     const puedeBorrarProgramacion =
         esSuperAdmin ||
-        (programadosCfg?.ver === true && programadosCfg?.borrar === true);
+        (programadosCfg?.ver === true && programadosCfg?.borrar === true) ||
+        (botonProgramadosCfg?.ver === true &&
+            botonProgramadosCfg?.borrar === true);
     // Botones "Ver programados" sueltos (barra de pestañas): dan cada grilla a
     // quien no tiene el formulario que la lleva. Hay que asignarlos en el
     // Gestor de Permisos.
