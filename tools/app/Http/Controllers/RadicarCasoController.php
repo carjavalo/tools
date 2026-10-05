@@ -1454,7 +1454,7 @@ class RadicarCasoController extends Controller
             ->keyBy('codrad');
 
         $pacientes = User::whereIn('Numero_D', $casos->pluck('Ndocumento')->filter()->unique())
-            ->get(['Numero_D', 'name', 'Apellido1', 'apellido2'])
+            ->get(['Numero_D', 'name', 'Apellido1', 'apellido2', 'Telefono1', 'telefono2'])
             ->keyBy('Numero_D');
 
         // Médico tratante de la radicación (codMed) y especialista de la
@@ -1492,6 +1492,10 @@ class RadicarCasoController extends Controller
                 'ambito' => $caso?->ambito ?? RadicarCaso::AMBULATORIO,
                 'paciente' => $this->nombreUsuario($pac) ?? '—',
                 'documento' => $caso?->Ndocumento ?? '—',
+                // Teléfonos del paciente, para contactarlo por la cirugía.
+                'telefonos' => $pac
+                    ? (trim(implode(' / ', array_filter([$pac->Telefono1, $pac->telefono2]))) ?: '—')
+                    : '—',
                 'especialidad' => $caso ? ($especialidades[$caso->Codesp] ?? '—') : '—',
                 'medico' => $this->nombreUsuario($med) ?? '—',
                 'especialista' => $this->nombreUsuario($esp) ?? '—',

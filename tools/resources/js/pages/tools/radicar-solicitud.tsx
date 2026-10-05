@@ -140,6 +140,8 @@ interface ProgramadoRow {
     codrad: number;
     paciente: string;
     documento: string;
+    // Teléfonos del paciente ('—' si no tiene).
+    telefonos: string;
     especialidad: string;
     medico: string;
     especialista: string;
@@ -2422,6 +2424,7 @@ export default function RadicarSolicitud({
                     String(r.codrad),
                     r.documento,
                     r.paciente,
+                    r.telefonos,
                     r.especialidad,
                     r.medico,
                     r.quirofano,
@@ -2464,6 +2467,7 @@ export default function RadicarSolicitud({
             Ámbito: nombreAmbito(r.ambito),
             Paciente: r.paciente,
             Identificación: r.documento,
+            Teléfono: r.telefonos,
             Especialidad: r.especialidad,
             Médico: r.medico,
             'Especialista Médico': r.especialista,
@@ -7759,7 +7763,7 @@ export default function RadicarSolicitud({
                                 onChange={(e) =>
                                     setProgramadosFiltro(e.target.value)
                                 }
-                                placeholder="Filtrar por N° caso, documento, paciente, especialidad o médico…"
+                                placeholder="Filtrar por N° caso, documento, paciente, teléfono, especialidad o médico…"
                                 className="pl-9"
                             />
                         </div>
@@ -7853,6 +7857,7 @@ export default function RadicarSolicitud({
                                     <th className="px-3 py-2">
                                         Identificación
                                     </th>
+                                    <th className="px-3 py-2">Teléfono</th>
                                     <th className="px-3 py-2">Especialidad</th>
                                     <th className="px-3 py-2">Médico</th>
                                     <th className="px-3 py-2">
@@ -7879,7 +7884,7 @@ export default function RadicarSolicitud({
                                     <tr>
                                         <td
                                             colSpan={
-                                                hayAccionesProgramados ? 12 : 11
+                                                hayAccionesProgramados ? 13 : 12
                                             }
                                             className="px-3 py-8 text-center text-muted-foreground"
                                         >
@@ -7893,8 +7898,8 @@ export default function RadicarSolicitud({
                                             <td
                                                 colSpan={
                                                     hayAccionesProgramados
-                                                        ? 12
-                                                        : 11
+                                                        ? 13
+                                                        : 12
                                                 }
                                                 className="px-3 py-8 text-center text-muted-foreground"
                                             >
@@ -7928,6 +7933,9 @@ export default function RadicarSolicitud({
                                             </td>
                                             <td className="px-3 py-2">
                                                 {r.documento}
+                                            </td>
+                                            <td className="px-3 py-2 whitespace-nowrap">
+                                                {r.telefonos}
                                             </td>
                                             <td className="px-3 py-2">
                                                 {r.especialidad}
