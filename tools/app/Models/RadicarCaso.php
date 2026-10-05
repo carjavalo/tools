@@ -63,6 +63,8 @@ class RadicarCaso extends Model
         'fechavenautorizacion',
         'ObservacionTFX',
         'ObservacionCCX',
+        // Acumulado de observaciones de la Revisión Clínica Hemodinamia.
+        'obs_revision_hemo',
         'venc_anestesia',
     ];
 

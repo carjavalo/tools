@@ -256,6 +256,8 @@ interface CasoDetalle {
     maos: boolean;
     paquete: string | null;
     paqueteUrl: string | null;
+    // Acumulado de Observaciones de la Revisión Clínica Hemodinamia.
+    obsRevisionHemo?: string | null;
     codMed: string | null;
     // Especialidad (código espcodser) para el select de Modificar Radicado.
     Codesp: string | null;
@@ -449,6 +451,20 @@ const EMPTY_SEG = {
  * programación tanto con "Programado" como con "Programados", sin depender de
  * un id fijo del catálogo.
  */
+/**
+ * ¿El nombre de un Estado QX es "Revisión Clínica Hemodinamia"? Sin tildes,
+ * mayúsculas ni espacios, igual que en el servidor.
+ */
+function esEstadoRevisionHemo(nombre: string | null | undefined): boolean {
+    const n = (nombre ?? '')
+        .normalize('NFD')
+        .replace(/[̀-ͯ]/g, '')
+        .toLowerCase()
+        .replace(/\s+/g, '');
+
+    return n.includes('revision') && n.includes('hemodinamia');
+}
+
 function esEstadoProgramado(nombre: string | null | undefined): boolean {
     return (nombre ?? '')
         .normalize('NFD')
@@ -812,6 +828,9 @@ const EMPTY_SEG_HEMO = {
     fecha_programacion: '',
     especialista_medico_id: '',
     observaciones_prg: '',
+    // Solo con Estado QX "Revisión Clínica Hemodinamia": texto que se anexa
+    // al acumulado del caso.
+    obs_revision_hemo: '',
 };
 
 /**
@@ -1095,16 +1114,18 @@ function ObservacionesCcx({
     value,
     onChange,
     className = '',
+    label = 'Observaciones CCX',
 }: {
     registrado: string | null | undefined;
     value: string;
     onChange: (valor: string) => void;
     className?: string;
+    label?: string;
 }) {
     const historial = (registrado ?? '').trim();
 
     return (
-        <Field label="Observaciones CCX" className={className}>
+        <Field label={label} className={className}>
             <div className="grid gap-2">
                 {historial !== '' && (
                     <div className="rounded-md border bg-muted/40 p-2">
@@ -2120,8 +2141,28 @@ export default function RadicarSolicitud({
     const setSegHemoField = (campo: string, valor: string) =>
         setSegHemo((prev) => ({ ...prev, [campo]: valor }));
 
+    // Al dejar "Revisión Clínica Hemodinamia" se descarta el texto escrito en
+    // sus observaciones, para que no viaje con otro estado.
     const setEstadoQxHemo = (valor: string) =>
-        setSegHemo((prev) => ({ ...prev, ...cambiosEstadoQx(valor) }));
+        setSegHemo((prev) => ({
+            ...prev,
+            ...cambiosEstadoQx(valor),
+            ...(esEstadoRevisionHemo(
+                estadosSecundarios.find((s) => String(s.id) === valor)?.Nombre,
+            )
+                ? {}
+                : { obs_revision_hemo: '' }),
+        }));
+
+    const segHemoEsRevision = useMemo(
+        () =>
+            esEstadoRevisionHemo(
+                estadosSecundarios.find(
+                    (s) => String(s.id) === String(segHemo.codestsecundario),
+                )?.Nombre,
+            ),
+        [estadosSecundarios, segHemo.codestsecundario],
+    );
 
     const segHemoEsProgramado = useMemo(
         () =>
@@ -6251,6 +6292,31 @@ export default function RadicarSolicitud({
                                                             </Field>
                                                         </>
                                                     )}
+                                                    {/* Solo formulario Hemo:
+                                                        con Estado QX "Revisión
+                                                        Clínica Hemodinamia" se
+                                                        anexan observaciones
+                                                        acumulables, firmadas
+                                                        con autor y fecha. */}
+                                                    {f.key === 'hemo' &&
+                                                        segHemoEsRevision && (
+                                                            <ObservacionesCcx
+                                                                label="Observaciones Revisión Clínica Hemodinamia"
+                                                                className="md:col-span-2 lg:col-span-3"
+                                                                registrado={
+                                                                    caso.obsRevisionHemo
+                                                                }
+                                                                value={
+                                                                    segHemo.obs_revision_hemo
+                                                                }
+                                                                onChange={(v) =>
+                                                                    setSegHemoField(
+                                                                        'obs_revision_hemo',
+                                                                        v,
+                                                                    )
+                                                                }
+                                                            />
+                                                        )}
                                                     {/* Paquete en los
                                                         formularios Hemo y
                                                         Cvascular: de último,

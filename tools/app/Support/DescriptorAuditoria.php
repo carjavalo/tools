@@ -72,6 +72,7 @@ class DescriptorAuditoria
         'fechavenautorizacion' => 'Fecha Vencimiento Autorización',
         'ObservacionTFX' => 'OB TFX',
         'ObservacionCCX' => 'Observación CCX',
+        'obs_revision_hemo' => 'Observaciones Revisión Clínica Hemodinamia',
         'venc_anestesia' => 'Vencimiento Anestesia',
         'copago' => 'Copago',
         'valor_copago' => 'Valor del copago',

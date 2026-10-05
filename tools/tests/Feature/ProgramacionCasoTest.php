@@ -181,6 +181,27 @@ test('el botón Ver programados con editar y borrar deja manipular solo las prog
         ->toBe(['ver', 'editar', 'borrar']);
 });
 
+test('las observaciones de Revisión Clínica Hemodinamia se acumulan solo con ese Estado QX', function () {
+    $admin = User::factory()->create(['name' => 'Ana', 'Apellido1' => 'Ruiz']);
+    $revision = EstRadisecundario::create(['Nombre' => 'Revisión Clínica Hemodinamia', 'Estado' => true]);
+    $otro = EstRadisecundario::create(['Nombre' => 'Programados', 'Estado' => true]);
+    $caso = RadicarCaso::create(['Ndocumento' => '4600', 'estRad' => '1']);
+    $url = "/tools/radicar-solicitud/{$caso->codrad}/seguimiento";
+
+    $this->actingAs($admin)->postJson($url, ['codestsecundario' => (string) $revision->id, 'obs_revision_hemo' => 'Primera revisión'])->assertOk();
+    $this->actingAs($admin)->postJson($url, ['codestsecundario' => (string) $revision->id, 'obs_revision_hemo' => 'Segunda revisión'])
+        ->assertOk()
+        ->assertJsonPath('caso.obsRevisionHemo', fn ($v) => str_contains($v, 'Primera revisión') && str_contains($v, 'Segunda revisión'));
+
+    $acumulado = $caso->refresh()->obs_revision_hemo;
+    expect(strpos($acumulado, 'Primera revisión'))->toBeLessThan(strpos($acumulado, 'Segunda revisión'))
+        ->and($acumulado)->toContain('— Ana Ruiz');
+
+    // Con otro Estado QX el texto no se anexa.
+    $this->actingAs($admin)->postJson($url, ['codestsecundario' => (string) $otro->id, 'obs_revision_hemo' => 'No va'])->assertOk();
+    expect($caso->refresh()->obs_revision_hemo)->toBe($acumulado);
+});
+
 test('los botones Ver programados se asignan en el Gestor y vienen apagados', function () {
     $claves = collect(Permiso::VISTAS)->pluck('key');
 

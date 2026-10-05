@@ -78,6 +78,7 @@ class RadicarCasoController extends Controller
         'fechavenautorizacion' => 'Fecha Vencimiento Autorización',
         'ObservacionTFX' => 'OB TFX',
         'ObservacionCCX' => 'Observación CCX',
+        'obs_revision_hemo' => 'Observaciones Revisión Clínica Hemodinamia',
         'venc_anestesia' => 'Vencimiento Anestesia',
     ];
 
@@ -1227,9 +1228,13 @@ class RadicarCasoController extends Controller
             // texto nuevo, nunca el contenido completo del campo. Se limita a
             // un tramo razonable para que el acumulado no reviente la columna.
             'ObservacionCCX' => ['nullable', 'string', 'max:10000'],
+            // Observaciones de la Revisión Clínica Hemodinamia (formulario
+            // Hemo): también de solo-anexar, llega solo el texto nuevo.
+            'obs_revision_hemo' => ['nullable', 'string', 'max:10000'],
         ], [
             'estRad.in' => 'El estado seleccionado no está asignado a tu rol.',
         ], [
+            'obs_revision_hemo' => 'observaciones de revisión clínica hemodinamia',
             'estRad' => 'estado actual',
             'fecreci' => 'fecha recibido serv',
             'fecha_programacion' => 'fecha de programación',
@@ -1245,6 +1250,28 @@ class RadicarCasoController extends Controller
         $camposProgramacion = ['fecha_programacion', 'especialista_medico_id', 'quirofano_id', 'observaciones_prg'];
         $datosProgramacion = Arr::only($data, $camposProgramacion);
         $data = Arr::except($data, $camposProgramacion);
+
+        // Observaciones de la Revisión Clínica Hemodinamia: tampoco es columna
+        // del seguimiento. Solo se anexa cuando el Estado QX escogido es esa
+        // revisión; con cualquier otro estado el texto se descarta.
+        $textoRevisionHemo = $data['obs_revision_hemo'] ?? null;
+        unset($data['obs_revision_hemo']);
+        $estadoQxNombre = ! empty($data['codestsecundario'])
+            ? EstRadisecundario::find($data['codestsecundario'])?->Nombre
+            : null;
+        $acumuladoRevisionHemo = null;
+        if ($this->esEstadoRevisionHemo($estadoQxNombre)) {
+            $entradaRevision = $this->entradaObservacionCcx($textoRevisionHemo, $request);
+            if ($entradaRevision !== null) {
+                $acumuladoRevisionHemo = $this->anexarObservacionCcx($caso->obs_revision_hemo, $entradaRevision);
+
+                if (strlen($acumuladoRevisionHemo) > 64000) {
+                    throw ValidationException::withMessages([
+                        'obs_revision_hemo' => 'Las observaciones de revisión clínica hemodinamia del caso llegaron a su tope de capacidad y no admiten más texto.',
+                    ]);
+                }
+            }
+        }
 
         // El texto nuevo se firma con quien lo anexa y se agrega al final de
         // lo que ya tenía el caso. Nadie puede borrar ni reescribir lo que
@@ -1271,7 +1298,7 @@ class RadicarCasoController extends Controller
             $esProgramado = $estadoQx !== null && $this->esEstadoProgramado($estadoQx->Nombre);
         }
 
-        DB::transaction(function () use ($caso, $data, $request, $entradaCcx, $acumuladoCcx, $esProgramado, $datosProgramacion) {
+        DB::transaction(function () use ($caso, $data, $request, $entradaCcx, $acumuladoCcx, $acumuladoRevisionHemo, $esProgramado, $datosProgramacion) {
             // Foto del seguimiento. Estado y MAOS no se guardan aquí porque
             // seguimiento_caso no tiene esas columnas: sus cambios quedan en
             // la bitácora, que además registra el valor anterior y el nuevo.
@@ -1288,6 +1315,9 @@ class RadicarCasoController extends Controller
             // Observaciones CCX se aplica ya acumulado, no como el tramo suelto.
             if ($acumuladoCcx !== null) {
                 $aplicar['ObservacionCCX'] = $acumuladoCcx;
+            }
+            if ($acumuladoRevisionHemo !== null) {
+                $aplicar['obs_revision_hemo'] = $acumuladoRevisionHemo;
             }
             if (! empty($aplicar)) {
                 $antes = $caso->getRawOriginal();
@@ -1327,6 +1357,18 @@ class RadicarCasoController extends Controller
         $normalizado = strtolower(trim(\Illuminate\Support\Str::ascii((string) $nombre)));
 
         return str_starts_with($normalizado, 'programad');
+    }
+
+    /**
+     * ¿El nombre de un Estado QX es "Revisión Clínica Hemodinamia"? Sin
+     * tildes, mayúsculas ni espacios, para no depender de cómo se escribió en
+     * el catálogo.
+     */
+    private function esEstadoRevisionHemo(?string $nombre): bool
+    {
+        $normalizado = str_replace(' ', '', strtolower(\Illuminate\Support\Str::ascii((string) $nombre)));
+
+        return str_contains($normalizado, 'revision') && str_contains($normalizado, 'hemodinamia');
     }
 
     /**
@@ -2584,6 +2626,8 @@ class RadicarCasoController extends Controller
             // lo muestra en modo lectura: es lo único que se puede hacer con
             // lo ya registrado.
             'ObservacionCCX' => $caso->ObservacionCCX,
+            // Acumulado de Observaciones de la Revisión Clínica Hemodinamia.
+            'obsRevisionHemo' => $caso->obs_revision_hemo,
             'procedimientos' => $procedimientos,
             'autorizaciones' => $procs->pluck('N_Autorizacion')->filter()->values(),
             'cotizaciones' => $this->cotizacionesDeCaso($caso->codrad),
