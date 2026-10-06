@@ -2600,11 +2600,29 @@ test('la grilla del historial ignora filtros mal formados', function () {
     RadicarCaso::create(['Ndocumento' => '9974', 'estRad' => '1']);
 
     $this->actingAs($admin)
-        ->get('/tools/radicar-solicitud?grid_desde=ayer&grid_servicio=1%20or%201=1&grid_ambito=urgencias')
+        ->get('/tools/radicar-solicitud?grid_desde=ayer&grid_servicio=1%20or%201=1&grid_ambito=urgencias&grid_medico=abc')
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
-            ->where('casosListaFiltros', ['desde' => '', 'hasta' => '', 'servicio' => '', 'ambito' => ''])
+            ->where('casosListaFiltros', ['desde' => '', 'hasta' => '', 'servicio' => '', 'ambito' => '', 'especialidad' => '', 'medico' => ''])
             ->where('casosListaTope', 200)
             ->has('casosLista', 1)
         );
+});
+
+test('la grilla del historial filtra por especialidad y por medico', function () {
+    $admin = User::factory()->create();
+    $medicoA = User::factory()->create(['rol' => 'Medico']);
+    $medicoB = User::factory()->create(['rol' => 'Medico']);
+    $cardio = RadicarCaso::create(['Ndocumento' => '9975', 'estRad' => '1', 'Codesp' => 'CAR', 'codMed' => $medicoA->id]);
+    $orto = RadicarCaso::create(['Ndocumento' => '9976', 'estRad' => '1', 'Codesp' => 'ORT', 'codMed' => $medicoB->id]);
+    $cardioB = RadicarCaso::create(['Ndocumento' => '9977', 'estRad' => '1', 'Codesp' => 'CAR', 'codMed' => $medicoB->id]);
+
+    $codrads = fn (string $query) => collect(
+        $this->actingAs($admin)->get('/tools/radicar-solicitud'.$query)
+            ->viewData('page')['props']['casosLista']
+    )->pluck('codrad')->sort()->values()->all();
+
+    expect($codrads('?grid_especialidad=CAR'))->toBe([$cardio->codrad, $cardioB->codrad])
+        ->and($codrads('?grid_medico='.$medicoB->id))->toBe([$orto->codrad, $cardioB->codrad])
+        ->and($codrads('?grid_especialidad=CAR&grid_medico='.$medicoB->id))->toBe([$cardioB->codrad]);
 });

@@ -207,6 +207,8 @@ interface PageProps {
         hasta: string;
         servicio: string;
         ambito: string;
+        especialidad: string;
+        medico: string;
     };
     casosListaTope: number;
     casosListaTruncada: boolean;
@@ -1376,12 +1378,20 @@ export default function RadicarSolicitud({
     const [gridAmbito, setGridAmbito] = useState(
         casosListaFiltros.ambito || 'todos',
     );
+    const [gridEspecialidad, setGridEspecialidad] = useState(
+        casosListaFiltros.especialidad || 'todas',
+    );
+    const [gridMedico, setGridMedico] = useState(
+        casosListaFiltros.medico || 'todos',
+    );
     const [gridCargando, setGridCargando] = useState(false);
     const gridHayFiltros =
         gridDesde !== '' ||
         gridHasta !== '' ||
         gridServicio !== 'todos' ||
-        gridAmbito !== 'todos';
+        gridAmbito !== 'todos' ||
+        gridEspecialidad !== 'todas' ||
+        gridMedico !== 'todos';
     const gridFechasInvertidas =
         gridDesde !== '' && gridHasta !== '' && gridDesde > gridHasta;
     const gridMontado = useRef(false);
@@ -1407,6 +1417,12 @@ export default function RadicarSolicitud({
                     ...(gridAmbito !== 'todos'
                         ? { grid_ambito: gridAmbito }
                         : {}),
+                    ...(gridEspecialidad !== 'todas'
+                        ? { grid_especialidad: gridEspecialidad }
+                        : {}),
+                    ...(gridMedico !== 'todos'
+                        ? { grid_medico: gridMedico }
+                        : {}),
                 },
                 {
                     only: [
@@ -1426,13 +1442,22 @@ export default function RadicarSolicitud({
 
         return () => clearTimeout(timer);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [gridDesde, gridHasta, gridServicio, gridAmbito]);
+    }, [
+        gridDesde,
+        gridHasta,
+        gridServicio,
+        gridAmbito,
+        gridEspecialidad,
+        gridMedico,
+    ]);
 
     const limpiarFiltrosGrilla = () => {
         setGridDesde('');
         setGridHasta('');
         setGridServicio('todos');
         setGridAmbito('todos');
+        setGridEspecialidad('todas');
+        setGridMedico('todos');
     };
 
     // Lo que muestra la grilla: lo que devolvió el servidor con sus filtros,
@@ -4532,7 +4557,7 @@ export default function RadicarSolicitud({
                                         consultan al servidor, así que alcanzan
                                         también radicaciones antiguas. */}
                                     <div className="flex flex-col gap-3 border-b bg-muted/20 p-3 lg:flex-row lg:items-end">
-                                        <div className="grid flex-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                                        <div className="grid flex-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
                                             <div className="grid gap-1">
                                                 <Label className="text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
                                                     Fecha creación inicial
@@ -4630,6 +4655,84 @@ export default function RadicarSolicitud({
                                                                 {a.nombre}
                                                             </SelectItem>
                                                         ))}
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+                                            <div className="grid gap-1">
+                                                <Label className="text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
+                                                    Especialidad
+                                                </Label>
+                                                <Select
+                                                    value={gridEspecialidad}
+                                                    onValueChange={
+                                                        setGridEspecialidad
+                                                    }
+                                                >
+                                                    <SelectTrigger className="h-8 text-sm">
+                                                        <SelectValue />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="todas">
+                                                            Todas las
+                                                            especialidades
+                                                        </SelectItem>
+                                                        {especialidadesList
+                                                            .filter(
+                                                                (e) =>
+                                                                    e.espcodser,
+                                                            )
+                                                            .map((e) => (
+                                                                <SelectItem
+                                                                    key={e.id}
+                                                                    value={String(
+                                                                        e.espcodser,
+                                                                    )}
+                                                                >
+                                                                    {e.Nombre}
+                                                                </SelectItem>
+                                                            ))}
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+                                            <div className="grid gap-1">
+                                                <Label className="text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
+                                                    Médico
+                                                </Label>
+                                                <Select
+                                                    value={gridMedico}
+                                                    onValueChange={
+                                                        setGridMedico
+                                                    }
+                                                >
+                                                    <SelectTrigger className="h-8 text-sm">
+                                                        <SelectValue />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="todos">
+                                                            Todos los médicos
+                                                        </SelectItem>
+                                                        {medicosList.map(
+                                                            (m) => (
+                                                                <SelectItem
+                                                                    key={m.id}
+                                                                    value={String(
+                                                                        m.id,
+                                                                    )}
+                                                                >
+                                                                    {[
+                                                                        m.name,
+                                                                        m.Apellido1,
+                                                                        m.apellido2,
+                                                                    ]
+                                                                        .filter(
+                                                                            Boolean,
+                                                                        )
+                                                                        .join(
+                                                                            ' ',
+                                                                        )}
+                                                                </SelectItem>
+                                                            ),
+                                                        )}
                                                     </SelectContent>
                                                 </Select>
                                             </div>

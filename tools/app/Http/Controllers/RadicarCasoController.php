@@ -372,7 +372,9 @@ class RadicarCasoController extends Controller
             ->when($filtros['hasta'] !== '', fn ($q) => $q->whereDate('created_at', '<=', $filtros['hasta']))
             ->when($filtros['servicio'] === 'sin', fn ($q) => $q->whereNull('codservicio'))
             ->when(ctype_digit($filtros['servicio']), fn ($q) => $q->where('codservicio', (int) $filtros['servicio']))
-            ->when($filtros['ambito'] !== '', fn ($q) => $q->where('ambito', $filtros['ambito']));
+            ->when($filtros['ambito'] !== '', fn ($q) => $q->where('ambito', $filtros['ambito']))
+            ->when($filtros['especialidad'] !== '', fn ($q) => $q->where('Codesp', $filtros['especialidad']))
+            ->when($filtros['medico'] !== '', fn ($q) => $q->where('codMed', $filtros['medico']));
 
         $casos = $query->limit($this->topeGrillaCasos($filtros))
             ->get(['codrad', 'Ndocumento', 'estRad', 'convenio', 'codservicio', 'ambito', 'created_at']);
@@ -458,9 +460,10 @@ class RadicarCasoController extends Controller
      * Filtros de la Grilla de Radicaciones del Historial, saneados: fechas
      * aaaa-mm-dd válidas (o vacías); servicio '' (todos), 'sin' (sin servicio
      * asignado) o el código de un servicio; y ámbito '' (todos), 'ambulatorio'
-     * u 'hospitalario'. Lo que no cumple se ignora.
+     * u 'hospitalario'; especialidad '' (todas) o un espcodser; y médico ''
+     * (todos) o el id de un usuario. Lo que no cumple se ignora.
      *
-     * @return array{desde: string, hasta: string, servicio: string, ambito: string}
+     * @return array{desde: string, hasta: string, servicio: string, ambito: string, especialidad: string, medico: string}
      */
     private function filtrosGrillaCasos(Request $request): array
     {
@@ -472,12 +475,16 @@ class RadicarCasoController extends Controller
 
         $servicio = trim((string) $request->query('grid_servicio', ''));
         $ambito = trim((string) $request->query('grid_ambito', ''));
+        $especialidad = mb_substr(trim((string) $request->query('grid_especialidad', '')), 0, 50);
+        $medico = trim((string) $request->query('grid_medico', ''));
 
         return [
             'desde' => $fecha('grid_desde'),
             'hasta' => $fecha('grid_hasta'),
             'servicio' => $servicio === 'sin' || ctype_digit($servicio) ? $servicio : '',
             'ambito' => array_key_exists($ambito, RadicarCaso::AMBITOS) ? $ambito : '',
+            'especialidad' => $especialidad,
+            'medico' => ctype_digit($medico) ? $medico : '',
         ];
     }
 
@@ -486,12 +493,13 @@ class RadicarCasoController extends Controller
      * filtros, hasta 2000, para que el rango pedido salga completo (y completo
      * se exporte a Excel).
      *
-     * @param  array{desde: string, hasta: string, servicio: string, ambito: string}  $filtros
+     * @param  array{desde: string, hasta: string, servicio: string, ambito: string, especialidad: string, medico: string}  $filtros
      */
     private function topeGrillaCasos(array $filtros): int
     {
         return $filtros['desde'] !== '' || $filtros['hasta'] !== ''
             || $filtros['servicio'] !== '' || $filtros['ambito'] !== ''
+            || $filtros['especialidad'] !== '' || $filtros['medico'] !== ''
             ? 2000
             : 200;
     }
