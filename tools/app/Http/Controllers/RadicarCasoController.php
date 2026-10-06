@@ -1252,6 +1252,19 @@ class RadicarCasoController extends Controller
             'ObservacionCCX' => 'observaciones CCX',
         ]);
 
+        // Rol que solo tiene el formulario Espe_Programa: únicamente puede
+        // anexar Observaciones CCX. Cualquier otro campo que traiga la
+        // petición se descarta, aunque la vista no lo ofrezca.
+        if ($this->soloObservacionesCcx($request)) {
+            $data = Arr::only($data, ['ObservacionCCX']);
+
+            if (trim((string) ($data['ObservacionCCX'] ?? '')) === '') {
+                throw ValidationException::withMessages([
+                    'ObservacionCCX' => 'Escribe la observación CCX que deseas anexar.',
+                ]);
+            }
+        }
+
         // Los campos de programación viajan aparte: no son columnas del caso ni
         // del seguimiento, así que se sacan de $data antes de esas escrituras y
         // se guardan en programacion_caso solo si el Estado QX es "Programados".
@@ -1352,6 +1365,50 @@ class RadicarCasoController extends Controller
             'ok' => true,
             'caso' => $this->casoDetalle($caso->fresh()),
         ]);
+    }
+
+    /**
+     * ¿El rol del usuario solo tiene el formulario Espe_Programa? Es así
+     * cuando lo tiene asignado y ninguno de los otros formularios del
+     * seguimiento lo autoriza (el completo cuenta como permitido mientras no
+     * se apague, igual que en el middleware).
+     */
+    private function soloObservacionesCcx(Request $request): bool
+    {
+        $user = $request->user();
+
+        if (! $user || $user->rol === User::SUPER_ADMIN) {
+            return false;
+        }
+
+        $role = Role::where('Nombre', $user->rol)->first();
+        if (! $role) {
+            return false;
+        }
+
+        $permisos = Permiso::where('role_id', $role->id)
+            ->whereIn('vista', [
+                'radicar-solicitud-seguimiento',
+                'radicar-solicitud-seguimiento-basico',
+                'radicar-solicitud-seguimiento-hemo',
+                'radicar-solicitud-seguimiento-cvascular',
+                'radicar-solicitud-seguimiento-espe-programa',
+            ])
+            ->get()
+            ->keyBy('vista');
+
+        $espePrograma = $permisos->get('radicar-solicitud-seguimiento-espe-programa');
+        if (! $espePrograma || ! $espePrograma->ver) {
+            return false;
+        }
+
+        $completo = $permisos->get('radicar-solicitud-seguimiento');
+        $otro = (! $completo || $completo->ver)
+            || (bool) $permisos->get('radicar-solicitud-seguimiento-basico')?->ver
+            || (bool) $permisos->get('radicar-solicitud-seguimiento-hemo')?->ver
+            || (bool) $permisos->get('radicar-solicitud-seguimiento-cvascular')?->ver;
+
+        return ! $otro;
     }
 
     /**

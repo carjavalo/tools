@@ -112,6 +112,50 @@ test('el formulario Cvascular programa y su botón da la grilla sin el formulari
         ->and(Permiso::VISTAS_OPT_IN)->toContain('radicar-solicitud-seguimiento-cvascular');
 });
 
+test('el formulario Espe_Programa solo anexa Observaciones CCX', function () {
+    $rol = Role::create(['Nombre' => 'Espe Programa', 'Estado' => true]);
+    $usuario = User::factory()->create(['rol' => 'Espe Programa']);
+    $cv = EstRadisecundario::create(['Nombre' => 'Programado Cirugia Cardio Vascular', 'Estado' => true]);
+    $caso = RadicarCaso::create(['Ndocumento' => '4320', 'estRad' => '1', 'ObservacionCCX' => 'Nota previa']);
+
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud', 'ver' => true]);
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud-seguimiento', 'ver' => false]);
+
+    // Sin asignarlo: no guarda.
+    $this->actingAs($usuario)
+        ->postJson("/tools/radicar-solicitud/{$caso->codrad}/seguimiento", ['ObservacionCCX' => 'Nueva'])
+        ->assertForbidden();
+
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud-seguimiento-espe-programa', 'ver' => true]);
+
+    // Anexa la observación y descarta cualquier otro campo de la petición.
+    $this->actingAs($usuario)
+        ->postJson("/tools/radicar-solicitud/{$caso->codrad}/seguimiento", [
+            'ObservacionCCX' => 'Nueva observación',
+            'fecreci' => '2026-10-01',
+            'codestsecundario' => (string) $cv->id,
+        ])
+        ->assertOk();
+
+    $caso->refresh();
+    expect($caso->ObservacionCCX)->toContain('Nota previa')->toContain('Nueva observación')
+        ->and($caso->fecreci)->toBeNull()
+        ->and($caso->codestsecundario)->toBeNull()
+        ->and(ProgramacionCaso::where('codrad', $caso->codrad)->exists())->toBeFalse();
+
+    // Sin texto no hay nada que anexar.
+    $this->actingAs($usuario)
+        ->postJson("/tools/radicar-solicitud/{$caso->codrad}/seguimiento", ['ObservacionCCX' => '  '])
+        ->assertUnprocessable()->assertJsonValidationErrors(['ObservacionCCX']);
+
+    expect(Permiso::VISTAS_OPT_IN)->toContain('radicar-solicitud-seguimiento-espe-programa');
+
+    // En el Gestor de Permisos queda justo debajo del formulario Cvascular.
+    $keys = Permiso::vistasKeys();
+    expect($keys[array_search('radicar-solicitud-seguimiento-cvascular', $keys, true) + 1])
+        ->toBe('radicar-solicitud-seguimiento-espe-programa');
+});
+
 test('la programación guarda el quirófano y la grilla lo muestra y lo deja editar', function () {
     $admin = User::factory()->create();
     $programados = EstRadisecundario::create(['Nombre' => 'Programados', 'Estado' => true]);

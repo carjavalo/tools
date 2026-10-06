@@ -199,6 +199,7 @@ class CheckPermisoVista
                 'radicar-solicitud-seguimiento-basico',
                 'radicar-solicitud-seguimiento-hemo',
                 'radicar-solicitud-seguimiento-cvascular',
+                'radicar-solicitud-seguimiento-espe-programa',
             ])
             ->get()
             ->keyBy('vista');
@@ -207,11 +208,13 @@ class CheckPermisoVista
         $basico = $permisos->get('radicar-solicitud-seguimiento-basico');
         $hemo = $permisos->get('radicar-solicitud-seguimiento-hemo');
         $cvascular = $permisos->get('radicar-solicitud-seguimiento-cvascular');
+        $espePrograma = $permisos->get('radicar-solicitud-seguimiento-espe-programa');
 
         return (! $completo || $completo->ver)
             || ($basico && $basico->ver)
             || ($hemo && $hemo->ver)
-            || ($cvascular && $cvascular->ver);
+            || ($cvascular && $cvascular->ver)
+            || ($espePrograma && $espePrograma->ver);
     }
 
     /**

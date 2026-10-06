@@ -46,6 +46,10 @@ class Permiso extends Model
         // trae solo el Estado QX "Programado Cirugia Cardio Vascular". Como el
         // de Hemo, apagado hasta que se asigne al rol.
         ['key' => 'radicar-solicitud-seguimiento-cvascular', 'titulo' => 'Formulario Aplicar Modificaciones (Historial) Cvascular', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver']],
+        // Formulario reducido a Observaciones CCX: deja ver el acumulado y
+        // anexarle texto, nada más. Si es el único formulario del rol, el
+        // servidor descarta cualquier otro campo. Apagado hasta asignarlo.
+        ['key' => 'radicar-solicitud-seguimiento-espe-programa', 'titulo' => 'Formulario Aplicar Modificaciones (Historial) Espe_Programa', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver']],
         ['key' => 'radicar-solicitud-seguimiento', 'titulo' => 'Formulario Aplicar Modificaciones (Historial)', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver']],
         ['key' => 'radicar-solicitud-grilla', 'titulo' => 'Grilla de Radicaciones (Historial)', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver']],
         // Botones por fila del modal "Radicaciones programadas para cirugía".
@@ -102,6 +106,7 @@ class Permiso extends Model
         'radicar-solicitud-ver-programados-hemo',
         'radicar-solicitud-ver-programados-cvascular',
         'radicar-solicitud-seguimiento-cvascular',
+        'radicar-solicitud-seguimiento-espe-programa',
         'radicar-solicitud-subir-paquete',
     ];
 

@@ -1283,6 +1283,15 @@ export default function RadicarSolicitud({
     const [segCvascularError, setSegCvascularError] = useState<string | null>(
         null,
     );
+    // Formulario Espe_Programa: solo anexa Observaciones CCX.
+    const [segEspePrograma, setSegEspePrograma] = useState({
+        ObservacionCCX: '',
+    });
+    const [aplicandoEspePrograma, setAplicandoEspePrograma] = useState(false);
+    const [segEspeProgramaOk, setSegEspeProgramaOk] = useState(false);
+    const [segEspeProgramaError, setSegEspeProgramaError] = useState<
+        string | null
+    >(null);
     const [borrarOpen, setBorrarOpen] = useState(false);
     const [borrarError, setBorrarError] = useState<string | null>(null);
     // El servidor dejó de reconocer la sesión (401 o 419). Se avisa en un
@@ -2985,6 +2994,25 @@ export default function RadicarSolicitud({
         );
     };
 
+    /** Formulario Espe_Programa: manda solo el texto nuevo de Observaciones CCX. */
+    const aplicarModificacionEspePrograma = (e: FormEvent) => {
+        e.preventDefault();
+        if (segEspePrograma.ObservacionCCX.trim() === '') {
+            setSegEspeProgramaOk(false);
+            setSegEspeProgramaError(
+                'Escribe la observación CCX que deseas anexar.',
+            );
+            return;
+        }
+        enviarSeguimiento(
+            { ObservacionCCX: segEspePrograma.ObservacionCCX },
+            () => setSegEspePrograma({ ObservacionCCX: '' }),
+            setAplicandoEspePrograma,
+            setSegEspeProgramaOk,
+            setSegEspeProgramaError,
+        );
+    };
+
     const borrarCaso = () => {
         if (!caso) return;
         setBorrando(true);
@@ -3347,6 +3375,13 @@ export default function RadicarSolicitud({
     const puedeAplicarModificacionesCvascular =
         esSuperAdmin ||
         permisosUsuario['radicar-solicitud-seguimiento-cvascular']?.ver ===
+            true;
+
+    // Formulario Espe_Programa (Historial): solo Observaciones CCX. Misma
+    // regla de asignación expresa.
+    const puedeAplicarModificacionesEspePrograma =
+        esSuperAdmin ||
+        permisosUsuario['radicar-solicitud-seguimiento-espe-programa']?.ver ===
             true;
 
     // Botones de cada fila del modal "Ver programados". Se rigen por la
@@ -6136,6 +6171,41 @@ export default function RadicarSolicitud({
                                             ok: segCvascularOk,
                                             error: segCvascularError,
                                         },
+                                        {
+                                            // Solo Observaciones CCX: ver el
+                                            // acumulado y anexarle texto.
+                                            key: 'espePrograma',
+                                            visible:
+                                                puedeAplicarModificacionesEspePrograma,
+                                            soloObservaciones: true,
+                                            titulo: 'Formulario Espe_Programa — observaciones CCX',
+                                            valores: {
+                                                estRad: '',
+                                                fecreci: '',
+                                                ObservacionCCX:
+                                                    segEspePrograma.ObservacionCCX,
+                                            },
+                                            setCampo: (
+                                                campo: string,
+                                                valor: string,
+                                            ) =>
+                                                setSegEspePrograma((prev) => ({
+                                                    ...prev,
+                                                    [campo]: valor,
+                                                })),
+                                            estadoQx: null,
+                                            sufijo: '',
+                                            tipoProgramados:
+                                                'cirugia' as TipoProgramados,
+                                            tituloProgramados: '',
+                                            destinoEspecialista:
+                                                'especialista' as const,
+                                            onSubmit:
+                                                aplicarModificacionEspePrograma,
+                                            ocupado: aplicandoEspePrograma,
+                                            ok: segEspeProgramaOk,
+                                            error: segEspeProgramaError,
+                                        },
                                     ]
                                         .filter((f) => f.visible)
                                         .map((f) => (
@@ -6161,68 +6231,82 @@ export default function RadicarSolicitud({
                                                     </div>
                                                 )}
                                                 <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                                                    <Field label="Estado Actual">
-                                                        <Select
-                                                            value={
-                                                                f.valores.estRad
-                                                            }
-                                                            onValueChange={(
-                                                                v,
-                                                            ) =>
-                                                                f.setCampo(
-                                                                    'estRad',
-                                                                    v,
-                                                                )
-                                                            }
-                                                        >
-                                                            <SelectTrigger>
-                                                                <SelectValue placeholder="Seleccione…" />
-                                                            </SelectTrigger>
-                                                            <SelectContent>
-                                                                {estados.length ===
-                                                                    0 && (
-                                                                    <div className="px-2 py-1.5 text-xs text-muted-foreground">
-                                                                        Tu rol
-                                                                        no tiene
-                                                                        estados
-                                                                        asignados.
-                                                                    </div>
-                                                                )}
-                                                                {estados.map(
-                                                                    (s) => (
-                                                                        <SelectItem
-                                                                            key={
-                                                                                s.id
-                                                                            }
-                                                                            value={String(
-                                                                                s.id,
-                                                                            )}
-                                                                        >
-                                                                            {
-                                                                                s.Nombre
-                                                                            }
-                                                                        </SelectItem>
-                                                                    ),
-                                                                )}
-                                                            </SelectContent>
-                                                        </Select>
-                                                    </Field>
-                                                    <Field label="Fecha Recibido Serv">
-                                                        <Input
-                                                            type="date"
-                                                            value={
-                                                                f.valores
-                                                                    .fecreci
-                                                            }
-                                                            onChange={(e) =>
-                                                                f.setCampo(
-                                                                    'fecreci',
-                                                                    e.target
-                                                                        .value,
-                                                                )
-                                                            }
-                                                        />
-                                                    </Field>
+                                                    {!f.soloObservaciones && (
+                                                        <>
+                                                            <Field label="Estado Actual">
+                                                                <Select
+                                                                    value={
+                                                                        f
+                                                                            .valores
+                                                                            .estRad
+                                                                    }
+                                                                    onValueChange={(
+                                                                        v,
+                                                                    ) =>
+                                                                        f.setCampo(
+                                                                            'estRad',
+                                                                            v,
+                                                                        )
+                                                                    }
+                                                                >
+                                                                    <SelectTrigger>
+                                                                        <SelectValue placeholder="Seleccione…" />
+                                                                    </SelectTrigger>
+                                                                    <SelectContent>
+                                                                        {estados.length ===
+                                                                            0 && (
+                                                                            <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                                                                                Tu
+                                                                                rol
+                                                                                no
+                                                                                tiene
+                                                                                estados
+                                                                                asignados.
+                                                                            </div>
+                                                                        )}
+                                                                        {estados.map(
+                                                                            (
+                                                                                s,
+                                                                            ) => (
+                                                                                <SelectItem
+                                                                                    key={
+                                                                                        s.id
+                                                                                    }
+                                                                                    value={String(
+                                                                                        s.id,
+                                                                                    )}
+                                                                                >
+                                                                                    {
+                                                                                        s.Nombre
+                                                                                    }
+                                                                                </SelectItem>
+                                                                            ),
+                                                                        )}
+                                                                    </SelectContent>
+                                                                </Select>
+                                                            </Field>
+                                                            <Field label="Fecha Recibido Serv">
+                                                                <Input
+                                                                    type="date"
+                                                                    value={
+                                                                        f
+                                                                            .valores
+                                                                            .fecreci
+                                                                    }
+                                                                    onChange={(
+                                                                        e,
+                                                                    ) =>
+                                                                        f.setCampo(
+                                                                            'fecreci',
+                                                                            e
+                                                                                .target
+                                                                                .value,
+                                                                        )
+                                                                    }
+                                                                />
+                                                            </Field>
+                                                        </>
+                                                    )}
                                                     {f.estadoQx && (
                                                         <Field label="Estado QX">
                                                             <Select
