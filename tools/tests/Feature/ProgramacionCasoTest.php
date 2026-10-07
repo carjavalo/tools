@@ -156,6 +156,40 @@ test('el formulario Espe_Programa solo anexa Observaciones CCX', function () {
         ->toBe('radicar-solicitud-seguimiento-espe-programa');
 });
 
+test('las observaciones de programación se acumulan firmadas por grilla', function () {
+    $ana = User::factory()->create(['name' => 'Ana', 'Apellido1' => 'Ruiz']);
+    $luis = User::factory()->create(['name' => 'Luis', 'Apellido1' => 'Mora']);
+    $programados = EstRadisecundario::create(['Nombre' => 'Programados', 'Estado' => true]);
+    $hemo = EstRadisecundario::create(['Nombre' => 'Programado x Hemodinamia', 'Estado' => true]);
+    $caso = RadicarCaso::create(['Ndocumento' => '4330', 'estRad' => '1']);
+    $url = "/tools/radicar-solicitud/{$caso->codrad}/seguimiento";
+
+    $this->actingAs($ana)->postJson($url, ['codestsecundario' => (string) $programados->id, 'observaciones_prg' => 'Primera'])->assertOk();
+    $this->actingAs($luis)->postJson($url, ['codestsecundario' => (string) $programados->id, 'observaciones_prg' => 'Segunda'])->assertOk();
+    // Otra grilla (Hemo): no arrastra las de cirugía.
+    $this->actingAs($luis)->postJson($url, ['codestsecundario' => (string) $hemo->id, 'observaciones_prg' => 'De hemo'])->assertOk();
+
+    $ultimaCx = ProgramacionCaso::where('codrad', $caso->codrad)->where('codestsecundario', (string) $programados->id)->latest('id')->first();
+    expect($ultimaCx->observaciones_prg)
+        ->toContain("Primera\n— Ana Ruiz · ")
+        ->toContain("Segunda\n— Luis Mora · ");
+
+    $hemoProg = ProgramacionCaso::where('codrad', $caso->codrad)->where('codestsecundario', (string) $hemo->id)->first();
+    expect($hemoProg->observaciones_prg)->toContain('De hemo')->not->toContain('Primera');
+
+    // Editar la programación anexa, no reemplaza; sin texto nuevo no cambia.
+    $this->actingAs($ana)->putJson("/tools/radicar-solicitud/programacion/{$ultimaCx->id}", ['observaciones_prg' => 'Tercera'])->assertOk();
+    $this->actingAs($ana)->putJson("/tools/radicar-solicitud/programacion/{$ultimaCx->id}", ['observaciones_prg' => ''])->assertOk();
+    expect($ultimaCx->refresh()->observaciones_prg)
+        ->toContain('Primera')->toContain('Segunda')->toContain("Tercera\n— Ana Ruiz · ");
+
+    // El detalle del caso trae lo registrado por grilla.
+    $detalle = $this->actingAs($ana)->getJson('/tools/radicar-solicitud/buscar-caso?q='.$caso->codrad)->json('caso.obsPrg');
+    expect($detalle['cirugia'])->toContain('Tercera')
+        ->and($detalle['hemo'])->toContain('De hemo')
+        ->and($detalle['cvascular'])->toBeNull();
+});
+
 test('la programación guarda el quirófano y la grilla lo muestra y lo deja editar', function () {
     $admin = User::factory()->create();
     $programados = EstRadisecundario::create(['Nombre' => 'Programados', 'Estado' => true]);
@@ -366,9 +400,9 @@ test('el super admin edita una programacion y el cambio queda en la bitacora', f
 
     expect($prog->fecha_programacion->format('Y-m-d H:i'))->toBe('2026-09-10 07:30')
         ->and($prog->especialista_medico_id)->toBe($despues->id)
-        // Un campo que se dejó vacío se guarda vacío: aquí se corrige la
-        // programación, no se anexa a ella.
-        ->and($prog->observaciones_prg)->toBeNull();
+        // Las observaciones son acumulables: dejarlas vacías no borra lo
+        // registrado.
+        ->and($prog->observaciones_prg)->toBe('Torres laparo');
 
     $this->assertDatabaseHas('trazabilidad_caso', [
         'codrad' => $caso->codrad,
@@ -398,7 +432,8 @@ test('editar una programacion sin cambiar nada no ensucia la bitacora', function
         ->putJson("/tools/radicar-solicitud/programacion/{$prog->id}", [
             'fecha_programacion' => '2026-09-09T03:41',
             'especialista_medico_id' => null,
-            'observaciones_prg' => 'Torres laparo',
+            // Sin texto nuevo que anexar.
+            'observaciones_prg' => '',
         ])
         ->assertOk();
 

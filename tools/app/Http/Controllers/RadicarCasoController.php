@@ -983,6 +983,8 @@ class RadicarCasoController extends Controller
         // primera entrada también se firma, para que el historial tenga un
         // único formato y se sepa quién escribió cada tramo.
         $data['ObservacionCCX'] = $this->entradaObservacionCcx($data['ObservacionCCX'] ?? null, $request) ?? '';
+        // OB TFX también es acumulable: su primera entrada se firma igual.
+        $data['ObservacionTFX'] = $this->entradaObservacionCcx($data['ObservacionTFX'] ?? null, $request) ?? '';
 
         // El caso, sus procedimientos y su bitácora se guardan o fallan juntos:
         // una radicación sin su registro de creación quedaría fuera del informe.
@@ -1083,7 +1085,8 @@ class RadicarCasoController extends Controller
             'fecreci' => ['nullable', 'date', 'date_format:Y-m-d'],
             'fecAutorizacion' => ['required', 'date', 'date_format:Y-m-d'],
             'fechavenautorizacion' => ['required', 'date', 'date_format:Y-m-d'],
-            'ObservacionTFX' => ['nullable', 'string', 'max:65535'],
+            // OB TFX es de solo-anexar: llega únicamente el texto nuevo.
+            'ObservacionTFX' => ['nullable', 'string', 'max:10000'],
             'procedimientos' => ['required', 'array', 'min:1'],
             'procedimientos.*.cusv_id' => ['required', 'integer', 'exists:cups,id'],
             'procedimientos.*.N_Autorizacion' => ['nullable', 'string', 'max:20'],
@@ -1111,6 +1114,16 @@ class RadicarCasoController extends Controller
             $data['copago'] = false;
             $data['valor_copago'] = null;
         }
+
+        // OB TFX: el texto nuevo se firma y se agrega al final de lo que ya
+        // tenía el caso; sin texto nuevo, el campo queda como estaba.
+        $data['ObservacionTFX'] = $this->acumularObservacion(
+            $caso->ObservacionTFX,
+            $data['ObservacionTFX'] ?? null,
+            $request,
+            'ObservacionTFX',
+            'Las observaciones OB TFX del caso',
+        ) ?? $caso->ObservacionTFX;
 
         // Sin archivo nuevo se mantiene el que ya estaba.
         $paqueteAnterior = $caso->paquete;
@@ -1317,6 +1330,23 @@ class RadicarCasoController extends Controller
         if (! empty($data['codestsecundario'])) {
             $estadoQx = EstRadisecundario::find($data['codestsecundario']);
             $esProgramado = $estadoQx !== null && $this->esEstadoProgramado($estadoQx->Nombre);
+        }
+
+        // Observaciones de la programación: acumulables. La nueva programación
+        // arranca con lo ya registrado en el caso para su misma grilla y le
+        // anexa, firmado, el texto nuevo.
+        if ($esProgramado) {
+            $previas = $this->observacionesPrgDelCaso(
+                $caso->codrad,
+                ProgramacionCaso::tipoDeEstadoQx($data['codestsecundario']),
+            );
+            $datosProgramacion['observaciones_prg'] = $this->acumularObservacion(
+                $previas,
+                $datosProgramacion['observaciones_prg'] ?? null,
+                $request,
+                'observaciones_prg',
+                'Las observaciones de programación del caso',
+            ) ?? $previas;
         }
 
         DB::transaction(function () use ($caso, $data, $request, $entradaCcx, $acumuladoCcx, $acumuladoRevisionHemo, $esProgramado, $datosProgramacion) {
@@ -1624,13 +1654,20 @@ class RadicarCasoController extends Controller
             $antes[$campo] = $this->valorProgramacion($campo, $programacion->$campo);
         }
 
-        // Aquí se corrige la programación, no se anexa a ella: un campo que el
-        // usuario dejó vacío se guarda vacío.
+        // Fecha, especialista y quirófano se corrigen: un campo que el usuario
+        // dejó vacío se guarda vacío. Las observaciones, en cambio, son
+        // acumulables: el texto nuevo se firma y se anexa a lo registrado.
         $programacion->update([
             'fecha_programacion' => ($data['fecha_programacion'] ?? '') !== '' ? $data['fecha_programacion'] : null,
             'especialista_medico_id' => ($data['especialista_medico_id'] ?? '') !== '' ? $data['especialista_medico_id'] : null,
             'quirofano_id' => ($data['quirofano_id'] ?? '') !== '' ? $data['quirofano_id'] : null,
-            'observaciones_prg' => trim((string) ($data['observaciones_prg'] ?? '')) !== '' ? $data['observaciones_prg'] : null,
+            'observaciones_prg' => $this->acumularObservacion(
+                $programacion->observaciones_prg,
+                $data['observaciones_prg'] ?? null,
+                $request,
+                'observaciones_prg',
+                'Las observaciones de programación',
+            ) ?? $programacion->observaciones_prg,
         ]);
 
         // La corrección queda en la bitácora del caso, igual que los cambios
@@ -2301,6 +2338,45 @@ class RadicarCasoController extends Controller
     }
 
     /**
+     * Observaciones acumulables (OB TFX, Observaciones Prg / Hemo / Cvascular):
+     * firma el texto nuevo y lo agrega al final de lo ya registrado, como
+     * Observaciones CCX. Devuelve null si no se escribió nada. El tope se mide
+     * en bytes porque las columnas son TEXT.
+     */
+    private function acumularObservacion(?string $actual, ?string $texto, Request $request, string $campo, string $descripcion): ?string
+    {
+        $entrada = $this->entradaObservacionCcx($texto, $request);
+
+        if ($entrada === null) {
+            return null;
+        }
+
+        $acumulado = $this->anexarObservacionCcx($actual, $entrada);
+
+        if (strlen($acumulado) > 64000) {
+            throw ValidationException::withMessages([
+                $campo => $descripcion.' llegaron a su tope de capacidad y no admiten más texto.',
+            ]);
+        }
+
+        return $acumulado;
+    }
+
+    /**
+     * Observaciones de programación ya registradas en el caso para una grilla
+     * (cirugía, Hemo o Cvascular): las de su programación más reciente, que
+     * lleva el acumulado de las anteriores.
+     */
+    private function observacionesPrgDelCaso(int $codrad, string $tipo): ?string
+    {
+        return ProgramacionCaso::where('codrad', $codrad)
+            ->orderByDesc('id')
+            ->get(['id', 'codestsecundario', 'observaciones_prg'])
+            ->first(fn (ProgramacionCaso $p) => $p->tipoGrilla() === $tipo)
+            ?->observaciones_prg;
+    }
+
+    /**
      * Registra un evento de la radicación que no corresponde a un campo
      * concreto (creación, cambio de procedimientos, cotizaciones…).
      */
@@ -2697,6 +2773,13 @@ class RadicarCasoController extends Controller
             'ObservacionCCX' => $caso->ObservacionCCX,
             // Acumulado de Observaciones de la Revisión Clínica Hemodinamia.
             'obsRevisionHemo' => $caso->obs_revision_hemo,
+            // Observaciones de programación ya registradas, por grilla: las
+            // muestran en solo lectura los formularios completo, Hemo y Cvascular.
+            'obsPrg' => [
+                'cirugia' => $this->observacionesPrgDelCaso($caso->codrad, 'cirugia'),
+                'hemo' => $this->observacionesPrgDelCaso($caso->codrad, 'hemo'),
+                'cvascular' => $this->observacionesPrgDelCaso($caso->codrad, 'cvascular'),
+            ],
             'procedimientos' => $procedimientos,
             'autorizaciones' => $procs->pluck('N_Autorizacion')->filter()->values(),
             'cotizaciones' => $this->cotizacionesDeCaso($caso->codrad),

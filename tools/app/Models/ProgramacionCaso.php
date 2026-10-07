@@ -88,8 +88,17 @@ class ProgramacionCaso extends Model
      */
     public function tipoGrilla(): string
     {
-        $nombre = $this->codestsecundario
-            ? EstRadisecundario::find($this->codestsecundario)?->Nombre
+        return self::tipoDeEstadoQx($this->codestsecundario);
+    }
+
+    /**
+     * Grilla que corresponde a un Estado QX (id del catálogo), con la misma
+     * regla de tipoGrilla(). Sirve antes de crear la programación.
+     */
+    public static function tipoDeEstadoQx(?string $codestsecundario): string
+    {
+        $nombre = $codestsecundario
+            ? EstRadisecundario::find($codestsecundario)?->Nombre
             : null;
         $normalizado = str_replace(' ', '', strtolower(Str::ascii((string) $nombre)));
 

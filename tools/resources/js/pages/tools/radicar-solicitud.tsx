@@ -262,6 +262,12 @@ interface CasoDetalle {
     paqueteUrl: string | null;
     // Acumulado de Observaciones de la Revisión Clínica Hemodinamia.
     obsRevisionHemo?: string | null;
+    // Observaciones de programación ya registradas, por grilla.
+    obsPrg?: {
+        cirugia: string | null;
+        hemo: string | null;
+        cvascular: string | null;
+    };
     codMed: string | null;
     // Especialidad (código espcodser) para el select de Modificar Radicado.
     Codesp: string | null;
@@ -2315,7 +2321,9 @@ export default function RadicarSolicitud({
                 ? String(r.especialistaId)
                 : '',
             quirofano_id: r.quirofanoId ? String(r.quirofanoId) : '',
-            observaciones_prg: r.observaciones ?? '',
+            // Las observaciones son acumulables: lo registrado se muestra
+            // aparte y aquí solo se escribe lo nuevo.
+            observaciones_prg: '',
         });
         setProgEditError(null);
         setProgEditOpen(true);
@@ -2555,7 +2563,9 @@ export default function RadicarSolicitud({
             fecreci: caso.fecreci ?? '',
             fecAutorizacion: caso.fechaAutorizacion ?? '',
             fechavenautorizacion: caso.vencimientoAut ?? '',
-            ObservacionTFX: caso.ObservacionTFX ?? '',
+            // OB TFX es acumulable: lo registrado se muestra aparte y aquí
+            // solo se escribe lo nuevo.
+            ObservacionTFX: '',
             procedimientos: caso.procedimientos.map((p) => ({
                 cusv_id: String(p.cusv_id),
                 N_Autorizacion: p.N_Autorizacion ?? '',
@@ -6010,25 +6020,23 @@ export default function RadicarSolicitud({
                                                                 </SelectContent>
                                                             </Select>
                                                         </Field>
-                                                        <Field
+                                                        <ObservacionesCcx
                                                             label="Observaciones Prg"
-                                                            className="lg:col-span-2"
-                                                        >
-                                                            <Textarea
-                                                                value={
-                                                                    seg.observaciones_prg
-                                                                }
-                                                                onChange={(e) =>
-                                                                    setSegField(
-                                                                        'observaciones_prg',
-                                                                        e.target
-                                                                            .value,
-                                                                    )
-                                                                }
-                                                                rows={2}
-                                                                placeholder="Observaciones de la programación…"
-                                                            />
-                                                        </Field>
+                                                            className="md:col-span-2 lg:col-span-3"
+                                                            registrado={
+                                                                caso.obsPrg
+                                                                    ?.cirugia
+                                                            }
+                                                            value={
+                                                                seg.observaciones_prg
+                                                            }
+                                                            onChange={(v) =>
+                                                                setSegField(
+                                                                    'observaciones_prg',
+                                                                    v,
+                                                                )
+                                                            }
+                                                        />
                                                     </>
                                                 )}
                                                 {/* Paquete: va de último, tras
@@ -6456,31 +6464,31 @@ export default function RadicarSolicitud({
                                                                     </SelectContent>
                                                                 </Select>
                                                             </Field>
-                                                            <Field
+                                                            <ObservacionesCcx
                                                                 label={`Observaciones ${f.sufijo}`}
-                                                                className="lg:col-span-2"
-                                                            >
-                                                                <Textarea
-                                                                    value={
-                                                                        f
-                                                                            .estadoQx
-                                                                            .valores
-                                                                            .observaciones_prg
-                                                                    }
-                                                                    onChange={(
-                                                                        e,
-                                                                    ) =>
-                                                                        f.setCampo(
-                                                                            'observaciones_prg',
-                                                                            e
-                                                                                .target
-                                                                                .value,
-                                                                        )
-                                                                    }
-                                                                    rows={2}
-                                                                    placeholder="Observaciones de la programación…"
-                                                                />
-                                                            </Field>
+                                                                className="md:col-span-2 lg:col-span-3"
+                                                                registrado={
+                                                                    f.tipoProgramados ===
+                                                                    'cvascular'
+                                                                        ? caso
+                                                                              .obsPrg
+                                                                              ?.cvascular
+                                                                        : caso
+                                                                              .obsPrg
+                                                                              ?.hemo
+                                                                }
+                                                                value={
+                                                                    f.estadoQx
+                                                                        .valores
+                                                                        .observaciones_prg
+                                                                }
+                                                                onChange={(v) =>
+                                                                    f.setCampo(
+                                                                        'observaciones_prg',
+                                                                        v,
+                                                                    )
+                                                                }
+                                                            />
                                                         </>
                                                     )}
                                                     {/* Solo formulario Hemo:
@@ -8411,19 +8419,17 @@ export default function RadicarSolicitud({
                                 </SelectContent>
                             </Select>
                         </Field>
-                        <Field label="Observaciones Prg">
-                            <Textarea
-                                value={progEdit.observaciones_prg}
-                                onChange={(e) =>
-                                    setProgEdit((prev) => ({
-                                        ...prev,
-                                        observaciones_prg: e.target.value,
-                                    }))
-                                }
-                                rows={3}
-                                placeholder="Observaciones de la programación…"
-                            />
-                        </Field>
+                        <ObservacionesCcx
+                            label="Observaciones Prg"
+                            registrado={progEditRow?.observaciones}
+                            value={progEdit.observaciones_prg}
+                            onChange={(v) =>
+                                setProgEdit((prev) => ({
+                                    ...prev,
+                                    observaciones_prg: v,
+                                }))
+                            }
+                        />
                     </div>
 
                     {progEditError && (
@@ -8800,20 +8806,13 @@ export default function RadicarSolicitud({
                                 )}
                             </span>
                         </div>
-                        <div className="grid gap-2 sm:col-span-2">
-                            <Label>OB TFX</Label>
-                            <Textarea
-                                value={modif.ObservacionTFX}
-                                onChange={(e) =>
-                                    setModifField(
-                                        'ObservacionTFX',
-                                        e.target.value,
-                                    )
-                                }
-                                rows={2}
-                                placeholder="Observación (opcional)"
-                            />
-                        </div>
+                        <ObservacionesCcx
+                            label="OB TFX"
+                            className="sm:col-span-2"
+                            registrado={caso?.ObservacionTFX}
+                            value={modif.ObservacionTFX}
+                            onChange={(v) => setModifField('ObservacionTFX', v)}
+                        />
                     </div>
 
                     {/* Códigos CUPS del radicado */}

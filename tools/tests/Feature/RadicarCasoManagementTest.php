@@ -1762,7 +1762,8 @@ test('el formulario Hemo guarda el Estado QX y la programación de cirugía', fu
         ->and($prog)->not->toBeNull()
         ->and($prog->fecha_programacion->format('Y-m-d H:i'))->toBe('2026-09-25 08:00')
         ->and($prog->especialista_medico_id)->toBe($especialista->id)
-        ->and($prog->observaciones_prg)->toBe('Cateterismo');
+        // Firmada con el nombre de quien la escribe, como Observaciones CCX.
+        ->and($prog->observaciones_prg)->toStartWith("Cateterismo\n— ");
 });
 
 test('sin ninguno de los dos formularios asignados no se puede guardar el seguimiento', function () {
