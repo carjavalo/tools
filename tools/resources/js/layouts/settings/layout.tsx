@@ -6,25 +6,29 @@ import { edit as editAppearance } from '@/routes/appearance';
 import { edit as editPassword } from '@/routes/password';
 import { edit } from '@/routes/profile';
 import { show } from '@/routes/two-factor';
-import { type NavItem } from '@/types';
-import { Link } from '@inertiajs/react';
+import { type NavItem, type SharedData } from '@/types';
+import { Link, usePage } from '@inertiajs/react';
 import { type PropsWithChildren } from 'react';
 
-const sidebarNavItems: NavItem[] = [
+// `opcion`: clave en el Gestor Menú de Usuario (sin ella, siempre visible).
+const sidebarNavItems: (NavItem & { opcion?: string })[] = [
     {
         title: 'Profile',
         href: edit(),
         icon: null,
+        opcion: 'perfil',
     },
     {
         title: 'Password',
         href: editPassword(),
         icon: null,
+        opcion: 'password',
     },
     {
         title: 'Two-Factor Auth',
         href: show(),
         icon: null,
+        opcion: 'two-factor',
     },
     {
         title: 'Appearance',
@@ -34,6 +38,11 @@ const sidebarNavItems: NavItem[] = [
 ];
 
 export default function SettingsLayout({ children }: PropsWithChildren) {
+    const menuUsuario = usePage<SharedData>().props.auth.menuUsuario ?? {};
+    const navItems = sidebarNavItems.filter(
+        (item) => !item.opcion || menuUsuario[item.opcion] !== false,
+    );
+
     // When server-side rendering, we only render the layout on the client...
     if (typeof window === 'undefined') {
         return null;
@@ -51,7 +60,7 @@ export default function SettingsLayout({ children }: PropsWithChildren) {
             <div className="flex flex-col lg:flex-row lg:space-x-12">
                 <aside className="w-full max-w-xl lg:w-48">
                     <nav className="flex flex-col space-y-1 space-x-0">
-                        {sidebarNavItems.map((item, index) => (
+                        {navItems.map((item, index) => (
                             <Button
                                 key={`${typeof item.href === 'string' ? item.href : (item.href?.url ?? '')}-${index}`}
                                 size="sm"

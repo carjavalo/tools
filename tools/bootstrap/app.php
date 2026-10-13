@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\CheckMenuUsuario;
 use App\Http\Middleware\CheckPermisoVista;
 use App\Http\Middleware\EnsureUserHasRole;
 use App\Http\Middleware\HandleAppearance;
@@ -23,6 +24,8 @@ return Application::configure(basePath: dirname(__DIR__))
             HandleAppearance::class,
             HandleInertiaRequests::class,
             AddLinkHeadersForPreloadedAssets::class,
+            // Opciones de la cuenta negadas al rol en el Gestor Menú de Usuario.
+            CheckMenuUsuario::class,
         ]);
 
         $middleware->alias([

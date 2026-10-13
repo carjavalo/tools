@@ -55,6 +55,8 @@ const accesos = [
         href: editProfile().url,
         icon: UserCog,
         roles: undefined as string[] | undefined,
+        // Opción del Gestor Menú de Usuario que la gobierna.
+        opcion: 'perfil',
     },
 ];
 
@@ -64,12 +66,14 @@ const cuenta = [
         description: 'Edita tu nombre y correo electrónico.',
         href: editProfile().url,
         icon: UserCog,
+        opcion: 'perfil',
     },
     {
         title: 'Cambiar contraseña',
         description: 'Actualiza tu contraseña de acceso.',
         href: editPassword().url,
         icon: KeyRound,
+        opcion: 'password',
     },
 ];
 
@@ -117,11 +121,19 @@ export default function Dashboard() {
         return esOperador;
     };
 
+    // Opciones de la cuenta negadas al rol en el Gestor Menú de Usuario.
+    const menuUsuario = auth.menuUsuario ?? {};
+    const permiteOpcion = (opcion?: string) =>
+        !opcion || menuUsuario[opcion] !== false;
+
     const accesosVisibles = accesos.filter(
         (a) =>
             (!a.roles || (rol ? a.roles.includes(rol) : false)) &&
-            permiteVer(a.href),
+            permiteVer(a.href) &&
+            permiteOpcion('opcion' in a ? a.opcion : undefined),
     );
+
+    const cuentaVisible = cuenta.filter((c) => permiteOpcion(c.opcion));
 
     return (
         <AppLayout breadcrumbs={breadcrumbs}>
@@ -129,7 +141,7 @@ export default function Dashboard() {
 
             <div className="flex h-full flex-1 flex-col gap-6 p-4 md:p-6">
                 {/* Banner de bienvenida */}
-                <section className="hero-gradient relative overflow-hidden rounded-2xl p-6 text-white shadow-lg md:p-8">
+                <section className="relative overflow-hidden rounded-2xl p-6 text-white shadow-lg hero-gradient md:p-8">
                     <div className="relative z-10 flex flex-col gap-2">
                         <span className="text-sm font-medium text-white/80">
                             {fecha}
@@ -184,7 +196,7 @@ export default function Dashboard() {
                                 className="group focus-visible:outline-none"
                                 prefetch
                             >
-                                <Card className="hover-lift h-full transition-colors group-hover:border-[#2d3e83]/40">
+                                <Card className="h-full hover-lift transition-colors group-hover:border-[#2d3e83]/40">
                                     <CardHeader>
                                         <div className="mb-2 flex size-11 items-center justify-center rounded-xl bg-[#2d3e83]/10 text-[#2d3e83] dark:bg-white/10 dark:text-white">
                                             <item.icon className="size-6" />
@@ -204,36 +216,38 @@ export default function Dashboard() {
                 </section>
 
                 {/* Gestión de cuenta */}
-                <section className="flex flex-col gap-3">
-                    <h2 className="text-lg font-semibold text-foreground">
-                        Mi cuenta
-                    </h2>
-                    <div className="grid gap-4 sm:grid-cols-2">
-                        {cuenta.map((item) => (
-                            <Link
-                                key={item.title}
-                                href={item.href}
-                                className="group focus-visible:outline-none"
-                                prefetch
-                            >
-                                <Card className="hover-lift flex h-full flex-row items-center gap-4 p-4 transition-colors group-hover:border-[#2d3e83]/40">
-                                    <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-[#2d3e83]/10 text-[#2d3e83] dark:bg-white/10 dark:text-white">
-                                        <item.icon className="size-6" />
-                                    </div>
-                                    <CardContent className="flex flex-1 flex-col p-0">
-                                        <span className="font-medium text-foreground">
-                                            {item.title}
-                                        </span>
-                                        <span className="text-sm text-muted-foreground">
-                                            {item.description}
-                                        </span>
-                                    </CardContent>
-                                    <ArrowRight className="size-4 text-muted-foreground transition-transform group-hover:translate-x-1 group-hover:text-[#2d3e83] dark:group-hover:text-white" />
-                                </Card>
-                            </Link>
-                        ))}
-                    </div>
-                </section>
+                {cuentaVisible.length > 0 && (
+                    <section className="flex flex-col gap-3">
+                        <h2 className="text-lg font-semibold text-foreground">
+                            Mi cuenta
+                        </h2>
+                        <div className="grid gap-4 sm:grid-cols-2">
+                            {cuentaVisible.map((item) => (
+                                <Link
+                                    key={item.title}
+                                    href={item.href}
+                                    className="group focus-visible:outline-none"
+                                    prefetch
+                                >
+                                    <Card className="flex h-full hover-lift flex-row items-center gap-4 p-4 transition-colors group-hover:border-[#2d3e83]/40">
+                                        <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-[#2d3e83]/10 text-[#2d3e83] dark:bg-white/10 dark:text-white">
+                                            <item.icon className="size-6" />
+                                        </div>
+                                        <CardContent className="flex flex-1 flex-col p-0">
+                                            <span className="font-medium text-foreground">
+                                                {item.title}
+                                            </span>
+                                            <span className="text-sm text-muted-foreground">
+                                                {item.description}
+                                            </span>
+                                        </CardContent>
+                                        <ArrowRight className="size-4 text-muted-foreground transition-transform group-hover:translate-x-1 group-hover:text-[#2d3e83] dark:group-hover:text-white" />
+                                    </Card>
+                                </Link>
+                            ))}
+                        </div>
+                    </section>
+                )}
             </div>
         </AppLayout>
     );

@@ -32,6 +32,7 @@ import {
     MessageSquareText,
     Shield,
     Stethoscope,
+    UserCog,
     Users,
     Wrench,
 } from 'lucide-react';
@@ -139,6 +140,12 @@ const mainNavItems: NavItem[] = [
                 title: 'Gestor de Permisos',
                 href: '/tools/gestor-permisos',
                 icon: KeyRound,
+                roles: ['Super Admin'],
+            },
+            {
+                title: 'Gestor Menú de Usuario',
+                href: '/tools/gestor-menu-usuario',
+                icon: UserCog,
                 roles: ['Super Admin'],
             },
             {

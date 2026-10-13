@@ -5,6 +5,7 @@ namespace App\Http\Middleware;
 use App\Models\Permiso;
 use App\Models\Role;
 use App\Models\User;
+use App\Support\MenuUsuario;
 use App\Support\Sede;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Http\Request;
@@ -49,6 +50,8 @@ class HandleInertiaRequests extends Middleware
             'auth' => [
                 'user' => $request->user(),
                 'permisos' => $this->permisosDelUsuario($request),
+                // Opciones de la cuenta que el rol puede usar (Gestor Menú de Usuario).
+                'menuUsuario' => fn () => MenuUsuario::permitidasPara($request->user()),
                 // Diferida: solo se calcula cuando la respuesta es una página,
                 // no en cada consulta JSON de las grillas.
                 'sede' => fn () => $this->sedeDelUsuario($request),
