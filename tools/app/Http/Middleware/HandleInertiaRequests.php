@@ -50,7 +50,7 @@ class HandleInertiaRequests extends Middleware
             'auth' => [
                 'user' => $request->user(),
                 'permisos' => $this->permisosDelUsuario($request),
-                // Opciones de la cuenta que el rol puede usar (Gestor Menú de Usuario).
+                // Opciones de la cuenta que el rol puede usar (Gestor de Permisos (menú de usuario)).
                 'menuUsuario' => fn () => MenuUsuario::permitidasPara($request->user()),
                 // Diferida: solo se calcula cuando la respuesta es una página,
                 // no en cada consulta JSON de las grillas.

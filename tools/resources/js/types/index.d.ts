@@ -7,7 +7,7 @@ export interface Auth {
         string,
         { ver: boolean; crear: boolean; editar: boolean; borrar: boolean }
     >;
-    // Opciones de la cuenta que el rol puede usar (Gestor Menú de Usuario):
+    // Opciones de la cuenta que el rol puede usar (Gestor de Permisos (menú de usuario)):
     // perfil, password, two-factor, eliminar-cuenta.
     menuUsuario?: Record<string, boolean>;
     // Sede en la que trabaja la sesión (la de la opción por la que ingresó)

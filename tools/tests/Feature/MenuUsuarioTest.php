@@ -6,7 +6,7 @@ use App\Support\MenuUsuario;
 use Illuminate\Support\Facades\DB;
 use Inertia\Testing\AssertableInertia as Assert;
 
-// Gestor Menú de Usuario: el Super Admin decide por rol qué opciones de la
+// Gestor de Permisos (menú de usuario): el Super Admin decide por rol qué opciones de la
 // cuenta (cambiar cuenta, contraseña, dos pasos, eliminar cuenta) puede usar.
 // Sin configurar se permiten, como siempre.
 
@@ -60,21 +60,22 @@ test('bloquear eliminar cuenta impide borrarla', function () {
     expect($user->fresh())->not->toBeNull();
 });
 
-test('el Super Admin guarda el menú de usuario de un rol', function () {
+test('el Super Admin guarda el menú de usuario de un rol desde el Gestor de Permisos', function () {
     $admin = User::factory()->create(['rol' => User::SUPER_ADMIN]);
     $role = Role::firstOrCreate(['Nombre' => 'Gestor Radicación'], ['Estado' => true]);
 
     $this->actingAs($admin)
-        ->get("/tools/gestor-menu-usuario?role={$role->id}")
+        ->get("/tools/gestor-permisos?role={$role->id}")
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
-            ->component('tools/gestor-menu-usuario')
-            ->where('roleId', $role->id)
-            ->where('permitidas.perfil', true));
+            ->component('tools/gestor-permisos')
+            ->where('menuUsuario.perfil', true)
+            ->has('menuOpciones', count(MenuUsuario::OPCIONES)));
 
-    $this->actingAs($admin)->post("/tools/gestor-menu-usuario/{$role->id}", [
-        'opciones' => ['perfil' => false, 'password' => false, 'two-factor' => true, 'eliminar-cuenta' => false],
-    ])->assertRedirect(route('tools.gestor-menu-usuario', ['role' => $role->id]));
+    $this->actingAs($admin)->post("/tools/gestor-permisos/{$role->id}", [
+        'permisos' => ['gestion-usuarios' => ['ver' => true, 'crear' => true, 'editar' => true, 'borrar' => true]],
+        'menu_usuario' => ['perfil' => false, 'password' => false, 'two-factor' => true, 'eliminar-cuenta' => false],
+    ])->assertRedirect(route('tools.gestor-permisos', ['role' => $role->id]));
 
     expect(MenuUsuario::delRol($role))->toBe([
         'perfil' => false,
@@ -82,11 +83,4 @@ test('el Super Admin guarda el menú de usuario de un rol', function () {
         'two-factor' => true,
         'eliminar-cuenta' => false,
     ]);
-});
-
-test('solo el Super Admin entra al Gestor Menú de Usuario', function () {
-    Role::firstOrCreate(['Nombre' => 'Operador'], ['Estado' => true]);
-    $user = User::factory()->create(['rol' => 'Operador']);
-
-    $this->actingAs($user)->get('/tools/gestor-menu-usuario')->assertForbidden();
 });

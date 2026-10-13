@@ -11,8 +11,8 @@ class CheckMenuUsuario
 {
     /**
      * Niega las rutas de la cuenta (perfil, contraseña, dos pasos, eliminar
-     * cuenta) a los roles que no tienen la opción en el Gestor Menú de
-     * Usuario. Va en el grupo web para alcanzar también las rutas de Fortify,
+     * cuenta) a los roles que no tienen la opción en el menú de usuario del
+     * Gestor de Permisos. Va en el grupo web para alcanzar también las rutas de Fortify,
      * y se reconoce cada ruta por su nombre.
      */
     public function handle(Request $request, Closure $next): Response

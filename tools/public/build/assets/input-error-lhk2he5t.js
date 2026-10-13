@@ -1,0 +1,1 @@
+import{j as n}from"./app-By0VUw89.js";import{a as o}from"./createLucideIcon-BL0DwwuM.js";function a({message:r,className:t="",...e}){return r?n.jsx("p",{...e,className:o("text-sm text-red-600 dark:text-red-400",t),children:r}):null}export{a as I};

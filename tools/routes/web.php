@@ -130,10 +130,6 @@ Route::prefix('tools')->name('tools.')->group(function () {
         Route::get('gestor-permisos', [App\Http\Controllers\GestorPermisosController::class, 'index'])->name('gestor-permisos');
         Route::post('gestor-permisos/{role}', [App\Http\Controllers\GestorPermisosController::class, 'guardar'])->name('gestor-permisos.guardar');
 
-        // Gestor Menú de Usuario: opciones de la cuenta por rol (solo Super Admin; validado en el controlador)
-        Route::get('gestor-menu-usuario', [App\Http\Controllers\GestorMenuUsuarioController::class, 'index'])->name('gestor-menu-usuario');
-        Route::post('gestor-menu-usuario/{role}', [App\Http\Controllers\GestorMenuUsuarioController::class, 'guardar'])->name('gestor-menu-usuario.guardar');
-
         // Herramientas - Seguimiento: bitácora de actividad (solo consulta)
         Route::get('herramientas-seguimiento', [App\Http\Controllers\AuditoriaController::class, 'index'])->name('herramientas-seguimiento');
 

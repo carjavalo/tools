@@ -11,7 +11,7 @@ return new class extends Migration
      *
      * Opciones del menú de usuario (Cambiar cuenta, Cambiar contraseña,
      * autenticación en dos pasos, eliminar cuenta) que cada rol puede usar,
-     * configuradas en el Gestor Menú de Usuario. Una opción sin fila para el
+     * configuradas en el Gestor de Permisos (menú de usuario). Una opción sin fila para el
      * rol se permite (el comportamiento de siempre). El Super Admin no se
      * configura: siempre las tiene todas.
      */

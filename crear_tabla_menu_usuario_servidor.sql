@@ -1,5 +1,5 @@
 -- ============================================================================
---  Gestor Menú de Usuario (opciones de la cuenta por rol)
+--  Gestor de Permisos (menú de usuario) (opciones de la cuenta por rol)
 --  Equivalente exacto de la migración nueva, para aplicar en phpMyAdmin
 --  cuando no se pueda ejecutar "php artisan migrate" en el servidor.
 --

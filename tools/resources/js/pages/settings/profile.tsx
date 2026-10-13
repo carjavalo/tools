@@ -141,7 +141,7 @@ export default function Profile({
                     </Form>
                 </div>
 
-                {/* Opción del Gestor Menú de Usuario; sin configurar, se permite. */}
+                {/* Opción del Gestor de Permisos (menú de usuario); sin configurar, se permite. */}
                 {auth.menuUsuario?.['eliminar-cuenta'] !== false && (
                     <DeleteUser />
                 )}

@@ -59,6 +59,9 @@ interface PageProps {
     sedesRol: string[];
     // Pacientes y médicos: son de las dos sedes y no se configuran.
     sedesFijas: boolean;
+    // Opciones de la cuenta (menú de usuario) que el rol puede usar.
+    menuOpciones: { key: string; titulo: string; descripcion: string }[];
+    menuUsuario: Record<string, boolean>;
 }
 
 const breadcrumbs: BreadcrumbItem[] = [
@@ -94,6 +97,8 @@ export default function GestorPermisos({
     sedesList,
     sedesRol,
     sedesFijas,
+    menuOpciones,
+    menuUsuario,
 }: PageProps) {
     const { flash } = usePage<SharedData>().props;
     const [matriz, setMatriz] = useState<Record<string, Flags>>(permisos);
@@ -106,6 +111,8 @@ export default function GestorPermisos({
     const [audModulos, setAudModulos] = useState<string[]>(auditoriaModulos);
     // Sedes por las que puede ingresar el rol.
     const [sedes, setSedes] = useState<string[]>(sedesRol);
+    // Opciones del menú de usuario (cambiar cuenta, contraseña...).
+    const [menu, setMenu] = useState<Record<string, boolean>>(menuUsuario);
     const [saving, setSaving] = useState(false);
     const [notice, setNotice] = useState<{
         type: 'success' | 'error';
@@ -121,6 +128,7 @@ export default function GestorPermisos({
         setAudRoles(auditoriaRoles);
         setAudModulos(auditoriaModulos);
         setSedes(sedesRol);
+        setMenu(menuUsuario);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [roleId]);
 
@@ -248,6 +256,7 @@ export default function GestorPermisos({
                 auditoria_roles: audRoles,
                 auditoria_modulos: audModulos,
                 sedes,
+                menu_usuario: menu,
             },
             {
                 preserveScroll: true,
@@ -714,6 +723,97 @@ export default function GestorPermisos({
                             para este rol en la matriz de permisos de abajo.
                         </p>
                     )}
+                </div>
+
+                {/* Menú de usuario: opciones de la cuenta que puede usar el rol */}
+                <div className="rounded-xl border bg-card p-4 shadow-sm">
+                    <div className="mb-1 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="flex items-center gap-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+                            <UserCog className="size-4" />
+                            Menú de usuario de {rolActivo?.Nombre ?? 'el rol'}
+                        </div>
+                        <div className="flex gap-2">
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() =>
+                                    setMenu(
+                                        Object.fromEntries(
+                                            menuOpciones.map((o) => [
+                                                o.key,
+                                                true,
+                                            ]),
+                                        ),
+                                    )
+                                }
+                            >
+                                Permitir todas
+                            </Button>
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() =>
+                                    setMenu(
+                                        Object.fromEntries(
+                                            menuOpciones.map((o) => [
+                                                o.key,
+                                                false,
+                                            ]),
+                                        ),
+                                    )
+                                }
+                            >
+                                Bloquear todas
+                            </Button>
+                        </div>
+                    </div>
+                    <p className="mb-3 text-xs text-muted-foreground">
+                        Opciones de su propia cuenta que pueden usar los
+                        usuarios del rol. Una opción bloqueada desaparece del
+                        menú de usuario, de Mi cuenta en el inicio y de la
+                        configuración; si entran por la dirección, el sistema
+                        los devuelve al inicio. Sin configurar, se permiten.
+                    </p>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                        {menuOpciones.map((o) => {
+                            const activa = menu[o.key] !== false;
+                            return (
+                                <label
+                                    key={o.key}
+                                    className="flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-2 hover:bg-muted/60"
+                                >
+                                    <div className="flex flex-1 flex-col">
+                                        <span className="text-sm font-medium text-foreground">
+                                            {o.titulo}
+                                        </span>
+                                        <span className="text-xs text-muted-foreground">
+                                            {o.descripcion}
+                                        </span>
+                                    </div>
+                                    <span
+                                        className={`text-xs font-medium ${
+                                            activa
+                                                ? 'text-green-700 dark:text-green-300'
+                                                : 'text-amber-700 dark:text-amber-300'
+                                        }`}
+                                    >
+                                        {activa ? 'Permitida' : 'Bloqueada'}
+                                    </span>
+                                    <Switch
+                                        checked={activa}
+                                        onCheckedChange={(v) =>
+                                            setMenu((prev) => ({
+                                                ...prev,
+                                                [o.key]: v,
+                                            }))
+                                        }
+                                    />
+                                </label>
+                            );
+                        })}
+                    </div>
                 </div>
 
                 {/* Matriz de permisos */}

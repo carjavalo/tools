@@ -19,7 +19,7 @@ interface UserMenuContentProps {
 
 export function UserMenuContent({ user }: UserMenuContentProps) {
     const cleanup = useMobileNavigation();
-    // Opciones de la cuenta habilitadas al rol en el Gestor Menú de Usuario;
+    // Opciones de la cuenta habilitadas al rol en el Gestor de Permisos (menú de usuario);
     // sin configurar, se permiten.
     const menuUsuario = usePage<SharedData>().props.auth.menuUsuario ?? {};
     const puedePerfil = menuUsuario.perfil !== false;

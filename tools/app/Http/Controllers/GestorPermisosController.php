@@ -7,6 +7,7 @@ use App\Models\EstRadisecundario;
 use App\Models\Permiso;
 use App\Models\Role;
 use App\Models\User;
+use App\Support\MenuUsuario;
 use App\Support\Sede;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -94,6 +95,12 @@ class GestorPermisosController extends Controller
                 ->values(),
             'sedesRol' => $rolActivo ? Sede::delRol($rolActivo) : [Sede::CALI],
             'sedesFijas' => $rolActivo && Sede::rolSinRestriccion($rolActivo->Nombre),
+            // Menú de usuario: opciones de la cuenta que el rol puede usar.
+            // Sin configurar, se permiten.
+            'menuOpciones' => MenuUsuario::OPCIONES,
+            'menuUsuario' => $rolActivo
+                ? MenuUsuario::delRol($rolActivo)
+                : array_fill_keys(MenuUsuario::claves(), true),
         ]);
     }
 
@@ -124,6 +131,8 @@ class GestorPermisosController extends Controller
             // Sin ninguna sede el rol no podría ingresar por ninguna opción.
             'sedes' => ['sometimes', 'array', 'min:1'],
             'sedes.*' => ['string', Rule::in(Sede::claves())],
+            'menu_usuario' => ['sometimes', 'array'],
+            'menu_usuario.*' => ['boolean'],
         ], [
             'sedes.min' => 'Marca al menos una sede: sin ninguna, el rol no podría ingresar al sistema.',
         ]);
@@ -140,6 +149,17 @@ class GestorPermisosController extends Controller
                     'updated_at' => now(),
                 ]);
             }
+        }
+
+        foreach ($data['menu_usuario'] ?? [] as $opcion => $permitido) {
+            if (! in_array($opcion, MenuUsuario::claves(), true)) {
+                continue;
+            }
+
+            DB::table('role_menu_usuario')->updateOrInsert(
+                ['role_id' => $role->id, 'opcion' => $opcion],
+                ['permitido' => $permitido, 'created_at' => now(), 'updated_at' => now()],
+            );
         }
 
         $role->rolesAsignables()->sync($data['roles_asignables'] ?? []);

@@ -8,7 +8,7 @@ use Illuminate\Support\Facades\DB;
 
 /**
  * Opciones del menú de usuario (la cuenta de cada quien) que el Super Admin
- * habilita o niega por rol en el Gestor Menú de Usuario.
+ * habilita o niega por rol en el Gestor de Permisos (menú de usuario).
  *
  * Una opción sin configurar para el rol se permite; el Super Admin siempre
  * las tiene todas.

@@ -55,7 +55,7 @@ const accesos = [
         href: editProfile().url,
         icon: UserCog,
         roles: undefined as string[] | undefined,
-        // Opción del Gestor Menú de Usuario que la gobierna.
+        // Opción del Gestor de Permisos (menú de usuario) que la gobierna.
         opcion: 'perfil',
     },
 ];
@@ -121,7 +121,7 @@ export default function Dashboard() {
         return esOperador;
     };
 
-    // Opciones de la cuenta negadas al rol en el Gestor Menú de Usuario.
+    // Opciones de la cuenta negadas al rol en el Gestor de Permisos (menú de usuario).
     const menuUsuario = auth.menuUsuario ?? {};
     const permiteOpcion = (opcion?: string) =>
         !opcion || menuUsuario[opcion] !== false;

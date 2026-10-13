@@ -10,7 +10,7 @@ import { type NavItem, type SharedData } from '@/types';
 import { Link, usePage } from '@inertiajs/react';
 import { type PropsWithChildren } from 'react';
 
-// `opcion`: clave en el Gestor Menú de Usuario (sin ella, siempre visible).
+// `opcion`: clave en el Gestor de Permisos (menú de usuario) (sin ella, siempre visible).
 const sidebarNavItems: (NavItem & { opcion?: string })[] = [
     {
         title: 'Profile',
