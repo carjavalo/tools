@@ -40,6 +40,7 @@ import {
     FileSpreadsheet,
     FileText,
     Hospital,
+    ListChecks,
     LoaderCircle,
     Lock,
     MapPin,
@@ -404,7 +405,13 @@ function AmbitoBadge({ ambito }: { ambito: Ambito | undefined }) {
 }
 
 /** Pestañas de la vista, en el orden en que se muestran. */
-const PESTANAS = ['nueva', 'hospitalario', 'historial', 'informes'] as const;
+const PESTANAS = [
+    'nueva',
+    'hospitalario',
+    'historial',
+    'informes',
+    'consultas',
+] as const;
 type Pestana = (typeof PESTANAS)[number];
 
 const breadcrumbs: BreadcrumbItem[] = [
@@ -856,6 +863,57 @@ const EMPTY_SEG_CVASCULAR = { ...EMPTY_SEG_HEMO };
 /** Qué grilla muestra el modal "Ver programados". */
 type TipoProgramados = 'cirugia' | 'hemo' | 'cvascular';
 
+/** Orden elegido en los encabezados de una grilla (null = el original). */
+type Orden<C extends string> = { col: C; dir: 'asc' | 'desc' } | null;
+
+/** Valor de una celda para ordenar. null = vacío, siempre al final. */
+type ValorOrden = string | number | null;
+
+/** Texto para ordenar: '' y '—' cuentan como vacío. */
+const textoOrden = (v: string | null | undefined): ValorOrden => {
+    const t = (v ?? '').trim();
+    return t === '' || t === '—' ? null : t;
+};
+
+/** Clic en un encabezado: ascendente → descendente → orden original. */
+const siguienteOrden = <C extends string>(o: Orden<C>, col: C): Orden<C> =>
+    o?.col !== col
+        ? { col, dir: 'asc' }
+        : o.dir === 'asc'
+          ? { col, dir: 'desc' }
+          : null;
+
+/**
+ * Filas en el orden elegido. Sin orden se devuelven tal cual (el orden del
+ * servidor). Los vacíos quedan al final en ambos sentidos; los textos se
+ * comparan sin distinguir mayúsculas ni tildes y con los números en orden
+ * natural.
+ */
+function ordenarFilas<T, C extends string>(
+    rows: T[],
+    orden: Orden<C>,
+    valor: (r: T, col: C) => ValorOrden,
+): T[] {
+    if (!orden) return rows;
+    const { col, dir } = orden;
+    const signo = dir === 'asc' ? 1 : -1;
+    return [...rows].sort((a, b) => {
+        const va = valor(a, col);
+        const vb = valor(b, col);
+        if (va === null && vb === null) return 0;
+        if (va === null) return 1;
+        if (vb === null) return -1;
+        const cmp =
+            typeof va === 'number' && typeof vb === 'number'
+                ? va - vb
+                : String(va).localeCompare(String(vb), 'es', {
+                      numeric: true,
+                      sensitivity: 'base',
+                  });
+        return cmp * signo;
+    });
+}
+
 /** Columnas por las que se puede ordenar la grilla de "Ver programados". */
 type ColProgramados =
     | 'codrad'
@@ -871,58 +929,150 @@ type ColProgramados =
     | 'cotizacion'
     | 'observaciones';
 
-type OrdenProgramados = { col: ColProgramados; dir: 'asc' | 'desc' } | null;
-
-/**
- * Valor de una fila para ordenar por la columna dada. null = vacío ('—'),
- * que siempre queda al final sin importar el sentido.
- */
 const valorOrdenProgramado = (
     r: ProgramadoRow,
     col: ColProgramados,
-): string | number | null => {
-    const texto = (v: string | null | undefined) => {
-        const t = (v ?? '').trim();
-        return t === '' || t === '—' ? null : t;
-    };
+): ValorOrden => {
     switch (col) {
         case 'codrad':
             return r.codrad;
         case 'fechaProgramacion':
             // 'AAAA-MM-DD HH:mm' ordena bien como texto.
-            return texto(r.fechaProgramacionInput ?? r.fechaProgramacion);
+            return textoOrden(r.fechaProgramacionInput ?? r.fechaProgramacion);
         case 'paquete':
             return r.paqueteUrl ? 1 : null;
         case 'cotizacion':
-            return r.cotizaciones.length === 0
-                ? null
-                : r.cotizaciones
-                      .map((c) => c.tercero || 'Ver PDF')
-                      .join(', ');
+            return textoOrden(
+                r.cotizaciones.map((c) => c.tercero || 'Ver PDF').join(', '),
+            );
         default:
-            return texto(r[col]);
+            return textoOrden(r[col]);
     }
 };
 
 /**
- * Encabezado de la grilla de "Ver programados" que ordena al hacer clic:
- * ascendente → descendente → orden original (más reciente primero).
+ * Columnas de la grilla de INFORMES / CONSULTAS, en el orden en que se
+ * muestran: clave para ordenar y título del encabezado.
  */
-function ThOrdenable({
+const COLS_INFORME = [
+    ['codrad', 'N° Caso'],
+    ['fechaRecibido', 'Fecha Recibido'],
+    // Va junto a Fecha Recibido y no al final: es la columna que filtran
+    // Fecha Inicial y Final Programados.
+    ['fechasProgramacion', 'Fecha y Hora de Programación'],
+    ['documento', 'Documento'],
+    ['paciente', 'Paciente'],
+    ['telefonos', 'Teléfonos'],
+    ['tipo', 'Tipo'],
+    ['campo', 'Campo'],
+    ['nuevo', 'Cambio'],
+    ['estado', 'Estado'],
+    ['eps', 'Aseguradora (EPS)'],
+    ['convenio', 'Convenio'],
+    ['copago', 'Copago'],
+    ['maos', 'MAOS'],
+    ['paquete', 'Paquete'],
+    ['cotizacion', 'Cotización'],
+    ['medico', 'Médico'],
+    ['especialidad', 'Especialidad'],
+    ['motivo', 'Motivo'],
+    ['subespecialidad', 'Subespecialidad'],
+    ['cups', 'CUPS'],
+    ['autorizacionesCups', 'Autorizaciones'],
+    ['entregaProg', 'Entrega al Serv'],
+    ['fechaRecibidoDev', 'Fec. Recibido Serv'],
+    ['fechaAutorizacion', 'Fecha Autorización'],
+    ['vencimientoAut', 'Venc. Aut.'],
+    ['vencAnestesia', 'Venc. Anest.'],
+    ['observacion', 'Observación'],
+    ['observacionTfx', 'OB TFX'],
+    ['observacionCcxCaso', 'Observaciones CCX'],
+    ['estadoQx', 'Estado QX'],
+    ['usuario', 'Usuario'],
+    ['modificadoEn', 'Modificado'],
+] as const;
+
+type ColInforme = (typeof COLS_INFORME)[number][0];
+
+const valorOrdenInforme = (r: InformeRow, col: ColInforme): ValorOrden => {
+    switch (col) {
+        case 'codrad':
+            return r.codrad;
+        // Con copago se ordena por su valor; sin copago, al final.
+        case 'copago':
+            return r.copago ? Number(r.valorCopago) || 0 : null;
+        case 'maos':
+            return r.maos ? 1 : null;
+        case 'paquete':
+            return r.paqueteUrl ? 1 : null;
+        case 'cotizacion':
+            return textoOrden(r.cotizaciones.map((c) => c.tercero).join(', '));
+        case 'fechasProgramacion':
+            return textoOrden(r.fechasProgramacion[0]);
+        case 'cups':
+        case 'autorizacionesCups':
+            return textoOrden(r[col].join(', '));
+        default:
+            return textoOrden(r[col]);
+    }
+};
+
+/** Columnas de la grilla de radicaciones del Historial, en su orden. */
+const COLS_HISTORIAL = [
+    ['codrad', 'Caso N°'],
+    ['fecha', 'Fecha'],
+    ['paciente', 'Paciente'],
+    ['documento', 'Identificación'],
+    ['eps', 'EPS'],
+    ['procedimientos', 'Códigos CUPS & procedimientos'],
+    ['convenio', 'Convenio'],
+    ['servicio', 'Servicio asignado'],
+    ['estado', 'Estado'],
+    // Los PDF de los conceptos cotizados los ve todo el que ve la grilla:
+    // sirven para verificar qué se cotizó.
+    ['cotizacion', 'Cotización'],
+] as const;
+
+type ColHistorial = (typeof COLS_HISTORIAL)[number][0];
+
+const valorOrdenHistorial = (
+    c: CasoListaRow,
+    col: ColHistorial,
+): ValorOrden => {
+    switch (col) {
+        case 'codrad':
+            return c.codrad;
+        case 'procedimientos':
+            return textoOrden(c.procedimientos.map((p) => p.codigo).join(', '));
+        case 'cotizacion':
+            return textoOrden(c.cotizaciones.map((t) => t.tercero).join(', '));
+        default:
+            return textoOrden(c[col]);
+    }
+};
+
+/**
+ * Encabezado de grilla que ordena al hacer clic: ascendente → descendente →
+ * orden original. Lo usan "Ver programados", INFORMES / CONSULTAS y la
+ * grilla del Historial.
+ */
+function ThOrdenable<C extends string>({
     col,
     orden,
     onOrdenar,
     children,
+    className = 'px-3 py-2',
 }: {
-    col: ColProgramados;
-    orden: OrdenProgramados;
-    onOrdenar: (col: ColProgramados) => void;
+    col: C;
+    orden: Orden<C>;
+    onOrdenar: (col: C) => void;
     children: ReactNode;
+    className?: string;
 }) {
     const dir = orden?.col === col ? orden.dir : null;
     return (
         <th
-            className="px-3 py-2"
+            className={className}
             aria-sort={
                 dir === 'asc'
                     ? 'ascending'
@@ -971,6 +1121,8 @@ const EMPTY_INF = {
     // Fecha Inicial / Fecha Final, que es el de los movimientos.
     programadoInicial: '',
     programadoFinal: '',
+    // EPS del paciente (nombre). Solo lo ofrece la pestaña CONSULTAS.
+    eps: '',
 };
 
 /** Muestra un monto en pesos; '—' cuando no hay valor. */
@@ -1163,6 +1315,131 @@ function CupsCombobox({
                                         </span>
                                     )}
                                 </span>
+                            </button>
+                        ))
+                    )}
+                </div>
+            )}
+        </div>
+    );
+}
+
+/**
+ * Selector de EPS digitable: al escribir se filtra la lista (sin distinguir
+ * mayúsculas ni tildes) para ubicar la EPS sin recorrerla con el scroll.
+ * Flechas + Enter para elegir; Escape cierra. value = nombre de la EPS,
+ * '' = todas.
+ */
+function EpsCombobox({
+    opciones,
+    value,
+    onChange,
+}: {
+    opciones: string[];
+    value: string;
+    onChange: (eps: string) => void;
+}) {
+    const [query, setQuery] = useState('');
+    const [open, setOpen] = useState(false);
+    const [activo, setActivo] = useState(0);
+    const ref = useRef<HTMLDivElement>(null);
+    const listaRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const handler = (ev: MouseEvent) => {
+            if (ref.current && !ref.current.contains(ev.target as Node)) {
+                setOpen(false);
+                setQuery('');
+            }
+        };
+        document.addEventListener('mousedown', handler);
+        return () => document.removeEventListener('mousedown', handler);
+    }, []);
+
+    const normalizar = (t: string) =>
+        t.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+
+    // '' encabeza la lista: es la opción "Todas".
+    const filtradas = useMemo(() => {
+        const q = normalizar(query.trim());
+        const coinciden =
+            q === ''
+                ? opciones
+                : opciones.filter((o) => normalizar(o).includes(q));
+        return q === '' ? ['', ...coinciden] : coinciden;
+    }, [opciones, query]);
+
+    useEffect(() => setActivo(0), [query]);
+
+    // La opción resaltada con el teclado se mantiene a la vista.
+    useEffect(() => {
+        listaRef.current
+            ?.querySelector<HTMLElement>(`[data-idx="${activo}"]`)
+            ?.scrollIntoView({ block: 'nearest' });
+    }, [activo]);
+
+    const elegir = (eps: string) => {
+        onChange(eps);
+        setOpen(false);
+        setQuery('');
+    };
+
+    return (
+        <div ref={ref} className="relative">
+            <Input
+                value={open ? query : value || 'Todas'}
+                onFocus={(e) => {
+                    setOpen(true);
+                    e.currentTarget.select();
+                }}
+                onChange={(e) => {
+                    setQuery(e.target.value);
+                    setOpen(true);
+                }}
+                onKeyDown={(e) => {
+                    if (e.key === 'ArrowDown') {
+                        e.preventDefault();
+                        setOpen(true);
+                        setActivo((i) => Math.min(i + 1, filtradas.length - 1));
+                    } else if (e.key === 'ArrowUp') {
+                        e.preventDefault();
+                        setActivo((i) => Math.max(i - 1, 0));
+                    } else if (e.key === 'Enter' && open) {
+                        // Enter elige la EPS, no envía el formulario.
+                        e.preventDefault();
+                        if (filtradas[activo] !== undefined) {
+                            elegir(filtradas[activo]);
+                        }
+                    } else if (e.key === 'Escape') {
+                        setOpen(false);
+                        setQuery('');
+                    }
+                }}
+                placeholder="Digite o seleccione la EPS…"
+                autoComplete="off"
+                className={!open && !value ? 'text-muted-foreground' : ''}
+            />
+            <ChevronDown className="pointer-events-none absolute top-1/2 right-3 size-4 -translate-y-1/2 opacity-50" />
+            {open && (
+                <div
+                    ref={listaRef}
+                    className="absolute z-50 mt-1 max-h-64 w-full min-w-[16rem] overflow-y-auto rounded-md border bg-popover p-1 shadow-md"
+                >
+                    {filtradas.length === 0 ? (
+                        <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                            No hay EPS que coincidan con «{query.trim()}».
+                        </div>
+                    ) : (
+                        filtradas.map((o, i) => (
+                            <button
+                                key={o || '__todas'}
+                                type="button"
+                                data-idx={i}
+                                onMouseEnter={() => setActivo(i)}
+                                onClick={() => elegir(o)}
+                                className={`flex w-full rounded-sm px-2 py-1.5 text-left text-sm ${i === activo ? 'bg-muted' : ''} ${o === value ? 'font-semibold text-[#2d3e83] dark:text-white' : ''}`}
+                            >
+                                {o || 'Todas'}
                             </button>
                         ))
                     )}
@@ -1432,7 +1709,7 @@ export default function RadicarSolicitud({
     const [programadosQuirofano, setProgramadosQuirofano] = useState('');
     // Orden elegido en los encabezados de la grilla (null = el del servidor).
     const [programadosOrden, setProgramadosOrden] =
-        useState<OrdenProgramados>(null);
+        useState<Orden<ColProgramados>>(null);
     // Aviso de lo último que se hizo sobre una fila (editar o borrar). Vive
     // aparte del error para que un guardado bueno no borre un mensaje de fallo
     // anterior ni al revés.
@@ -1607,13 +1884,24 @@ export default function RadicarSolicitud({
         );
     }, [casosLista, gridFilter]);
 
-    // Descarga en Excel lo que muestra la grilla, con todos sus filtros.
+    // Orden elegido en los encabezados. Sin orden se respeta el del servidor
+    // (hospitalarias urgentes primero, luego la más reciente).
+    const [gridOrden, setGridOrden] = useState<Orden<ColHistorial>>(null);
+    const casosOrdenados = useMemo(
+        () => ordenarFilas(casosFiltrados, gridOrden, valorOrdenHistorial),
+        [casosFiltrados, gridOrden],
+    );
+    const ordenarGrilla = (col: ColHistorial) =>
+        setGridOrden((o) => siguienteOrden(o, col));
+
+    // Descarga en Excel lo que muestra la grilla, con todos sus filtros y en
+    // el mismo orden.
     const exportarGrillaExcel = async () => {
-        if (casosFiltrados.length === 0) return;
+        if (casosOrdenados.length === 0) return;
 
         const XLSX = await import('xlsx');
 
-        const filas = casosFiltrados.map((c) => ({
+        const filas = casosOrdenados.map((c) => ({
             'Caso N°': c.codrad,
             Ámbito: nombreAmbito(c.ambito),
             Fecha: c.fecha ?? '',
@@ -1667,6 +1955,9 @@ export default function RadicarSolicitud({
     // De paso, la grilla deja de pintar miles de filas de golpe.
     const [infPorPagina, setInfPorPagina] = useState(12);
     const [infPagina, setInfPagina] = useState(1);
+    // Orden elegido en los encabezados (null = el del servidor, más reciente
+    // primero). Se aplica a todas las filas, no solo a la página visible.
+    const [infOrden, setInfOrden] = useState<Orden<ColInforme>>(null);
     // Período de programados con el que se generó el informe que se está
     // viendo. Se guarda aparte de los inputs: si el usuario los cambia sin
     // volver a generar, la grilla debe seguir resaltando según lo aplicado.
@@ -2596,36 +2887,18 @@ export default function RadicarSolicitud({
 
     // Filas filtradas en el orden elegido en los encabezados. Sin orden se
     // respeta el del servidor (más reciente primero). Los vacíos van al final.
-    const programadosOrdenados = useMemo(() => {
-        if (!programadosOrden) return programadosFiltrados;
-        const { col, dir } = programadosOrden;
-        const signo = dir === 'asc' ? 1 : -1;
-        return [...programadosFiltrados].sort((a, b) => {
-            const va = valorOrdenProgramado(a, col);
-            const vb = valorOrdenProgramado(b, col);
-            if (va === null && vb === null) return 0;
-            if (va === null) return 1;
-            if (vb === null) return -1;
-            const cmp =
-                typeof va === 'number' && typeof vb === 'number'
-                    ? va - vb
-                    : String(va).localeCompare(String(vb), 'es', {
-                          numeric: true,
-                          sensitivity: 'base',
-                      });
-            return cmp * signo;
-        });
-    }, [programadosFiltrados, programadosOrden]);
+    const programadosOrdenados = useMemo(
+        () =>
+            ordenarFilas(
+                programadosFiltrados,
+                programadosOrden,
+                valorOrdenProgramado,
+            ),
+        [programadosFiltrados, programadosOrden],
+    );
 
-    // Clic en un encabezado: ascendente → descendente → sin orden.
     const ordenarProgramados = (col: ColProgramados) =>
-        setProgramadosOrden((o) =>
-            o?.col !== col
-                ? { col, dir: 'asc' }
-                : o.dir === 'asc'
-                  ? { col, dir: 'desc' }
-                  : null,
-        );
+        setProgramadosOrden((o) => siguienteOrden(o, col));
 
     // Opciones del filtro por quirófano: los que aparecen en la grilla (también
     // los que hoy estén inactivos, que ya no salen en el formulario).
@@ -3203,6 +3476,31 @@ export default function RadicarSolicitud({
     const setInfField = (campo: string, valor: string) =>
         setInf((prev) => ({ ...prev, [campo]: valor }));
 
+    // CONSULTAS reutiliza la grilla y los filtros de INFORMES, pero pide al
+    // servidor una sola fila por radicación (su último movimiento) y suma el
+    // filtro por EPS.
+    const esConsulta = tab === 'consultas';
+
+    // Opciones del filtro EPS: nombres únicos del catálogo, en orden.
+    const epsOpciones = useMemo(
+        () =>
+            [...new Set(epsList.map((e) => e.Nombre).filter(Boolean))].sort(
+                (a, b) => a.localeCompare(b, 'es'),
+            ),
+        [epsList],
+    );
+
+    // Al pasar entre INFORMES y CONSULTAS se descarta el resultado: son
+    // grillas distintas y una no debe verse con los datos de la otra.
+    useEffect(() => {
+        setInfRows(null);
+        setInfTruncado(false);
+        setInfError(null);
+        setInfPagina(1);
+        setInfOrden(null);
+        setFlotante(null);
+    }, [esConsulta]);
+
     // Tramo del informe que se está viendo. El total y la última página salen
     // de las filas ya cargadas, así que cambiar de página no pide nada al
     // servidor.
@@ -3212,10 +3510,20 @@ export default function RadicarSolicitud({
     // fuera de rango.
     const infPaginaActual = Math.min(infPagina, infUltimaPagina);
     const infDesde = (infPaginaActual - 1) * infPorPagina;
-    const infRowsPagina = useMemo(
-        () => (infRows ?? []).slice(infDesde, infDesde + infPorPagina),
-        [infRows, infDesde, infPorPagina],
+    const infRowsOrdenadas = useMemo(
+        () => ordenarFilas(infRows ?? [], infOrden, valorOrdenInforme),
+        [infRows, infOrden],
     );
+    const infRowsPagina = useMemo(
+        () => infRowsOrdenadas.slice(infDesde, infDesde + infPorPagina),
+        [infRowsOrdenadas, infDesde, infPorPagina],
+    );
+
+    // Al cambiar el orden se vuelve a la primera página.
+    const ordenarInforme = (col: ColInforme) => {
+        setInfOrden((o) => siguienteOrden(o, col));
+        setInfPagina(1);
+    };
 
     // ¿El informe se generó con período de programados?
     const hayPeriodoProg = Boolean(
@@ -3281,9 +3589,12 @@ export default function RadicarSolicitud({
         setInfPagina(1);
         const params = new URLSearchParams();
         Object.entries(inf).forEach(([k, v]) => {
+            // El filtro EPS es propio de CONSULTAS.
+            if (k === 'eps' && !esConsulta) return;
             if (v) params.set(k, v);
         });
-        fetch(`/tools/radicar-solicitud/informe?${params.toString()}`, {
+        const endpoint = esConsulta ? 'consulta' : 'informe';
+        fetch(`/tools/radicar-solicitud/${endpoint}?${params.toString()}`, {
             headers: { Accept: 'application/json' },
         })
             // Sin sesión no se vacía la grilla: un informe en blanco se lee
@@ -3324,7 +3635,8 @@ export default function RadicarSolicitud({
 
         const XLSX = await import('xlsx');
 
-        const filas = infRows.map((r) => ({
+        // En el mismo orden que la grilla.
+        const filas = infRowsOrdenadas.map((r) => ({
             'N° Caso': r.codrad,
             Ámbito: nombreAmbito(r.ambito),
             'Fecha Recibido': r.fechaRecibido ?? '',
@@ -3385,10 +3697,17 @@ export default function RadicarSolicitud({
         }));
 
         const libro = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(libro, hoja, 'Informe');
+        XLSX.utils.book_append_sheet(
+            libro,
+            hoja,
+            esConsulta ? 'Consulta' : 'Informe',
+        );
 
         const hoy = new Date().toISOString().slice(0, 10);
-        XLSX.writeFile(libro, `informe-radicaciones-${hoy}.xlsx`);
+        XLSX.writeFile(
+            libro,
+            `${esConsulta ? 'consulta' : 'informe'}-radicaciones-${hoy}.xlsx`,
+        );
     };
 
     /**
@@ -3493,8 +3812,9 @@ export default function RadicarSolicitud({
     // sin asignar no aparece. Las demás pestañas, sin configurar, se permiten.
     const tabPermitida = (key: Pestana) =>
         esSuperAdmin ||
-        (key === 'hospitalario'
-            ? permisosUsuario['radicar-solicitud-hospitalario']?.ver === true
+        // Radicado Hospitalario y Consultas se asignan expresamente.
+        (key === 'hospitalario' || key === 'consultas'
+            ? permisosUsuario[`radicar-solicitud-${key}`]?.ver === true
             : permisosUsuario[`radicar-solicitud-${key}`]?.ver !== false);
 
     // Botón "Modificar radicado": si su sub-vista está configurada en el
@@ -3710,6 +4030,10 @@ export default function RadicarSolicitud({
         puedeEditarProgramacion ||
         puedeBorrarProgramacion;
 
+    // INFORMES y CONSULTAS comparten la misma pantalla.
+    const verInformesConsultas =
+        (tab === 'informes' || tab === 'consultas') && tabPermitida(tab);
+
     const tabs = [
         { key: 'nueva' as const, label: 'NUEVA RADICACIÓN', icon: FilePlus2 },
         {
@@ -3723,6 +4047,7 @@ export default function RadicarSolicitud({
             icon: Search,
         },
         { key: 'informes' as const, label: 'INFORMES', icon: BarChart3 },
+        { key: 'consultas' as const, label: 'CONSULTAS', icon: ListChecks },
     ].filter((t) => tabPermitida(t.key));
 
     // Si la pestaña activa no está permitida, se pasa a la primera visible.
@@ -4985,46 +5310,27 @@ export default function RadicarSolicitud({
                                         <table className="w-full text-left text-sm">
                                             <thead className="sticky top-0 bg-muted/80 text-xs text-muted-foreground uppercase backdrop-blur">
                                                 <tr>
-                                                    <th className="px-3 py-2 font-medium">
-                                                        Caso N°
-                                                    </th>
-                                                    <th className="px-3 py-2 font-medium">
-                                                        Fecha
-                                                    </th>
-                                                    <th className="px-3 py-2 font-medium">
-                                                        Paciente
-                                                    </th>
-                                                    <th className="px-3 py-2 font-medium">
-                                                        Identificación
-                                                    </th>
-                                                    <th className="px-3 py-2 font-medium">
-                                                        EPS
-                                                    </th>
-                                                    <th className="px-3 py-2 font-medium">
-                                                        Códigos CUPS &
-                                                        procedimientos
-                                                    </th>
-                                                    <th className="px-3 py-2 font-medium">
-                                                        Convenio
-                                                    </th>
-                                                    <th className="px-3 py-2 font-medium">
-                                                        Servicio asignado
-                                                    </th>
-                                                    <th className="px-3 py-2 font-medium">
-                                                        Estado
-                                                    </th>
-                                                    {/* Los PDF de los conceptos
-                                                        cotizados los ve todo
-                                                        el que ve la grilla:
-                                                        sirven para verificar
-                                                        qué se cotizó. */}
-                                                    <th className="px-3 py-2 font-medium">
-                                                        Cotización
-                                                    </th>
+                                                    {COLS_HISTORIAL.map(
+                                                        ([col, titulo]) => (
+                                                            <ThOrdenable
+                                                                key={col}
+                                                                col={col}
+                                                                orden={
+                                                                    gridOrden
+                                                                }
+                                                                onOrdenar={
+                                                                    ordenarGrilla
+                                                                }
+                                                                className="px-3 py-2 font-medium"
+                                                            >
+                                                                {titulo}
+                                                            </ThOrdenable>
+                                                        ),
+                                                    )}
                                                 </tr>
                                             </thead>
                                             <tbody className="divide-y">
-                                                {casosFiltrados.map((c) => (
+                                                {casosOrdenados.map((c) => (
                                                     <tr
                                                         key={c.codrad}
                                                         onClick={() => {
@@ -6732,17 +7038,26 @@ export default function RadicarSolicitud({
                         </div>
                     )}
 
-                    {tab === 'informes' && tabPermitida('informes') && (
+                    {/* INFORMES y CONSULTAS comparten esta pantalla: CONSULTAS
+                        trae una sola fila por radicación (su último
+                        movimiento) y agrega el filtro por EPS. */}
+                    {verInformesConsultas && (
                         <div className="p-4 md:p-6">
                             <div className="mb-4 flex items-center gap-3 border-b pb-4">
                                 <div
                                     className="flex size-10 items-center justify-center rounded-xl text-white"
                                     style={{ backgroundColor: BRAND }}
                                 >
-                                    <BarChart3 className="size-5" />
+                                    {esConsulta ? (
+                                        <ListChecks className="size-5" />
+                                    ) : (
+                                        <BarChart3 className="size-5" />
+                                    )}
                                 </div>
                                 <h1 className="text-lg font-bold tracking-tight text-foreground">
-                                    Generación de Informes
+                                    {esConsulta
+                                        ? 'Consulta de Radicaciones'
+                                        : 'Generación de Informes'}
                                 </h1>
                             </div>
 
@@ -6752,11 +7067,9 @@ export default function RadicarSolicitud({
                                 cualquier usuario. Se dice en pantalla para que
                                 nadie la confunda con las demás. */}
                             <p className="mb-4 rounded-lg border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-                                Esta grilla muestra todas las radicaciones y
-                                todos los cambios registrados, sin importar el
-                                estado de la radicación ni los estados asignados
-                                a tu rol. Los PDF del paquete y de los conceptos
-                                cotizados se pueden abrir desde aquí.
+                                {esConsulta
+                                    ? 'Esta grilla muestra todas las radicaciones con un solo registro por cada una: su última modificación, sin importar el usuario ni el área que la hizo. Los PDF del paquete y de los conceptos cotizados se pueden abrir desde aquí.'
+                                    : 'Esta grilla muestra todas las radicaciones y todos los cambios registrados, sin importar el estado de la radicación ni los estados asignados a tu rol. Los PDF del paquete y de los conceptos cotizados se pueden abrir desde aquí.'}
                             </p>
 
                             {/* Filtros */}
@@ -7015,6 +7328,17 @@ export default function RadicarSolicitud({
                                             title="Filtra por la Fecha y Hora de Programación de la cirugía"
                                         />
                                     </Field>
+                                    {esConsulta && (
+                                        <Field label="EPS">
+                                            <EpsCombobox
+                                                opciones={epsOpciones}
+                                                value={inf.eps}
+                                                onChange={(v) =>
+                                                    setInfField('eps', v)
+                                                }
+                                            />
+                                        </Field>
+                                    )}
                                 </div>
                                 {infError && (
                                     <p className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
@@ -7029,10 +7353,14 @@ export default function RadicarSolicitud({
                                 >
                                     {infLoading ? (
                                         <LoaderCircle className="size-4 animate-spin" />
+                                    ) : esConsulta ? (
+                                        <ListChecks className="size-4" />
                                     ) : (
                                         <BarChart3 className="size-4" />
                                     )}
-                                    Generar Informe
+                                    {esConsulta
+                                        ? 'Generar Consulta'
+                                        : 'Generar Informe'}
                                 </Button>
                                 <Button
                                     type="button"
@@ -7064,122 +7392,35 @@ export default function RadicarSolicitud({
                             <div className="mt-5 overflow-x-auto rounded-xl border bg-card shadow-sm">
                                 {infRows === null ? (
                                     <p className="p-8 text-center text-sm text-muted-foreground">
-                                        Aplica los filtros y genera el informe
-                                        para ver la trazabilidad de
-                                        modificaciones por caso.
+                                        {esConsulta
+                                            ? 'Aplica los filtros y genera la consulta para ver la última modificación de cada radicación.'
+                                            : 'Aplica los filtros y genera el informe para ver la trazabilidad de modificaciones por caso.'}
                                     </p>
                                 ) : infRows.length === 0 ? (
                                     <p className="p-8 text-center text-sm text-muted-foreground">
-                                        No se encontraron modificaciones con los
-                                        filtros indicados.
+                                        {esConsulta
+                                            ? 'No se encontraron radicaciones con los filtros indicados.'
+                                            : 'No se encontraron modificaciones con los filtros indicados.'}
                                     </p>
                                 ) : (
                                     <table className="w-full text-left text-sm">
                                         <thead className="bg-muted/50 text-xs text-muted-foreground uppercase">
                                             <tr>
-                                                <th className="px-3 py-2 font-medium">
-                                                    N° Caso
-                                                </th>
-                                                <th className="px-3 py-2 font-medium">
-                                                    Fecha Recibido
-                                                </th>
-                                                {/* Va junto a Fecha Recibido y
-                                                    no al final: es la columna
-                                                    que filtran Fecha Inicial y
-                                                    Final Programados. */}
-                                                <th className="px-3 py-2 font-medium whitespace-nowrap">
-                                                    Fecha y Hora de Programación
-                                                </th>
-                                                <th className="px-3 py-2 font-medium">
-                                                    Documento
-                                                </th>
-                                                <th className="px-3 py-2 font-medium">
-                                                    Paciente
-                                                </th>
-                                                <th className="px-3 py-2 font-medium">
-                                                    Teléfonos
-                                                </th>
-                                                <th className="px-3 py-2 font-medium">
-                                                    Tipo
-                                                </th>
-                                                <th className="px-3 py-2 font-medium">
-                                                    Campo
-                                                </th>
-                                                <th className="px-3 py-2 font-medium">
-                                                    Cambio
-                                                </th>
-                                                <th className="px-3 py-2 font-medium">
-                                                    Estado
-                                                </th>
-                                                <th className="px-3 py-2 font-medium">
-                                                    Aseguradora (EPS)
-                                                </th>
-                                                <th className="px-3 py-2 font-medium">
-                                                    Convenio
-                                                </th>
-                                                <th className="px-3 py-2 font-medium">
-                                                    Copago
-                                                </th>
-                                                <th className="px-3 py-2 font-medium">
-                                                    MAOS
-                                                </th>
-                                                <th className="px-3 py-2 font-medium">
-                                                    Paquete
-                                                </th>
-                                                <th className="px-3 py-2 font-medium">
-                                                    Cotización
-                                                </th>
-                                                <th className="px-3 py-2 font-medium">
-                                                    Médico
-                                                </th>
-                                                <th className="px-3 py-2 font-medium">
-                                                    Especialidad
-                                                </th>
-                                                <th className="px-3 py-2 font-medium">
-                                                    Motivo
-                                                </th>
-                                                <th className="px-3 py-2 font-medium">
-                                                    Subespecialidad
-                                                </th>
-                                                <th className="px-3 py-2 font-medium">
-                                                    CUPS
-                                                </th>
-                                                <th className="px-3 py-2 font-medium">
-                                                    Autorizaciones
-                                                </th>
-                                                <th className="px-3 py-2 font-medium">
-                                                    Entrega al Serv
-                                                </th>
-                                                <th className="px-3 py-2 font-medium">
-                                                    Fec. Recibido Serv
-                                                </th>
-                                                <th className="px-3 py-2 font-medium">
-                                                    Fecha Autorización
-                                                </th>
-                                                <th className="px-3 py-2 font-medium">
-                                                    Venc. Aut.
-                                                </th>
-                                                <th className="px-3 py-2 font-medium">
-                                                    Venc. Anest.
-                                                </th>
-                                                <th className="px-3 py-2 font-medium">
-                                                    Observación
-                                                </th>
-                                                <th className="px-3 py-2 font-medium">
-                                                    OB TFX
-                                                </th>
-                                                <th className="px-3 py-2 font-medium">
-                                                    Observaciones CCX
-                                                </th>
-                                                <th className="px-3 py-2 font-medium">
-                                                    Estado QX
-                                                </th>
-                                                <th className="px-3 py-2 font-medium">
-                                                    Usuario
-                                                </th>
-                                                <th className="px-3 py-2 font-medium">
-                                                    Modificado
-                                                </th>
+                                                {COLS_INFORME.map(
+                                                    ([col, titulo]) => (
+                                                        <ThOrdenable
+                                                            key={col}
+                                                            col={col}
+                                                            orden={infOrden}
+                                                            onOrdenar={
+                                                                ordenarInforme
+                                                            }
+                                                            className="px-3 py-2 font-medium whitespace-nowrap"
+                                                        >
+                                                            {titulo}
+                                                        </ThOrdenable>
+                                                    ),
+                                                )}
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y">

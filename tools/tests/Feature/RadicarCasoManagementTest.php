@@ -2672,3 +2672,85 @@ test('modificar radicado cambia el convenio por otro de la eps del paciente', fu
         ->and(TrazabilidadCaso::where('codrad', $caso->codrad)->where('campo', 'convenio')->value('nuevo'))
         ->toBe('Convenio CONV-B');
 });
+
+test('la consulta deja una sola fila por radicacion: su ultima modificacion', function () {
+    $admin = User::factory()->create(['rol' => User::SUPER_ADMIN]);
+    $otro = User::factory()->create();
+    $caso = RadicarCaso::create(['Ndocumento' => '6101', 'estRad' => '1']);
+    $sinCambios = RadicarCaso::create(['Ndocumento' => '6102', 'estRad' => '1']);
+
+    TrazabilidadCaso::create([
+        'codrad' => $caso->codrad, 'user_id' => $otro->id, 'evento' => 'cambio',
+        'campo' => 'estRad', 'etiqueta' => 'Estado Actual', 'anterior' => 'A', 'nuevo' => 'B',
+    ])->forceFill(['created_at' => now()->subDays(2)])->save();
+    SeguimientoCaso::create([
+        'codrad' => $caso->codrad, 'ObservacionCCX' => 'Intermedio', 'user_id' => $otro->id,
+    ])->forceFill(['created_at' => now()->subDay()])->save();
+    TrazabilidadCaso::create([
+        'codrad' => $caso->codrad, 'user_id' => $otro->id, 'evento' => 'cambio',
+        'campo' => 'estRad', 'etiqueta' => 'Estado Actual', 'anterior' => 'B', 'nuevo' => 'C',
+    ]);
+
+    $rows = collect($this->actingAs($admin)
+        ->getJson('/tools/radicar-solicitud/consulta')
+        ->assertOk()
+        ->json('rows'));
+
+    $delCaso = $rows->where('codrad', $caso->codrad)->values();
+    expect($delCaso)->toHaveCount(1)
+        ->and($delCaso[0]['nuevo'])->toBe('C')
+        ->and($rows->where('codrad', $sinCambios->codrad))->toHaveCount(1);
+
+    // El informe, en cambio, conserva todos los movimientos.
+    $informe = collect($this->actingAs($admin)
+        ->getJson('/tools/radicar-solicitud/informe')
+        ->json('rows'));
+    expect($informe->where('codrad', $caso->codrad))->toHaveCount(3);
+});
+
+test('la consulta filtra por la EPS del paciente', function () {
+    $admin = User::factory()->create(['rol' => User::SUPER_ADMIN]);
+    User::factory()->create(['Numero_D' => '6201', 'Eps' => 'EPS UNO']);
+    User::factory()->create(['Numero_D' => '6202', 'Eps' => 'EPS DOS']);
+    $uno = RadicarCaso::create(['Ndocumento' => '6201', 'estRad' => '1']);
+    $dos = RadicarCaso::create(['Ndocumento' => '6202', 'estRad' => '1']);
+
+    $codrads = collect($this->actingAs($admin)
+        ->getJson('/tools/radicar-solicitud/consulta?eps='.urlencode('EPS UNO'))
+        ->assertOk()
+        ->json('rows'))->pluck('codrad');
+
+    expect($codrads)->toContain($uno->codrad)->not->toContain($dos->codrad);
+});
+
+test('la pestaña Consultas viene apagada hasta asignarla al rol', function () {
+    $rol = Role::create(['Nombre' => 'Consultor', 'Estado' => true]);
+    $usuario = User::factory()->create(['rol' => 'Consultor']);
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud', 'ver' => true]);
+
+    expect(Permiso::VISTAS_OPT_IN)->toContain('radicar-solicitud-consultas');
+
+    $this->actingAs($usuario)
+        ->getJson('/tools/radicar-solicitud/consulta')
+        ->assertForbidden();
+
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud-consultas', 'ver' => true]);
+
+    $this->actingAs($usuario)
+        ->getJson('/tools/radicar-solicitud/consulta')
+        ->assertOk();
+});
+
+test('la consulta sin filtros trae todas las radicaciones, sin el tope del informe', function () {
+    $admin = User::factory()->create(['rol' => User::SUPER_ADMIN]);
+    foreach (range(1, 2005) as $i) {
+        RadicarCaso::create(['Ndocumento' => (string) (900000 + $i), 'estRad' => '1']);
+    }
+
+    $respuesta = $this->actingAs($admin)
+        ->getJson('/tools/radicar-solicitud/consulta')
+        ->assertOk();
+
+    expect(collect($respuesta->json('rows'))->pluck('codrad')->unique())->toHaveCount(2005)
+        ->and($respuesta->json('truncado'))->toBeFalse();
+});

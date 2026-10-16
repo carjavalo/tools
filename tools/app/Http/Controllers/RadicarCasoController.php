@@ -50,6 +50,9 @@ class RadicarCasoController extends Controller
     /** Filas de trazabilidad que como máximo entran a un informe. */
     private const TOPE_FILAS_INFORME = 5000;
 
+    /** Radicaciones que CONSULTAS procesa por lote (no tiene tope total). */
+    private const LOTE_CONSULTA = 1000;
+
     /**
      * Tamaño máximo del PDF del paquete, en MB. El PHP del servidor debe
      * aceptar al menos esto (upload_max_filesize y post_max_size, ver
@@ -260,7 +263,16 @@ class RadicarCasoController extends Controller
             ->where('vista', 'radicar-solicitud-informes')
             ->first();
 
-        return ! $permiso || (bool) $permiso->ver;
+        if (! $permiso || $permiso->ver) {
+            return true;
+        }
+
+        // La pestaña Consultas muestra los mismos enlaces; como viene
+        // apagada, solo cuenta si está asignada expresamente al rol.
+        return Permiso::where('role_id', $role->id)
+            ->where('vista', 'radicar-solicitud-consultas')
+            ->where('ver', true)
+            ->exists();
     }
 
     /**
@@ -1820,6 +1832,26 @@ class RadicarCasoController extends Controller
      */
     public function informe(Request $request): JsonResponse
     {
+        return $this->generarInforme($request, false);
+    }
+
+    /**
+     * Pestaña CONSULTAS: el mismo informe, pero con una sola fila por
+     * radicación, la de su último movimiento (de cualquier usuario o área).
+     * Admite además el filtro por EPS del paciente.
+     */
+    public function consulta(Request $request): JsonResponse
+    {
+        return $this->generarInforme($request, true);
+    }
+
+    /**
+     * Arma el informe de trazabilidad. Con $soloUltimo cada radicación aporta
+     * solo su movimiento más reciente (pestaña CONSULTAS); sin él, todos sus
+     * movimientos (pestaña INFORMES).
+     */
+    private function generarInforme(Request $request, bool $soloUltimo): JsonResponse
+    {
         // Las modificaciones hechas por un Super Admin son invisibles para
         // cualquier otro rol: sus filas de trazabilidad se omiten por completo.
         $viewerIsSuperAdmin = $request->user()?->isSuperAdmin() ?? false;
@@ -1833,6 +1865,8 @@ class RadicarCasoController extends Controller
         // Ámbito: 'ambulatorio' u 'hospitalario'; cualquier otro valor no filtra.
         $ambitoF = trim((string) $request->query('ambito', ''));
         $ambitoF = array_key_exists($ambitoF, RadicarCaso::AMBITOS) ? $ambitoF : '';
+        // EPS del paciente (users.Eps guarda el nombre de la EPS).
+        $epsF = trim((string) $request->query('eps', ''));
 
         // Los dos períodos se validan porque se comparan como fecha en SQL: una
         // fecha mal formada no daba error, solo un informe incoherente.
@@ -1881,6 +1915,10 @@ class RadicarCasoController extends Controller
             ->when($consecutivoF !== '', fn ($q) => $q->where('codrad', (int) $consecutivoF))
             ->when($ambitoF !== '', fn ($q) => $q->where('ambito', $ambitoF))
             ->when($documentoF !== '', fn ($q) => $q->where('Ndocumento', $documentoF))
+            ->when($epsF !== '', fn ($q) => $q->whereIn(
+                'Ndocumento',
+                User::query()->where('Eps', $epsF)->whereNotNull('Numero_D')->select('Numero_D'),
+            ))
             ->when($estadoF !== '', fn ($q) => $q->where('estRad', $estadoF))
             ->when($espF !== '', fn ($q) => $q->where('Codesp', $espF))
             ->when($subF !== '', fn ($q) => $q->where('codsubesp', $subF))
@@ -1922,294 +1960,332 @@ class RadicarCasoController extends Controller
         // qué rol consulte. El resto de vistas conserva su restricción.
         // Lo único que sigue oculto aquí es lo que hizo un Super Admin.
 
-        // Tope de seguridad: sin él, un informe sin filtros materializaría en
-        // memoria la tabla completa. Se avisa en la respuesta cuando recorta.
-        $totalCasos = (clone $casos)->count();
-        $casos = $casos->limit(self::TOPE_CASOS_INFORME)->get()->keyBy('codrad');
-        $truncado = $totalCasos > self::TOPE_CASOS_INFORME;
-
-        if ($casos->isEmpty()) {
-            return response()->json(['rows' => [], 'truncado' => false]);
+        if ($soloUltimo) {
+            // CONSULTAS trae TODAS las radicaciones (una fila por cada una),
+            // así que no lleva tope. Se recorren por lotes para no cargar la
+            // tabla entera en memoria ni armar consultas con miles de ids.
+            $lotes = $casos->reorder()
+                ->lazyByIdDesc(self::LOTE_CONSULTA, 'codrad')
+                ->chunk(self::LOTE_CONSULTA)
+                ->map(fn ($lote) => $lote->keyBy('codrad'));
+            $truncado = false;
+        } else {
+            // Tope de seguridad: sin él, un informe sin filtros materializaría
+            // en memoria la tabla completa. Se avisa en la respuesta cuando
+            // recorta.
+            $totalCasos = (clone $casos)->count();
+            $lotes = [$casos->limit(self::TOPE_CASOS_INFORME)->get()->keyBy('codrad')];
+            $truncado = $totalCasos > self::TOPE_CASOS_INFORME;
         }
-
-        $codrads = $casos->keys();
-
-        // 2) Catálogos completos de una sola vez: antes se resolvían con hasta
-        //    seis consultas por fila.
-        $estados = EstRadicado::pluck('Nombre', 'id');
-        $estadosSec = EstRadisecundario::pluck('Nombre', 'id');
-        $motivos = Motivo::pluck('Nombre', 'id');
-        $subesp = SubEspecialidad::pluck('Nombre', 'cod_SubEspecialidad');
-        $especialidades = Especialidad::pluck('Nombre', 'espcodser');
-        $convenios = Convenio::pluck('nombre', 'nit_Convenio');
-        // Del paciente se traen también aseguradora y teléfonos: el informe
-        // muestra la radicación completa, no solo el nombre.
-        $pacientes = User::whereIn('Numero_D', $casos->pluck('Ndocumento')->filter()->unique())
-            ->get(['Numero_D', 'name', 'Apellido1', 'apellido2', 'Eps', 'Telefono1', 'telefono2'])
-            ->keyBy('Numero_D');
-        $usuarios = User::whereIn('id', $casos->pluck('codMed')->filter()->unique())
-            ->get(['id', 'name', 'Apellido1', 'apellido2'])
-            ->keyBy('id');
-
-        // CUPS y autorizaciones de cada radicación. Se resuelven en dos
-        // consultas para todos los casos: dentro del bucle de filas serían dos
-        // por movimiento. codRadicado es columna de texto, de ahí el casteo.
-        $anexados = CupsAnezado::whereIn('codRadicado', $codrads->map(fn ($c) => (string) $c)->all())
-            ->orderBy('id')
-            ->get(['codRadicado', 'cusv_id', 'N_Autorizacion'])
-            ->groupBy('codRadicado');
-        $codigosCups = Cups::whereIn('id', $anexados->flatten(1)->pluck('cusv_id')->unique())
-            ->pluck('CodCupsHuv', 'id');
-
-        // PDFs de los conceptos cotizados, para verificar desde el informe qué
-        // se cotizó. Una sola consulta para todos los casos: dentro del bucle
-        // de filas sería una por movimiento.
-        $adjuntosCotizacion = CotizacionCaso::whereIn('codrad', $codrads)
-            ->whereNotNull('adjunto')
-            ->orderBy('id')
-            ->get(['id', 'codrad', 'tercero'])
-            ->groupBy('codrad');
-
-        // Fechas de cirugía programada de cada radicación, la más reciente
-        // primero. Van todas —también las de fuera del período filtrado—: una
-        // reprogramación posterior es justo lo que interesa ver.
-        $fechasProgramacion = ProgramacionCaso::whereIn('codrad', $codrads)
-            ->whereNotNull('fecha_programacion')
-            ->orderByDesc('fecha_programacion')
-            ->get(['codrad', 'fecha_programacion'])
-            ->groupBy('codrad');
-
-        $rangoFecha = function ($query) use ($desde, $hasta) {
-            return $query
-                ->when($desde !== null, fn ($q) => $q->whereDate('created_at', '>=', $desde))
-                ->when($hasta !== null, fn ($q) => $q->whereDate('created_at', '<=', $hasta));
-        };
-
-        // Lo que hizo un Super Admin es invisible para los demás roles. Se
-        // descarta en SQL y no después: si se filtrara en PHP, el tope de
-        // filas se consumiría con registros que el usuario no va a ver y el
-        // informe podría salir vacío teniendo movimientos visibles más atrás.
-        $ocultarSuperAdmin = function ($query) use ($viewerIsSuperAdmin) {
-            if ($viewerIsSuperAdmin) {
-                return $query;
-            }
-
-            return $query->where(fn ($q) => $q
-                ->whereNull('user_id')
-                ->orWhereDoesntHave('user')
-                ->orWhereHas('user', fn ($u) => $u->where('rol', '!=', User::SUPER_ADMIN))
-            );
-        };
-
-        // 3) Las dos fuentes de trazabilidad: la bitácora campo a campo y las
-        //    fotos históricas del formulario Aplicar Modificaciones.
-        $bitacora = TrazabilidadCaso::query()
-            ->with('user:id,name,Apellido1,apellido2,rol')
-            ->whereIn('codrad', $codrads)
-            ->tap($rangoFecha)
-            ->tap($ocultarSuperAdmin)
-            ->orderByDesc('created_at')
-            ->limit(self::TOPE_FILAS_INFORME)
-            ->get();
-
-        $seguimientos = SeguimientoCaso::query()
-            ->with('user:id,name,Apellido1,apellido2,rol')
-            ->whereIn('codrad', $codrads)
-            ->tap($rangoFecha)
-            ->tap($ocultarSuperAdmin)
-            ->orderByDesc('created_at')
-            ->limit(self::TOPE_FILAS_INFORME)
-            ->get();
-
-        // Qué radicaciones tienen realmente algún movimiento visible. Se
-        // consulta aparte y SIN tope: decidirlo con las filas ya traídas haría
-        // que un caso cuyos cambios quedaron fuera del corte apareciera
-        // rotulado como "Sin cambios registrados", que es justo lo contrario
-        // de la verdad en un informe de auditoría.
-        $conMovimiento = TrazabilidadCaso::query()
-            ->whereIn('codrad', $codrads)
-            ->tap($rangoFecha)
-            ->tap($ocultarSuperAdmin)
-            ->distinct()
-            ->pluck('codrad')
-            ->merge(
-                SeguimientoCaso::query()
-                    ->whereIn('codrad', $codrads)
-                    ->tap($rangoFecha)
-                    ->tap($ocultarSuperAdmin)
-                    ->distinct()
-                    ->pluck('codrad')
-            )
-            ->unique()
-            ->flip();
-
-        $datosCaso = function (RadicarCaso $caso) use ($estados, $usuarios, $subesp, $especialidades, $pacientes, $adjuntosCotizacion, $convenios, $anexados, $codigosCups, $fechasProgramacion) {
-            $med = $caso->codMed ? $usuarios->get($caso->codMed) : null;
-            $pac = $caso->Ndocumento ? $pacientes->get($caso->Ndocumento) : null;
-            $procs = $anexados->get((string) $caso->codrad) ?? collect();
-
-            return [
-                'codrad' => $caso->codrad,
-                'ambito' => $caso->ambito ?? RadicarCaso::AMBULATORIO,
-                'fechaRecibido' => optional($caso->created_at)->format('Y-m-d'),
-                'documento' => $caso->Ndocumento ?? '—',
-                'paciente' => $pac
-                    ? trim(implode(' ', array_filter([$pac->name, $pac->Apellido1, $pac->apellido2])))
-                    : '—',
-                'telefonos' => $pac
-                    ? trim(implode(' / ', array_filter([$pac->Telefono1, $pac->telefono2])))
-                    : '',
-                'eps' => $pac?->Eps ?? '',
-                'convenio' => $caso->convenio
-                    ? ($convenios[$caso->convenio] ?? $caso->convenio)
-                    : '',
-                'estado' => $estados[(int) $caso->estRad] ?? '—',
-                // Fecha Recibido Serv vigente del caso. Va en el bloque común
-                // para que acompañe a TODA fila del informe (cambios de la
-                // bitácora incluidos) y no solo a las de seguimiento.
-                'fechaRecibidoDev' => optional($caso->fecreci)->format('Y-m-d'),
-                'especialidad' => $especialidades[$caso->Codesp] ?? '—',
-                'medico' => $this->nombreUsuario($med) ?? '—',
-                'subespecialidad' => $subesp[$caso->codsubesp] ?? '—',
-                'copago' => (bool) $caso->copago,
-                'valorCopago' => $caso->valor_copago,
-                'maos' => (bool) $caso->maos,
-                'paqueteUrl' => $caso->paquete
-                    ? route('tools.radicar-solicitud.paquete', $caso->codrad)
-                    : null,
-                // Van en el bloque común: son del caso, así que acompañan a
-                // todas sus filas, igual que el estado o el paquete.
-                'cotizaciones' => ($adjuntosCotizacion->get($caso->codrad) ?? collect())
-                    ->map(fn (CotizacionCaso $c) => [
-                        'id' => $c->id,
-                        'tercero' => $c->tercero,
-                        'url' => route('tools.radicar-solicitud.cotizacion-adjunto', $c->id),
-                    ])->values()->all(),
-                // Resto de campos de la radicación: el informe muestra el caso
-                // completo, no un resumen.
-                'entregaProg' => optional($caso->fentregapro)->format('Y-m-d'),
-                'fechaAutorizacion' => optional($caso->fecAutorizacion)->format('Y-m-d'),
-                'vencimientoAut' => optional($caso->fechavenautorizacion)->format('Y-m-d'),
-                'observacionTfx' => $caso->ObservacionTFX,
-                // Acumulado de Observaciones CCX del caso. Va aparte de la
-                // columna 'observacion', que es el tramo de cada seguimiento.
-                'observacionCcxCaso' => $caso->ObservacionCCX,
-                'cups' => $procs
-                    ->map(fn ($p) => $codigosCups[$p->cusv_id] ?? (string) $p->cusv_id)
-                    ->filter()->unique()->values()->all(),
-                'autorizacionesCups' => $procs
-                    ->pluck('N_Autorizacion')->filter()->unique()->values()->all(),
-                'fechasProgramacion' => ($fechasProgramacion->get($caso->codrad) ?? collect())
-                    ->map(fn (ProgramacionCaso $p) => $p->fecha_programacion->format('Y-m-d H:i'))
-                    ->unique()->values()->all(),
-            ];
-        };
-
-        $visible = fn (?User $autor) => $viewerIsSuperAdmin || ! $autor || $autor->rol !== User::SUPER_ADMIN;
 
         $rows = [];
-        // Radicaciones que ya aportaron al menos una fila VISIBLE. Se calcula
-        // sobre lo realmente emitido y no sobre lo consultado: si todos los
-        // movimientos de un caso los hizo un Super Admin y quien consulta no
-        // lo es, el caso debe seguir apareciendo como radicación sin cambios
-        // en lugar de desaparecer del informe.
-        $conFilas = [];
+        $recortadoPorFilas = false;
 
-        // 3.a) Una fila por cada cambio registrado en la bitácora.
-        foreach ($bitacora as $t) {
-            if (! $visible($t->user)) {
+        foreach ($lotes as $casos) {
+            if ($casos->isEmpty()) {
                 continue;
             }
 
-            $caso = $casos->get($t->codrad);
-            if (! $caso) {
-                continue;
+            $codrads = $casos->keys();
+
+            // 2) Catálogos completos de una sola vez: antes se resolvían con hasta
+            //    seis consultas por fila.
+            $estados = EstRadicado::pluck('Nombre', 'id');
+            $estadosSec = EstRadisecundario::pluck('Nombre', 'id');
+            $motivos = Motivo::pluck('Nombre', 'id');
+            $subesp = SubEspecialidad::pluck('Nombre', 'cod_SubEspecialidad');
+            $especialidades = Especialidad::pluck('Nombre', 'espcodser');
+            $convenios = Convenio::pluck('nombre', 'nit_Convenio');
+            // Del paciente se traen también aseguradora y teléfonos: el informe
+            // muestra la radicación completa, no solo el nombre.
+            $pacientes = User::whereIn('Numero_D', $casos->pluck('Ndocumento')->filter()->unique())
+                ->get(['Numero_D', 'name', 'Apellido1', 'apellido2', 'Eps', 'Telefono1', 'telefono2'])
+                ->keyBy('Numero_D');
+            $usuarios = User::whereIn('id', $casos->pluck('codMed')->filter()->unique())
+                ->get(['id', 'name', 'Apellido1', 'apellido2'])
+                ->keyBy('id');
+
+            // CUPS y autorizaciones de cada radicación. Se resuelven en dos
+            // consultas para todos los casos: dentro del bucle de filas serían dos
+            // por movimiento. codRadicado es columna de texto, de ahí el casteo.
+            $anexados = CupsAnezado::whereIn('codRadicado', $codrads->map(fn ($c) => (string) $c)->all())
+                ->orderBy('id')
+                ->get(['codRadicado', 'cusv_id', 'N_Autorizacion'])
+                ->groupBy('codRadicado');
+            $codigosCups = Cups::whereIn('id', $anexados->flatten(1)->pluck('cusv_id')->unique())
+                ->pluck('CodCupsHuv', 'id');
+
+            // PDFs de los conceptos cotizados, para verificar desde el informe qué
+            // se cotizó. Una sola consulta para todos los casos: dentro del bucle
+            // de filas sería una por movimiento.
+            $adjuntosCotizacion = CotizacionCaso::whereIn('codrad', $codrads)
+                ->whereNotNull('adjunto')
+                ->orderBy('id')
+                ->get(['id', 'codrad', 'tercero'])
+                ->groupBy('codrad');
+
+            // Fechas de cirugía programada de cada radicación, la más reciente
+            // primero. Van todas —también las de fuera del período filtrado—: una
+            // reprogramación posterior es justo lo que interesa ver.
+            $fechasProgramacion = ProgramacionCaso::whereIn('codrad', $codrads)
+                ->whereNotNull('fecha_programacion')
+                ->orderByDesc('fecha_programacion')
+                ->get(['codrad', 'fecha_programacion'])
+                ->groupBy('codrad');
+
+            $rangoFecha = function ($query) use ($desde, $hasta) {
+                return $query
+                    ->when($desde !== null, fn ($q) => $q->whereDate('created_at', '>=', $desde))
+                    ->when($hasta !== null, fn ($q) => $q->whereDate('created_at', '<=', $hasta));
+            };
+
+            // Lo que hizo un Super Admin es invisible para los demás roles. Se
+            // descarta en SQL y no después: si se filtrara en PHP, el tope de
+            // filas se consumiría con registros que el usuario no va a ver y el
+            // informe podría salir vacío teniendo movimientos visibles más atrás.
+            $ocultarSuperAdmin = function ($query) use ($viewerIsSuperAdmin) {
+                if ($viewerIsSuperAdmin) {
+                    return $query;
+                }
+
+                return $query->where(fn ($q) => $q
+                    ->whereNull('user_id')
+                    ->orWhereDoesntHave('user')
+                    ->orWhereHas('user', fn ($u) => $u->where('rol', '!=', User::SUPER_ADMIN))
+                );
+            };
+
+            // 3) Las dos fuentes de trazabilidad: la bitácora campo a campo y las
+            //    fotos históricas del formulario Aplicar Modificaciones.
+            // En CONSULTAS solo interesa el último movimiento de cada radicación:
+            // se trae directamente el más reciente por caso (id más alto) en lugar
+            // de todos con tope, que podría dejar fuera el último de algún caso.
+            $ultimoPorCaso = fn (string $modelo) => $modelo::query()
+                ->whereIn('codrad', $codrads)
+                ->tap($rangoFecha)
+                ->tap($ocultarSuperAdmin)
+                ->selectRaw('MAX(id)')
+                ->groupBy('codrad');
+
+            $bitacora = TrazabilidadCaso::query()
+                ->with('user:id,name,Apellido1,apellido2,rol')
+                ->when(
+                    $soloUltimo,
+                    fn ($q) => $q->whereIn('id', $ultimoPorCaso(TrazabilidadCaso::class)),
+                    fn ($q) => $q->whereIn('codrad', $codrads)
+                        ->tap($rangoFecha)
+                        ->tap($ocultarSuperAdmin)
+                        ->limit(self::TOPE_FILAS_INFORME),
+                )
+                ->orderByDesc('created_at')
+                ->get();
+
+            $seguimientos = SeguimientoCaso::query()
+                ->with('user:id,name,Apellido1,apellido2,rol')
+                ->when(
+                    $soloUltimo,
+                    fn ($q) => $q->whereIn('id', $ultimoPorCaso(SeguimientoCaso::class)),
+                    fn ($q) => $q->whereIn('codrad', $codrads)
+                        ->tap($rangoFecha)
+                        ->tap($ocultarSuperAdmin)
+                        ->limit(self::TOPE_FILAS_INFORME),
+                )
+                ->orderByDesc('created_at')
+                ->get();
+
+            // Qué radicaciones tienen realmente algún movimiento visible. Se
+            // consulta aparte y SIN tope: decidirlo con las filas ya traídas haría
+            // que un caso cuyos cambios quedaron fuera del corte apareciera
+            // rotulado como "Sin cambios registrados", que es justo lo contrario
+            // de la verdad en un informe de auditoría.
+            $conMovimiento = TrazabilidadCaso::query()
+                ->whereIn('codrad', $codrads)
+                ->tap($rangoFecha)
+                ->tap($ocultarSuperAdmin)
+                ->distinct()
+                ->pluck('codrad')
+                ->merge(
+                    SeguimientoCaso::query()
+                        ->whereIn('codrad', $codrads)
+                        ->tap($rangoFecha)
+                        ->tap($ocultarSuperAdmin)
+                        ->distinct()
+                        ->pluck('codrad')
+                )
+                ->unique()
+                ->flip();
+
+            $datosCaso = function (RadicarCaso $caso) use ($estados, $usuarios, $subesp, $especialidades, $pacientes, $adjuntosCotizacion, $convenios, $anexados, $codigosCups, $fechasProgramacion) {
+                $med = $caso->codMed ? $usuarios->get($caso->codMed) : null;
+                $pac = $caso->Ndocumento ? $pacientes->get($caso->Ndocumento) : null;
+                $procs = $anexados->get((string) $caso->codrad) ?? collect();
+
+                return [
+                    'codrad' => $caso->codrad,
+                    'ambito' => $caso->ambito ?? RadicarCaso::AMBULATORIO,
+                    'fechaRecibido' => optional($caso->created_at)->format('Y-m-d'),
+                    'documento' => $caso->Ndocumento ?? '—',
+                    'paciente' => $pac
+                        ? trim(implode(' ', array_filter([$pac->name, $pac->Apellido1, $pac->apellido2])))
+                        : '—',
+                    'telefonos' => $pac
+                        ? trim(implode(' / ', array_filter([$pac->Telefono1, $pac->telefono2])))
+                        : '',
+                    'eps' => $pac?->Eps ?? '',
+                    'convenio' => $caso->convenio
+                        ? ($convenios[$caso->convenio] ?? $caso->convenio)
+                        : '',
+                    'estado' => $estados[(int) $caso->estRad] ?? '—',
+                    // Fecha Recibido Serv vigente del caso. Va en el bloque común
+                    // para que acompañe a TODA fila del informe (cambios de la
+                    // bitácora incluidos) y no solo a las de seguimiento.
+                    'fechaRecibidoDev' => optional($caso->fecreci)->format('Y-m-d'),
+                    'especialidad' => $especialidades[$caso->Codesp] ?? '—',
+                    'medico' => $this->nombreUsuario($med) ?? '—',
+                    'subespecialidad' => $subesp[$caso->codsubesp] ?? '—',
+                    'copago' => (bool) $caso->copago,
+                    'valorCopago' => $caso->valor_copago,
+                    'maos' => (bool) $caso->maos,
+                    'paqueteUrl' => $caso->paquete
+                        ? route('tools.radicar-solicitud.paquete', $caso->codrad)
+                        : null,
+                    // Van en el bloque común: son del caso, así que acompañan a
+                    // todas sus filas, igual que el estado o el paquete.
+                    'cotizaciones' => ($adjuntosCotizacion->get($caso->codrad) ?? collect())
+                        ->map(fn (CotizacionCaso $c) => [
+                            'id' => $c->id,
+                            'tercero' => $c->tercero,
+                            'url' => route('tools.radicar-solicitud.cotizacion-adjunto', $c->id),
+                        ])->values()->all(),
+                    // Resto de campos de la radicación: el informe muestra el caso
+                    // completo, no un resumen.
+                    'entregaProg' => optional($caso->fentregapro)->format('Y-m-d'),
+                    'fechaAutorizacion' => optional($caso->fecAutorizacion)->format('Y-m-d'),
+                    'vencimientoAut' => optional($caso->fechavenautorizacion)->format('Y-m-d'),
+                    'observacionTfx' => $caso->ObservacionTFX,
+                    // Acumulado de Observaciones CCX del caso. Va aparte de la
+                    // columna 'observacion', que es el tramo de cada seguimiento.
+                    'observacionCcxCaso' => $caso->ObservacionCCX,
+                    'cups' => $procs
+                        ->map(fn ($p) => $codigosCups[$p->cusv_id] ?? (string) $p->cusv_id)
+                        ->filter()->unique()->values()->all(),
+                    'autorizacionesCups' => $procs
+                        ->pluck('N_Autorizacion')->filter()->unique()->values()->all(),
+                    'fechasProgramacion' => ($fechasProgramacion->get($caso->codrad) ?? collect())
+                        ->map(fn (ProgramacionCaso $p) => $p->fecha_programacion->format('Y-m-d H:i'))
+                        ->unique()->values()->all(),
+                ];
+            };
+
+            $visible = fn (?User $autor) => $viewerIsSuperAdmin || ! $autor || $autor->rol !== User::SUPER_ADMIN;
+
+            // Radicaciones que ya aportaron al menos una fila VISIBLE. Se calcula
+            // sobre lo realmente emitido y no sobre lo consultado: si todos los
+            // movimientos de un caso los hizo un Super Admin y quien consulta no
+            // lo es, el caso debe seguir apareciendo como radicación sin cambios
+            // en lugar de desaparecer del informe.
+            $conFilas = [];
+
+            // 3.a) Una fila por cada cambio registrado en la bitácora.
+            foreach ($bitacora as $t) {
+                if (! $visible($t->user)) {
+                    continue;
+                }
+
+                $caso = $casos->get($t->codrad);
+                if (! $caso) {
+                    continue;
+                }
+
+                $conFilas[$t->codrad] = true;
+                $rows[] = array_merge($datosCaso($caso), [
+                    'id' => 'T'.$t->id,
+                    'tipo' => $t->evento === 'creacion' ? 'Radicación' : 'Cambio',
+                    'campo' => $t->etiqueta ?? '—',
+                    'anterior' => $t->anterior ?? '—',
+                    'nuevo' => $t->nuevo ?? '—',
+                    'motivo' => '—',
+                    'vencAnestesia' => null,
+                    'observacion' => null,
+                    'estadoQx' => '—',
+                    'usuario' => $this->nombreUsuario($t->user) ?? '—',
+                    'modificadoEn' => optional($t->created_at)->format('Y-m-d H:i'),
+                ]);
             }
 
-            $conFilas[$t->codrad] = true;
-            $rows[] = array_merge($datosCaso($caso), [
-                'id' => 'T'.$t->id,
-                'tipo' => $t->evento === 'creacion' ? 'Radicación' : 'Cambio',
-                'campo' => $t->etiqueta ?? '—',
-                'anterior' => $t->anterior ?? '—',
-                'nuevo' => $t->nuevo ?? '—',
-                'motivo' => '—',
-                'vencAnestesia' => null,
-                'observacion' => null,
-                'estadoQx' => '—',
-                'usuario' => $this->nombreUsuario($t->user) ?? '—',
-                'modificadoEn' => optional($t->created_at)->format('Y-m-d H:i'),
-            ]);
-        }
+            // 3.b) Una fila por cada seguimiento aplicado (incluye el histórico
+            //      registrado antes de que existiera la bitácora).
+            foreach ($seguimientos as $s) {
+                if (! $visible($s->user)) {
+                    continue;
+                }
 
-        // 3.b) Una fila por cada seguimiento aplicado (incluye el histórico
-        //      registrado antes de que existiera la bitácora).
-        foreach ($seguimientos as $s) {
-            if (! $visible($s->user)) {
-                continue;
+                $caso = $casos->get($s->codrad);
+                if (! $caso) {
+                    continue;
+                }
+
+                $base = $datosCaso($caso);
+                $conFilas[$s->codrad] = true;
+
+                $rows[] = array_merge($base, [
+                    'id' => 'S'.$s->id,
+                    'tipo' => 'Seguimiento',
+                    'campo' => 'Seguimiento aplicado',
+                    'anterior' => '—',
+                    'nuevo' => '—',
+                    'motivo' => $motivos[(int) $s->estcod] ?? '—',
+                    // La subespecialidad del seguimiento manda sobre la del caso.
+                    'subespecialidad' => $subesp[$s->codsubesp] ?? $base['subespecialidad'],
+                    // Igual que la subespecialidad: la foto del seguimiento manda,
+                    // y si ese campo se dejó en blanco queda la del caso.
+                    'fechaRecibidoDev' => optional($s->fecreci)->format('Y-m-d') ?? $base['fechaRecibidoDev'],
+                    'vencAnestesia' => optional($s->venc_anestesia)->format('Y-m-d'),
+                    'observacion' => $s->ObservacionCCX,
+                    // Estado QX es el estado secundario del catálogo.
+                    'estadoQx' => $estadosSec[(int) $s->codestsecundario] ?? '—',
+                    'usuario' => $this->nombreUsuario($s->user) ?? '—',
+                    'modificadoEn' => optional($s->created_at)->format('Y-m-d H:i'),
+                ]);
             }
 
-            $caso = $casos->get($s->codrad);
-            if (! $caso) {
-                continue;
+            // 3.c) Toda radicación aparece aunque no tenga ni un solo movimiento:
+            //      sin esto, una radicación recién creada sería invisible.
+            foreach ($casos as $caso) {
+                // Se usa el conteo real, no las filas que alcanzaron a traerse.
+                if ($conMovimiento->has($caso->codrad) || isset($conFilas[$caso->codrad])) {
+                    continue;
+                }
+
+                // Con filtro de fechas se usa la fecha de radicación del caso, para
+                // que una radicación creada dentro del rango y todavía sin cambios
+                // no quede fuera del informe.
+                $fechaCaso = optional($caso->created_at)->format('Y-m-d');
+                if ($desde !== null && ($fechaCaso === null || $fechaCaso < $desde)) {
+                    continue;
+                }
+                if ($hasta !== null && ($fechaCaso === null || $fechaCaso > $hasta)) {
+                    continue;
+                }
+
+                $rows[] = array_merge($datosCaso($caso), [
+                    'id' => 'C'.$caso->codrad,
+                    'tipo' => 'Radicación',
+                    'campo' => 'Sin cambios registrados',
+                    'anterior' => '—',
+                    'nuevo' => '—',
+                    'motivo' => $motivos[(int) $caso->estcod] ?? '—',
+                    'vencAnestesia' => optional($caso->venc_anestesia)->format('Y-m-d'),
+                    'observacion' => $caso->ObservacionCCX,
+                    'estadoQx' => $estadosSec[(int) $caso->codestsecundario] ?? '—',
+                    'usuario' => '—',
+                    'modificadoEn' => optional($caso->created_at)->format('Y-m-d H:i'),
+                ]);
             }
 
-            $base = $datosCaso($caso);
-            $conFilas[$s->codrad] = true;
-
-            $rows[] = array_merge($base, [
-                'id' => 'S'.$s->id,
-                'tipo' => 'Seguimiento',
-                'campo' => 'Seguimiento aplicado',
-                'anterior' => '—',
-                'nuevo' => '—',
-                'motivo' => $motivos[(int) $s->estcod] ?? '—',
-                // La subespecialidad del seguimiento manda sobre la del caso.
-                'subespecialidad' => $subesp[$s->codsubesp] ?? $base['subespecialidad'],
-                // Igual que la subespecialidad: la foto del seguimiento manda,
-                // y si ese campo se dejó en blanco queda la del caso.
-                'fechaRecibidoDev' => optional($s->fecreci)->format('Y-m-d') ?? $base['fechaRecibidoDev'],
-                'vencAnestesia' => optional($s->venc_anestesia)->format('Y-m-d'),
-                'observacion' => $s->ObservacionCCX,
-                // Estado QX es el estado secundario del catálogo.
-                'estadoQx' => $estadosSec[(int) $s->codestsecundario] ?? '—',
-                'usuario' => $this->nombreUsuario($s->user) ?? '—',
-                'modificadoEn' => optional($s->created_at)->format('Y-m-d H:i'),
-            ]);
-        }
-
-        // 3.c) Toda radicación aparece aunque no tenga ni un solo movimiento:
-        //      sin esto, una radicación recién creada sería invisible.
-        foreach ($casos as $caso) {
-            // Se usa el conteo real, no las filas que alcanzaron a traerse.
-            if ($conMovimiento->has($caso->codrad) || isset($conFilas[$caso->codrad])) {
-                continue;
-            }
-
-            // Con filtro de fechas se usa la fecha de radicación del caso, para
-            // que una radicación creada dentro del rango y todavía sin cambios
-            // no quede fuera del informe.
-            $fechaCaso = optional($caso->created_at)->format('Y-m-d');
-            if ($desde !== null && ($fechaCaso === null || $fechaCaso < $desde)) {
-                continue;
-            }
-            if ($hasta !== null && ($fechaCaso === null || $fechaCaso > $hasta)) {
-                continue;
-            }
-
-            $rows[] = array_merge($datosCaso($caso), [
-                'id' => 'C'.$caso->codrad,
-                'tipo' => 'Radicación',
-                'campo' => 'Sin cambios registrados',
-                'anterior' => '—',
-                'nuevo' => '—',
-                'motivo' => $motivos[(int) $caso->estcod] ?? '—',
-                'vencAnestesia' => optional($caso->venc_anestesia)->format('Y-m-d'),
-                'observacion' => $caso->ObservacionCCX,
-                'estadoQx' => $estadosSec[(int) $caso->codestsecundario] ?? '—',
-                'usuario' => '—',
-                'modificadoEn' => optional($caso->created_at)->format('Y-m-d H:i'),
-            ]);
+            $recortadoPorFilas = $recortadoPorFilas
+                || $bitacora->count() >= self::TOPE_FILAS_INFORME
+                || $seguimientos->count() >= self::TOPE_FILAS_INFORME;
         }
 
         // Más reciente primero; a igual momento, agrupadas por radicación.
@@ -2219,13 +2295,25 @@ class RadicarCasoController extends Controller
             return $cmp !== 0 ? $cmp : ($b['codrad'] <=> $a['codrad']);
         });
 
+        // CONSULTAS: una sola fila por radicación. Ya vienen ordenadas de la
+        // más reciente a la más antigua, así que la primera de cada caso es su
+        // última modificación (entre bitácora y seguimientos).
+        if ($soloUltimo) {
+            $vistos = [];
+            $rows = array_values(array_filter($rows, function ($r) use (&$vistos) {
+                if (isset($vistos[$r['codrad']])) {
+                    return false;
+                }
+
+                return $vistos[$r['codrad']] = true;
+            }));
+        }
+
         return response()->json([
             'rows' => $rows,
             // La vista avisa cuando el informe se recortó, para que nadie lo
             // lea como si fuera el universo completo.
-            'truncado' => $truncado
-                || $bitacora->count() >= self::TOPE_FILAS_INFORME
-                || $seguimientos->count() >= self::TOPE_FILAS_INFORME,
+            'truncado' => $truncado || (! $soloUltimo && $recortadoPorFilas),
         ]);
     }
 

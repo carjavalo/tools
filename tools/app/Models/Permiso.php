@@ -31,6 +31,9 @@ class Permiso extends Model
         // Réplica de Nueva Radicación con su propio permiso. Viene apagada:
         // el Super Admin la asigna a los roles que la necesiten.
         ['key' => 'radicar-solicitud-hospitalario', 'titulo' => 'Pestaña Radicado Hospitalario', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver']],
+        // Variante de Informes con una sola fila por radicación (su último
+        // movimiento) y filtro por EPS. Viene apagada hasta asignarla al rol.
+        ['key' => 'radicar-solicitud-consultas', 'titulo' => 'Pestaña Consultas', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver']],
         ['key' => 'radicar-solicitud-modificar', 'titulo' => 'Botón Modificar Radicado (Historial)', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver']],
         ['key' => 'radicar-solicitud-cotizaciones', 'titulo' => 'Formulario Cotizaciones de Conceptos No Convenidos (Historial)', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver']],
         // Versión reducida del formulario Aplicar Modificaciones: solo Estado
@@ -101,6 +104,7 @@ class Permiso extends Model
      */
     public const VISTAS_OPT_IN = [
         'radicar-solicitud-hospitalario',
+        'radicar-solicitud-consultas',
         'radicar-solicitud-programados',
         'radicar-solicitud-ver-programados',
         'radicar-solicitud-ver-programados-hemo',
