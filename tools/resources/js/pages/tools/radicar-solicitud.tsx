@@ -8633,49 +8633,63 @@ export default function RadicarSolicitud({
                         {/* Convenio: los activos de la EPS del paciente. Si
                             el caso tiene uno que ya no está entre ellos, se
                             ofrece también para poder conservarlo. */}
-                        <div className="grid gap-2 sm:col-span-2">
-                            <Label>Convenio *</Label>
-                            <Select
-                                value={modif.convenio}
-                                onValueChange={(v) =>
-                                    setModifField('convenio', v)
-                                }
-                                disabled={
-                                    (caso?.conveniosDisponibles ?? [])
-                                        .length === 0
-                                }
-                            >
-                                <SelectTrigger>
-                                    <SelectValue
-                                        placeholder={
-                                            (caso?.conveniosDisponibles ?? [])
-                                                .length === 0
-                                                ? 'La EPS no tiene convenios'
-                                                : 'Seleccione…'
-                                        }
-                                    />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {(caso?.conveniosDisponibles ?? []).map(
-                                        (c) => (
-                                            <SelectItem
-                                                key={c.id}
-                                                value={c.nit_Convenio}
-                                            >
-                                                {[
-                                                    c.nombre,
-                                                    c.regimen,
-                                                    c.tarifa
-                                                        ? `Tarifa ${c.tarifa}`
-                                                        : '',
-                                                ]
-                                                    .filter(Boolean)
-                                                    .join(' · ')}
-                                            </SelectItem>
-                                        ),
-                                    )}
-                                </SelectContent>
-                            </Select>
+                        <div className="grid gap-4 sm:col-span-2 sm:grid-cols-[1fr_12rem]">
+                            <div className="grid min-w-0 gap-2">
+                                <Label>Convenio *</Label>
+                                <Select
+                                    value={modif.convenio}
+                                    onValueChange={(v) =>
+                                        setModifField('convenio', v)
+                                    }
+                                    disabled={
+                                        (caso?.conveniosDisponibles ?? [])
+                                            .length === 0
+                                    }
+                                >
+                                    <SelectTrigger>
+                                        <SelectValue
+                                            placeholder={
+                                                (
+                                                    caso?.conveniosDisponibles ??
+                                                    []
+                                                ).length === 0
+                                                    ? 'La EPS no tiene convenios'
+                                                    : 'Seleccione…'
+                                            }
+                                        />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {(caso?.conveniosDisponibles ?? []).map(
+                                            (c) => (
+                                                <SelectItem
+                                                    key={c.id}
+                                                    value={c.nit_Convenio}
+                                                >
+                                                    {[
+                                                        c.nombre,
+                                                        c.regimen,
+                                                        c.tarifa
+                                                            ? `Tarifa ${c.tarifa}`
+                                                            : '',
+                                                    ]
+                                                        .filter(Boolean)
+                                                        .join(' · ')}
+                                                </SelectItem>
+                                            ),
+                                        )}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                            {/* NIT del convenio escogido: solo informativo. */}
+                            <div className="grid gap-2">
+                                <Label>NIT Convenio</Label>
+                                <Input
+                                    value={modif.convenio || '—'}
+                                    readOnly
+                                    tabIndex={-1}
+                                    className="bg-muted/40"
+                                />
+                            </div>
                         </div>
                         <div className="grid gap-2">
                             <Label>Médico *</Label>
