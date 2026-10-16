@@ -273,6 +273,9 @@ interface CasoDetalle {
     Codesp: string | null;
     codservicio: string | null;
     servicioInactivo: boolean;
+    // Convenio (nit_Convenio) y opciones para el select de Modificar Radicado.
+    codConvenio?: string | null;
+    conveniosDisponibles?: ConvenioOpt[];
     estRad: string | null;
     fecreci: string | null;
     entregaProg: string | null;
@@ -1363,6 +1366,7 @@ export default function RadicarSolicitud({
     const [modif, setModif] = useState({
         codservicio: '',
         Codesp: '',
+        convenio: '',
         codMed: '',
         estRad: '',
         copago: false,
@@ -2551,6 +2555,7 @@ export default function RadicarSolicitud({
             // Vacío en las radicaciones anteriores al campo: hay que escogerlo.
             codservicio: caso.codservicio ?? '',
             Codesp: caso.Codesp ?? '',
+            convenio: caso.codConvenio ?? '',
             codMed: caso.codMed ?? '',
             estRad: caso.estRad ?? '',
             copago: caso.copago ?? false,
@@ -2630,6 +2635,7 @@ export default function RadicarSolicitud({
         fd.append('_method', 'PUT');
         fd.append('codservicio', modif.codservicio);
         fd.append('Codesp', modif.Codesp);
+        fd.append('convenio', modif.convenio);
         fd.append('codMed', modif.codMed);
         fd.append('estRad', modif.estRad);
         fd.append('copago', modif.copago ? '1' : '0');
@@ -8623,6 +8629,53 @@ export default function RadicarSolicitud({
                                     escójala para poder guardar.
                                 </p>
                             )}
+                        </div>
+                        {/* Convenio: los activos de la EPS del paciente. Si
+                            el caso tiene uno que ya no está entre ellos, se
+                            ofrece también para poder conservarlo. */}
+                        <div className="grid gap-2 sm:col-span-2">
+                            <Label>Convenio *</Label>
+                            <Select
+                                value={modif.convenio}
+                                onValueChange={(v) =>
+                                    setModifField('convenio', v)
+                                }
+                                disabled={
+                                    (caso?.conveniosDisponibles ?? [])
+                                        .length === 0
+                                }
+                            >
+                                <SelectTrigger>
+                                    <SelectValue
+                                        placeholder={
+                                            (caso?.conveniosDisponibles ?? [])
+                                                .length === 0
+                                                ? 'La EPS no tiene convenios'
+                                                : 'Seleccione…'
+                                        }
+                                    />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {(caso?.conveniosDisponibles ?? []).map(
+                                        (c) => (
+                                            <SelectItem
+                                                key={c.id}
+                                                value={c.nit_Convenio}
+                                            >
+                                                {[
+                                                    c.nombre,
+                                                    c.regimen,
+                                                    c.tarifa
+                                                        ? `Tarifa ${c.tarifa}`
+                                                        : '',
+                                                ]
+                                                    .filter(Boolean)
+                                                    .join(' · ')}
+                                            </SelectItem>
+                                        ),
+                                    )}
+                                </SelectContent>
+                            </Select>
                         </div>
                         <div className="grid gap-2">
                             <Label>Médico *</Label>

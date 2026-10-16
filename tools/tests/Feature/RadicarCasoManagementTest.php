@@ -2627,3 +2627,48 @@ test('la grilla del historial filtra por especialidad y por medico', function ()
         ->and($codrads('?grid_medico='.$medicoB->id))->toBe([$orto->codrad, $cardioB->codrad])
         ->and($codrads('?grid_especialidad=CAR&grid_medico='.$medicoB->id))->toBe([$cardioB->codrad]);
 });
+
+test('modificar radicado cambia el convenio por otro de la eps del paciente', function () {
+    $admin = User::factory()->create();
+    $cups = Cups::create(['Nombre' => 'Proc', 'Estado' => true]);
+    Especialidad::create(['espcodser' => 'EC1', 'Nombre' => 'Cardiología', 'Estado' => true]);
+    Eps::create(['Nombre' => 'EPS CONVENIOS', 'nit_empresa' => 'NIT-EC', 'Estado' => true]);
+    Eps::create(['Nombre' => 'OTRA EPS', 'nit_empresa' => 'NIT-OT', 'Estado' => true]);
+    foreach ([['CONV-A', 'NIT-EC'], ['CONV-B', 'NIT-EC'], ['CONV-X', 'NIT-OT']] as [$nit, $empresa]) {
+        Convenio::create([
+            'nit_Convenio' => $nit,
+            'nombre' => "Convenio {$nit}",
+            'regimen' => 'Contributivo',
+            'tarifa' => 'SOAT',
+            'nit_empresa' => $empresa,
+            'Estado' => true,
+        ]);
+    }
+    User::factory()->create(['rol' => 'paciente', 'Numero_D' => '9990', 'Eps' => 'EPS CONVENIOS']);
+    $caso = RadicarCaso::create(['Ndocumento' => '9990', 'estRad' => '1', 'convenio' => 'CONV-A']);
+
+    $base = [
+        'codservicio' => servicioDePrueba(),
+        'Codesp' => 'EC1',
+        'codMed' => (string) $admin->id,
+        'estRad' => '1',
+        'fentregapro' => '2026-09-01',
+        'fecAutorizacion' => '2026-09-01',
+        'fechavenautorizacion' => '2026-12-01',
+        'procedimientos' => [['cusv_id' => $cups->id, 'N_Autorizacion' => 'A1']],
+    ];
+
+    // Un convenio de otra EPS no se acepta.
+    $this->actingAs($admin)->putJson("/tools/radicar-solicitud/{$caso->codrad}", [...$base, 'convenio' => 'CONV-X'])
+        ->assertUnprocessable()->assertJsonValidationErrors(['convenio']);
+
+    $this->actingAs($admin)->putJson("/tools/radicar-solicitud/{$caso->codrad}", [...$base, 'convenio' => 'CONV-B'])
+        ->assertOk()
+        ->assertJsonPath('caso.codConvenio', 'CONV-B')
+        ->assertJsonPath('caso.convenio', 'Convenio CONV-B')
+        ->assertJsonCount(2, 'caso.conveniosDisponibles');
+
+    expect($caso->refresh()->convenio)->toBe('CONV-B')
+        ->and(TrazabilidadCaso::where('codrad', $caso->codrad)->where('campo', 'convenio')->value('nuevo'))
+        ->toBe('Convenio CONV-B');
+});

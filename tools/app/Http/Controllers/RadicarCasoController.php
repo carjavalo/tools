@@ -852,6 +852,26 @@ class RadicarCasoController extends Controller
     }
 
     /**
+     * Convenios que se ofrecen al modificar un radicado: los activos de la EPS
+     * del paciente y, si el caso tiene uno que ya no está entre ellos
+     * (inactivo o de otra EPS), también ese, para poder conservarlo.
+     */
+    private function conveniosParaModificar(RadicarCaso $caso, ?string $epsNombre)
+    {
+        $convenios = $this->conveniosDeEps($epsNombre);
+
+        if ($caso->convenio && ! $convenios->contains('nit_Convenio', $caso->convenio)) {
+            $actual = Convenio::where('nit_Convenio', $caso->convenio)
+                ->first(['id', 'nit_Convenio', 'nombre', 'regimen', 'tarifa']);
+            if ($actual) {
+                $convenios->prepend($actual);
+            }
+        }
+
+        return $convenios->values();
+    }
+
+    /**
      * CUPS (tipos de acuerdo) asociados a una EPS (por nombre) vía cuvs_eps.
      */
     private function acuerdosDeEps(?string $epsNombre)
@@ -1045,6 +1065,16 @@ class RadicarCasoController extends Controller
     {
         $this->normalizarCopago($request);
 
+        // Convenio: solo se acepta uno de los que ofrece el modal (los de la
+        // EPS del paciente o el que ya tenía el caso). Si no hay ninguno
+        // disponible no se exige, para no bloquear la edición del resto.
+        $epsPaciente = $caso->Ndocumento
+            ? User::where('Numero_D', $caso->Ndocumento)->value('Eps')
+            : null;
+        $conveniosValidos = $this->conveniosParaModificar($caso, $epsPaciente)
+            ->pluck('nit_Convenio')
+            ->all();
+
         $data = $request->validate([
             // Servicio asignado: obligatorio también al modificar, para que
             // las radicaciones anteriores al campo lo completen. Debe ser de la
@@ -1063,6 +1093,10 @@ class RadicarCasoController extends Controller
             // radicaciones anteriores al campo la completen. Mismas reglas que
             // al radicar (store()).
             'Codesp' => ['required', 'string', 'max:10'],
+            // Si no llega, el caso conserva el convenio que tenía.
+            'convenio' => $conveniosValidos === []
+                ? ['sometimes', 'nullable', 'string', 'max:25', Rule::in([$caso->convenio])]
+                : ['sometimes', 'required', 'string', 'max:25', Rule::in($conveniosValidos)],
             'codMed' => ['required', 'string', 'max:20'],
             'estRad' => ['required', 'string', 'max:5'],
             // Copago: el valor solo se exige (y solo se guarda) si está marcado.
@@ -1099,6 +1133,7 @@ class RadicarCasoController extends Controller
         ], [
             'codservicio' => 'servicio asignado',
             'Codesp' => 'especialidad',
+            'convenio' => 'convenio',
             'codMed' => 'médico',
             'estRad' => 'estado actual',
             'valor_copago' => 'valor del copago',
@@ -1107,6 +1142,11 @@ class RadicarCasoController extends Controller
             'fecAutorizacion' => 'fecha autorización',
             'fechavenautorizacion' => 'fecha vencimiento autorización',
         ]);
+
+        // Un convenio vacío no borra el que ya tenía el caso.
+        if (array_key_exists('convenio', $data) && $data['convenio'] === null) {
+            unset($data['convenio']);
+        }
 
         // Sin copago no se conserva un valor viejo: quedaría un monto colgado
         // en un caso que dice no tener copago.
@@ -2750,6 +2790,10 @@ class RadicarCasoController extends Controller
             'servicioInactivo' => $caso->codservicio !== null
                 && ! Serasignado::withoutGlobalScope('sede')->whereKey($caso->codservicio)->where('estado', true)->exists(),
             'estRad' => $caso->estRad,
+            // Convenio (nit_Convenio) y sus opciones para el select de
+            // Modificar Radicado.
+            'codConvenio' => $caso->convenio,
+            'conveniosDisponibles' => $this->conveniosParaModificar($caso, $paciente?->Eps),
             // Se formatean aquí: el casteo 'date:Y-m-d' solo aplica cuando se
             // serializa el modelo entero. Al meter el Carbon suelto en este
             // arreglo saldría como 2026-07-30T00:00:00.000000Z, que además
