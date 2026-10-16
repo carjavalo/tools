@@ -27,6 +27,7 @@ import { Head, router, useForm, usePage } from '@inertiajs/react';
 import {
     ArrowDown,
     ArrowUp,
+    ArrowUpDown,
     BarChart3,
     CalendarClock,
     CalendarDays,
@@ -855,6 +856,106 @@ const EMPTY_SEG_CVASCULAR = { ...EMPTY_SEG_HEMO };
 /** Qué grilla muestra el modal "Ver programados". */
 type TipoProgramados = 'cirugia' | 'hemo' | 'cvascular';
 
+/** Columnas por las que se puede ordenar la grilla de "Ver programados". */
+type ColProgramados =
+    | 'codrad'
+    | 'paciente'
+    | 'documento'
+    | 'telefonos'
+    | 'especialidad'
+    | 'medico'
+    | 'especialista'
+    | 'fechaProgramacion'
+    | 'quirofano'
+    | 'paquete'
+    | 'cotizacion'
+    | 'observaciones';
+
+type OrdenProgramados = { col: ColProgramados; dir: 'asc' | 'desc' } | null;
+
+/**
+ * Valor de una fila para ordenar por la columna dada. null = vacío ('—'),
+ * que siempre queda al final sin importar el sentido.
+ */
+const valorOrdenProgramado = (
+    r: ProgramadoRow,
+    col: ColProgramados,
+): string | number | null => {
+    const texto = (v: string | null | undefined) => {
+        const t = (v ?? '').trim();
+        return t === '' || t === '—' ? null : t;
+    };
+    switch (col) {
+        case 'codrad':
+            return r.codrad;
+        case 'fechaProgramacion':
+            // 'AAAA-MM-DD HH:mm' ordena bien como texto.
+            return texto(r.fechaProgramacionInput ?? r.fechaProgramacion);
+        case 'paquete':
+            return r.paqueteUrl ? 1 : null;
+        case 'cotizacion':
+            return r.cotizaciones.length === 0
+                ? null
+                : r.cotizaciones
+                      .map((c) => c.tercero || 'Ver PDF')
+                      .join(', ');
+        default:
+            return texto(r[col]);
+    }
+};
+
+/**
+ * Encabezado de la grilla de "Ver programados" que ordena al hacer clic:
+ * ascendente → descendente → orden original (más reciente primero).
+ */
+function ThOrdenable({
+    col,
+    orden,
+    onOrdenar,
+    children,
+}: {
+    col: ColProgramados;
+    orden: OrdenProgramados;
+    onOrdenar: (col: ColProgramados) => void;
+    children: ReactNode;
+}) {
+    const dir = orden?.col === col ? orden.dir : null;
+    return (
+        <th
+            className="px-3 py-2"
+            aria-sort={
+                dir === 'asc'
+                    ? 'ascending'
+                    : dir === 'desc'
+                      ? 'descending'
+                      : 'none'
+            }
+        >
+            <button
+                type="button"
+                onClick={() => onOrdenar(col)}
+                title={
+                    dir === 'asc'
+                        ? 'Orden ascendente. Clic para ordenar descendente'
+                        : dir === 'desc'
+                          ? 'Orden descendente. Clic para quitar el orden'
+                          : 'Clic para ordenar ascendente'
+                }
+                className={`inline-flex items-center gap-1 text-left uppercase hover:text-foreground ${dir ? 'text-[#2d3e83] dark:text-white' : ''}`}
+            >
+                {children}
+                {dir === 'asc' ? (
+                    <ArrowUp className="size-3.5 shrink-0" />
+                ) : dir === 'desc' ? (
+                    <ArrowDown className="size-3.5 shrink-0" />
+                ) : (
+                    <ArrowUpDown className="size-3.5 shrink-0 opacity-40" />
+                )}
+            </button>
+        </th>
+    );
+}
+
 const EMPTY_INF = {
     fechaInicial: '',
     fechaFinal: '',
@@ -1329,6 +1430,9 @@ export default function RadicarSolicitud({
     const [programadosHasta, setProgramadosHasta] = useState('');
     // Filtro por quirófano: '' = todos, 'sin' = sin quirófano, o el id.
     const [programadosQuirofano, setProgramadosQuirofano] = useState('');
+    // Orden elegido en los encabezados de la grilla (null = el del servidor).
+    const [programadosOrden, setProgramadosOrden] =
+        useState<OrdenProgramados>(null);
     // Aviso de lo último que se hizo sobre una fila (editar o borrar). Vive
     // aparte del error para que un guardado bueno no borre un mensaje de fallo
     // anterior ni al revés.
@@ -2290,6 +2394,7 @@ export default function RadicarSolicitud({
         setProgramadosDesde('');
         setProgramadosHasta('');
         setProgramadosQuirofano('');
+        setProgramadosOrden(null);
         setProgramadosOk(null);
         setProgObsAbiertas(new Set());
         cargarProgramados(tipo);
@@ -2489,6 +2594,39 @@ export default function RadicarSolicitud({
         programadosQuirofano,
     ]);
 
+    // Filas filtradas en el orden elegido en los encabezados. Sin orden se
+    // respeta el del servidor (más reciente primero). Los vacíos van al final.
+    const programadosOrdenados = useMemo(() => {
+        if (!programadosOrden) return programadosFiltrados;
+        const { col, dir } = programadosOrden;
+        const signo = dir === 'asc' ? 1 : -1;
+        return [...programadosFiltrados].sort((a, b) => {
+            const va = valorOrdenProgramado(a, col);
+            const vb = valorOrdenProgramado(b, col);
+            if (va === null && vb === null) return 0;
+            if (va === null) return 1;
+            if (vb === null) return -1;
+            const cmp =
+                typeof va === 'number' && typeof vb === 'number'
+                    ? va - vb
+                    : String(va).localeCompare(String(vb), 'es', {
+                          numeric: true,
+                          sensitivity: 'base',
+                      });
+            return cmp * signo;
+        });
+    }, [programadosFiltrados, programadosOrden]);
+
+    // Clic en un encabezado: ascendente → descendente → sin orden.
+    const ordenarProgramados = (col: ColProgramados) =>
+        setProgramadosOrden((o) =>
+            o?.col !== col
+                ? { col, dir: 'asc' }
+                : o.dir === 'asc'
+                  ? { col, dir: 'desc' }
+                  : null,
+        );
+
     // Opciones del filtro por quirófano: los que aparecen en la grilla (también
     // los que hoy estén inactivos, que ya no salen en el formulario).
     const quirofanosProgramados = useMemo(() => {
@@ -2508,7 +2646,7 @@ export default function RadicarSolicitud({
 
         const XLSX = await import('xlsx');
 
-        const filas = programadosFiltrados.map((r) => ({
+        const filas = programadosOrdenados.map((r) => ({
             'N° Caso': r.codrad,
             Ámbito: nombreAmbito(r.ambito),
             Paciente: r.paciente,
@@ -8053,26 +8191,40 @@ export default function RadicarSolicitud({
                         <table className="w-full min-w-[1000px] text-sm">
                             <thead className="sticky top-0 z-10 bg-muted/80 backdrop-blur">
                                 <tr className="text-left text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
-                                    <th className="px-3 py-2">N° Caso</th>
-                                    <th className="px-3 py-2">Paciente</th>
-                                    <th className="px-3 py-2">
-                                        Identificación
-                                    </th>
-                                    <th className="px-3 py-2">Teléfono</th>
-                                    <th className="px-3 py-2">Especialidad</th>
-                                    <th className="px-3 py-2">Médico</th>
-                                    <th className="px-3 py-2">
-                                        Especialista Médico
-                                    </th>
-                                    <th className="px-3 py-2">
-                                        Fecha y Hora Prog.
-                                    </th>
-                                    <th className="px-3 py-2">Quirófano</th>
-                                    <th className="px-3 py-2">Paquete</th>
-                                    <th className="px-3 py-2">Cotización</th>
-                                    <th className="px-3 py-2">
-                                        Observaciones Prg
-                                    </th>
+                                    {(
+                                        [
+                                            ['codrad', 'N° Caso'],
+                                            ['paciente', 'Paciente'],
+                                            ['documento', 'Identificación'],
+                                            ['telefonos', 'Teléfono'],
+                                            ['especialidad', 'Especialidad'],
+                                            ['medico', 'Médico'],
+                                            [
+                                                'especialista',
+                                                'Especialista Médico',
+                                            ],
+                                            [
+                                                'fechaProgramacion',
+                                                'Fecha y Hora Prog.',
+                                            ],
+                                            ['quirofano', 'Quirófano'],
+                                            ['paquete', 'Paquete'],
+                                            ['cotizacion', 'Cotización'],
+                                            [
+                                                'observaciones',
+                                                'Observaciones Prg',
+                                            ],
+                                        ] as [ColProgramados, string][]
+                                    ).map(([col, titulo]) => (
+                                        <ThOrdenable
+                                            key={col}
+                                            col={col}
+                                            orden={programadosOrden}
+                                            onOrdenar={ordenarProgramados}
+                                        >
+                                            {titulo}
+                                        </ThOrdenable>
+                                    ))}
                                     {hayAccionesProgramados && (
                                         <th className="px-3 py-2 text-center">
                                             Acciones
@@ -8113,7 +8265,7 @@ export default function RadicarSolicitud({
                                         </tr>
                                     )}
                                 {!programadosLoading &&
-                                    programadosFiltrados.map((r) => (
+                                    programadosOrdenados.map((r) => (
                                         <tr
                                             key={r.id}
                                             className={`align-top hover:bg-muted/40 ${claseFilaAmbito(r.ambito)}`}
