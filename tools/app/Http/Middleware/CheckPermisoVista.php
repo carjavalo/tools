@@ -92,6 +92,7 @@ class CheckPermisoVista
 
             $tab = match (true) {
                 $sub === 'buscar-caso' => 'radicar-solicitud-historial',
+                $sub === 'grilla-exportar' => 'radicar-solicitud-historial',
                 $sub === 'informe' => 'radicar-solicitud-informes',
                 $sub === 'consulta' => 'radicar-solicitud-consultas',
                 // Radicar: el mismo endpoint sirve a Nueva Radicación y a su

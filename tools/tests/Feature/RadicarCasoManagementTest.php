@@ -2754,3 +2754,44 @@ test('la consulta sin filtros trae todas las radicaciones, sin el tope del infor
     expect(collect($respuesta->json('rows'))->pluck('codrad')->unique())->toHaveCount(2005)
         ->and($respuesta->json('truncado'))->toBeFalse();
 });
+
+test('exportar el informe trae todas las radicaciones, sin el tope de la grilla', function () {
+    $admin = User::factory()->create(['rol' => User::SUPER_ADMIN]);
+    foreach (range(1, 2005) as $i) {
+        RadicarCaso::create(['Ndocumento' => (string) (910000 + $i), 'estRad' => '1']);
+    }
+
+    $grilla = $this->actingAs($admin)->getJson('/tools/radicar-solicitud/informe')->assertOk();
+    expect($grilla->json('truncado'))->toBeTrue()
+        ->and(collect($grilla->json('rows'))->pluck('codrad')->unique())->toHaveCount(2000);
+
+    $excel = $this->actingAs($admin)->getJson('/tools/radicar-solicitud/informe?exportar=1')->assertOk();
+    expect($excel->json('truncado'))->toBeFalse()
+        ->and(collect($excel->json('rows'))->pluck('codrad')->unique())->toHaveCount(2005);
+});
+
+test('exportar la grilla del Historial trae todas las radicaciones, sin el tope de 200', function () {
+    $admin = User::factory()->create(['rol' => User::SUPER_ADMIN]);
+    foreach (range(1, 205) as $i) {
+        RadicarCaso::create(['Ndocumento' => (string) (920000 + $i), 'estRad' => '1', 'ambito' => 'ambulatorio']);
+    }
+    RadicarCaso::create(['Ndocumento' => '929999', 'estRad' => '1', 'ambito' => 'hospitalario']);
+
+    $todas = $this->actingAs($admin)->getJson('/tools/radicar-solicitud/grilla-exportar')->assertOk()->json('rows');
+    expect($todas)->toHaveCount(206);
+
+    // Con los mismos filtros que la grilla.
+    $filtradas = $this->actingAs($admin)
+        ->getJson('/tools/radicar-solicitud/grilla-exportar?grid_ambito=hospitalario')
+        ->assertOk()->json('rows');
+    expect($filtradas)->toHaveCount(1);
+});
+
+test('exportar la grilla del Historial exige poder ver la grilla', function () {
+    $rol = Role::create(['Nombre' => 'Sin Grilla', 'Estado' => true]);
+    $usuario = User::factory()->create(['rol' => 'Sin Grilla']);
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud', 'ver' => true]);
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud-grilla', 'ver' => false]);
+
+    $this->actingAs($usuario)->getJson('/tools/radicar-solicitud/grilla-exportar')->assertForbidden();
+});

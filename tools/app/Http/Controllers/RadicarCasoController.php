@@ -358,7 +358,7 @@ class RadicarCasoController extends Controller
      *
      * @return array<int, array<string, mixed>>
      */
-    private function listaCasos(Request $request): array
+    private function listaCasos(Request $request, bool $todo = false): array
     {
         $filtros = $this->filtrosGrillaCasos($request);
 
@@ -388,8 +388,31 @@ class RadicarCasoController extends Controller
             ->when($filtros['especialidad'] !== '', fn ($q) => $q->where('Codesp', $filtros['especialidad']))
             ->when($filtros['medico'] !== '', fn ($q) => $q->where('codMed', $filtros['medico']));
 
-        $casos = $query->limit($this->topeGrillaCasos($filtros))
-            ->get(['codrad', 'Ndocumento', 'estRad', 'convenio', 'codservicio', 'ambito', 'created_at']);
+        $columnas = ['codrad', 'Ndocumento', 'estRad', 'convenio', 'codservicio', 'ambito', 'created_at'];
+
+        if (! $todo) {
+            return $this->filasGrilla($query->limit($this->topeGrillaCasos($filtros))->get($columnas), $urgentes);
+        }
+
+        // Exportar a Excel: todas las radicaciones del filtro, sin tope. Se
+        // arman por lotes para no armar consultas con miles de ids.
+        $filas = [];
+        foreach ($query->select($columnas)->lazy(1000)->chunk(1000) as $lote) {
+            array_push($filas, ...$this->filasGrilla($lote->collect(), $urgentes));
+        }
+
+        return $filas;
+    }
+
+    /**
+     * Filas de la grilla del Historial para las radicaciones dadas.
+     *
+     * @param  \Illuminate\Support\Collection<int, RadicarCaso>  $casos
+     * @param  list<string>  $urgentes  estados "Solicitud Cotización"
+     * @return array<int, array<string, mixed>>
+     */
+    private function filasGrilla(\Illuminate\Support\Collection $casos, array $urgentes): array
+    {
 
         // Nombre del servicio asignado de cada fila. Sin el filtro de sede: el
         // caso ya es de la sede activa, y su servicio también.
@@ -1574,6 +1597,7 @@ class RadicarCasoController extends Controller
      */
     public function programados(Request $request): JsonResponse
     {
+        $exportar = $this->prepararExportacion($request);
         $hemodinamia = $this->estadosQxHemodinamia();
         $cardiovascular = $this->estadosQxCardiovascular();
         $propias = array_values(array_unique([...$hemodinamia, ...$cardiovascular]));
@@ -1591,8 +1615,10 @@ class RadicarCasoController extends Controller
             )
             ->orderByDesc('fecha_programacion')
             ->orderByDesc('id')
-            ->limit(self::TOPE_FILAS_INFORME)
+            // Exportar a Excel trae todas; la grilla, hasta el tope.
+            ->when(! $exportar, fn ($q) => $q->limit(self::TOPE_FILAS_INFORME))
             ->get();
+        $truncado = ! $exportar && $programaciones->count() >= self::TOPE_FILAS_INFORME;
 
         $codrads = $programaciones->pluck('codrad')->filter()->unique();
 
@@ -1667,7 +1693,7 @@ class RadicarCasoController extends Controller
             ];
         })->values()->all();
 
-        return response()->json(['rows' => $rows]);
+        return response()->json(['rows' => $rows, 'truncado' => $truncado]);
     }
 
     /**
@@ -1828,6 +1854,58 @@ class RadicarCasoController extends Controller
     }
 
     /**
+     * Grilla de radicaciones del Historial completa, sin el tope de filas,
+     * con los mismos filtros. La usa el botón Exportar a Excel.
+     */
+    public function grillaExportar(Request $request): JsonResponse
+    {
+        abort_unless($this->muestraGrillaCasos($request), 403);
+        $this->ampliarLimites();
+
+        return response()->json(['rows' => $this->listaCasos($request, true)]);
+    }
+
+    /**
+     * ¿La petición es para exportar a Excel (?exportar=1)? Exportar no lleva
+     * los topes de filas de las grillas, así que se le da el tiempo y la
+     * memoria que necesite un volumen grande.
+     */
+    private function prepararExportacion(Request $request): bool
+    {
+        if (! $request->boolean('exportar')) {
+            return false;
+        }
+
+        $this->ampliarLimites();
+
+        return true;
+    }
+
+    /** Tiempo y memoria para exportar un volumen grande. */
+    private function ampliarLimites(): void
+    {
+        @set_time_limit(0);
+        $actual = ini_get('memory_limit');
+        if ($actual !== '-1' && $this->bytes((string) $actual) < 1024 * 1024 * 1024) {
+            @ini_set('memory_limit', '1024M');
+        }
+    }
+
+    /** '512M' → bytes. */
+    private function bytes(string $valor): int
+    {
+        $valor = trim($valor);
+        $numero = (int) $valor;
+
+        return match (strtolower(substr($valor, -1))) {
+            'g' => $numero * 1024 ** 3,
+            'm' => $numero * 1024 ** 2,
+            'k' => $numero * 1024,
+            default => $numero,
+        };
+    }
+
+    /**
      * Informe de trazabilidad de modificaciones por caso.
      */
     public function informe(Request $request): JsonResponse
@@ -1867,6 +1945,8 @@ class RadicarCasoController extends Controller
         $ambitoF = array_key_exists($ambitoF, RadicarCaso::AMBITOS) ? $ambitoF : '';
         // EPS del paciente (users.Eps guarda el nombre de la EPS).
         $epsF = trim((string) $request->query('eps', ''));
+        // Exportar a Excel: sin topes de radicaciones ni de movimientos.
+        $exportar = $this->prepararExportacion($request);
 
         // Los dos períodos se validan porque se comparan como fecha en SQL: una
         // fecha mal formada no daba error, solo un informe incoherente.
@@ -1960,10 +2040,11 @@ class RadicarCasoController extends Controller
         // qué rol consulte. El resto de vistas conserva su restricción.
         // Lo único que sigue oculto aquí es lo que hizo un Super Admin.
 
-        if ($soloUltimo) {
+        if ($soloUltimo || $exportar) {
             // CONSULTAS trae TODAS las radicaciones (una fila por cada una),
-            // así que no lleva tope. Se recorren por lotes para no cargar la
-            // tabla entera en memoria ni armar consultas con miles de ids.
+            // así que no lleva tope; tampoco la exportación a Excel. Se
+            // recorren por lotes para no cargar la tabla entera en memoria ni
+            // armar consultas con miles de ids.
             $lotes = $casos->reorder()
                 ->lazyByIdDesc(self::LOTE_CONSULTA, 'codrad')
                 ->chunk(self::LOTE_CONSULTA)
@@ -2075,7 +2156,7 @@ class RadicarCasoController extends Controller
                     fn ($q) => $q->whereIn('codrad', $codrads)
                         ->tap($rangoFecha)
                         ->tap($ocultarSuperAdmin)
-                        ->limit(self::TOPE_FILAS_INFORME),
+                        ->when(! $exportar, fn ($l) => $l->limit(self::TOPE_FILAS_INFORME)),
                 )
                 ->orderByDesc('created_at')
                 ->get();
@@ -2088,7 +2169,7 @@ class RadicarCasoController extends Controller
                     fn ($q) => $q->whereIn('codrad', $codrads)
                         ->tap($rangoFecha)
                         ->tap($ocultarSuperAdmin)
-                        ->limit(self::TOPE_FILAS_INFORME),
+                        ->when(! $exportar, fn ($l) => $l->limit(self::TOPE_FILAS_INFORME)),
                 )
                 ->orderByDesc('created_at')
                 ->get();
@@ -2313,7 +2394,7 @@ class RadicarCasoController extends Controller
             'rows' => $rows,
             // La vista avisa cuando el informe se recortó, para que nadie lo
             // lea como si fuera el universo completo.
-            'truncado' => $truncado || (! $soloUltimo && $recortadoPorFilas),
+            'truncado' => $truncado || (! $soloUltimo && ! $exportar && $recortadoPorFilas),
         ]);
     }
 

@@ -85,7 +85,8 @@ Route::prefix('tools')->name('tools.')->group(function () {
         // no por la URL del disco: en S3 el bucket es privado.
         Route::get('radicar-solicitud/cotizacion/{cotizacion}/adjunto', [App\Http\Controllers\RadicarCasoController::class, 'verAdjuntoCotizacion'])->name('radicar-solicitud.cotizacion-adjunto');
         Route::get('radicar-solicitud/informe', [App\Http\Controllers\RadicarCasoController::class, 'informe'])->name('radicar-solicitud.informe');
-        Route::get('radicar-solicitud/consulta', [App\Http\Controllers\RadicarCasoController::class, 'consulta'])->name('radicar-solicitud.consulta');
+        Route::get('radicar-solicitud/grilla-exportar', [App\Http\Controllers\RadicarCasoController::class, 'grillaExportar'])->name('radicar-solicitud.grilla-exportar');
+        Route::get('radicar-solicitud/consulta',[App\Http\Controllers\RadicarCasoController::class, 'consulta'])->name('radicar-solicitud.consulta');
         Route::get('radicar-solicitud/programados', [App\Http\Controllers\RadicarCasoController::class, 'programados'])->name('radicar-solicitud.programados');
         // Botones de cada fila de la grilla "Ver programados". Van bajo
         // /programacion/{id} —y no bajo /{caso}— porque editan la programación

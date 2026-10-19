@@ -1449,6 +1449,47 @@ function EpsCombobox({
     );
 }
 
+/**
+ * Pide al servidor todas las filas de una grilla para exportarlas a Excel.
+ * Si falla avisa y devuelve null: un Excel incompleto se leería como si
+ * fuera el universo completo.
+ */
+async function traerParaExportar(
+    url: string,
+): Promise<{ rows: unknown[] } | null> {
+    try {
+        const r = await fetch(url, { headers: { Accept: 'application/json' } });
+        if (sesionCaducada(r)) return null;
+        if (!r.ok) {
+            window.alert(
+                `No se pudo exportar a Excel: ${await mensajeDeError(r)}`,
+            );
+            return null;
+        }
+        return await r.json();
+    } catch {
+        window.alert(
+            'No se pudo exportar a Excel: falló la conexión con el servidor.',
+        );
+        return null;
+    }
+}
+
+/**
+ * Ancho de cada columna de Excel: aproximado a su contenido más largo, con
+ * tope. Se recorre con un bucle y no con Math.max(...filas): con decenas de
+ * miles de filas, esparcirlas como argumentos desborda la pila del navegador.
+ */
+function anchosExcel(filas: Record<string, unknown>[], tope: number) {
+    return Object.keys(filas[0]).map((clave) => {
+        let max = clave.length + 2;
+        for (const f of filas) {
+            max = Math.max(max, String(f[clave] ?? '').length);
+        }
+        return { wch: Math.min(tope, max) };
+    });
+}
+
 /** Campo con etiqueta en mayúsculas (estilo del mockup). */
 function Field({
     label,
@@ -1708,6 +1749,10 @@ export default function RadicarSolicitud({
     // Filtro por quirófano: '' = todos, 'sin' = sin quirófano, o el id.
     const [programadosQuirofano, setProgramadosQuirofano] = useState('');
     // Orden elegido en los encabezados de la grilla (null = el del servidor).
+    // El servidor avisa cuando recortó la grilla por volumen; exportar
+    // entonces pide todas.
+    const [programadosTruncado, setProgramadosTruncado] = useState(false);
+    const [programadosExportando, setProgramadosExportando] = useState(false);
     const [programadosOrden, setProgramadosOrden] =
         useState<Orden<ColProgramados>>(null);
     // Aviso de lo último que se hizo sobre una fila (editar o borrar). Vive
@@ -1862,11 +1907,11 @@ export default function RadicarSolicitud({
 
     // Lo que muestra la grilla: lo que devolvió el servidor con sus filtros,
     // acotado además por el buscador de texto. Es también lo que se exporta.
-    const casosFiltrados = useMemo(() => {
+    const filtrarCasosPorTexto = (rows: CasoListaRow[]) => {
         const f = gridFilter.trim().toLowerCase();
-        if (!f) return casosLista;
+        if (!f) return rows;
 
-        return casosLista.filter((c) =>
+        return rows.filter((c) =>
             [
                 String(c.codrad),
                 c.paciente,
@@ -1882,7 +1927,12 @@ export default function RadicarSolicitud({
                 .toLowerCase()
                 .includes(f),
         );
-    }, [casosLista, gridFilter]);
+    };
+    const casosFiltrados = useMemo(
+        () => filtrarCasosPorTexto(casosLista),
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [casosLista, gridFilter],
+    );
 
     // Orden elegido en los encabezados. Sin orden se respeta el del servidor
     // (hospitalarias urgentes primero, luego la más reciente).
@@ -1894,14 +1944,45 @@ export default function RadicarSolicitud({
     const ordenarGrilla = (col: ColHistorial) =>
         setGridOrden((o) => siguienteOrden(o, col));
 
-    // Descarga en Excel lo que muestra la grilla, con todos sus filtros y en
-    // el mismo orden.
+    // Descarga en Excel la grilla con todos sus filtros y en el mismo orden.
+    // Si la grilla llegó recortada por el tope de filas, se pide al servidor
+    // la lista completa: el Excel no lleva límite de registros.
+    const [exportandoGrilla, setExportandoGrilla] = useState(false);
     const exportarGrillaExcel = async () => {
         if (casosOrdenados.length === 0) return;
 
+        let rows = casosOrdenados;
+        if (casosListaTruncada) {
+            setExportandoGrilla(true);
+            try {
+                const params = new URLSearchParams();
+                const f = casosListaFiltros;
+                if (f.desde) params.set('grid_desde', f.desde);
+                if (f.hasta) params.set('grid_hasta', f.hasta);
+                if (f.servicio) params.set('grid_servicio', f.servicio);
+                if (f.ambito) params.set('grid_ambito', f.ambito);
+                if (f.especialidad) {
+                    params.set('grid_especialidad', f.especialidad);
+                }
+                if (f.medico) params.set('grid_medico', f.medico);
+                const d = await traerParaExportar(
+                    `/tools/radicar-solicitud/grilla-exportar?${params.toString()}`,
+                );
+                if (!d) return;
+                rows = ordenarFilas(
+                    filtrarCasosPorTexto(d.rows as CasoListaRow[]),
+                    gridOrden,
+                    valorOrdenHistorial,
+                );
+            } finally {
+                setExportandoGrilla(false);
+            }
+        }
+        if (rows.length === 0) return;
+
         const XLSX = await import('xlsx');
 
-        const filas = casosOrdenados.map((c) => ({
+        const filas = rows.map((c) => ({
             'Caso N°': c.codrad,
             Ámbito: nombreAmbito(c.ambito),
             Fecha: c.fecha ?? '',
@@ -1918,17 +1999,7 @@ export default function RadicarSolicitud({
         }));
 
         const hoja = XLSX.utils.json_to_sheet(filas);
-        hoja['!cols'] = Object.keys(filas[0]).map((clave) => ({
-            wch: Math.min(
-                60,
-                Math.max(
-                    clave.length + 2,
-                    ...filas.map(
-                        (f) => String(f[clave as keyof typeof f] ?? '').length,
-                    ),
-                ),
-            ),
-        }));
+        hoja['!cols'] = anchosExcel(filas, 60);
 
         const libro = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(libro, hoja, 'Radicaciones');
@@ -1958,6 +2029,10 @@ export default function RadicarSolicitud({
     // Orden elegido en los encabezados (null = el del servidor, más reciente
     // primero). Se aplica a todas las filas, no solo a la página visible.
     const [infOrden, setInfOrden] = useState<Orden<ColInforme>>(null);
+    // URL con la que se generó el resultado que se está viendo: exportar
+    // repite esa misma consulta, sin tope, aunque se hayan tocado los filtros.
+    const [infUrl, setInfUrl] = useState('');
+    const [infExportando, setInfExportando] = useState(false);
     // Período de programados con el que se generó el informe que se está
     // viendo. Se guarda aparte de los inputs: si el usuario los cambia sin
     // volver a generar, la grilla debe seguir resaltando según lo aplicado.
@@ -2661,6 +2736,7 @@ export default function RadicarSolicitud({
 
                 if (Array.isArray(d.rows)) {
                     setProgramadosRows(d.rows);
+                    setProgramadosTruncado(Boolean(d.truncado));
                 } else {
                     setProgramadosError(
                         'No fue posible cargar las programaciones.',
@@ -2680,6 +2756,7 @@ export default function RadicarSolicitud({
         setProgramadosTipo(tipo);
         // Sin esto se veían un instante las filas de la otra grilla.
         setProgramadosRows([]);
+        setProgramadosTruncado(false);
         setProgramadosOpen(true);
         setProgramadosFiltro('');
         setProgramadosDesde('');
@@ -2825,7 +2902,7 @@ export default function RadicarSolicitud({
     // Filas del modal ya filtradas. El texto coincide si aparece en el N° de
     // caso, documento, paciente, especialidad o médico; el período, por el
     // día de la Fecha y Hora Prog. con ambos extremos incluidos.
-    const programadosFiltrados = useMemo(() => {
+    const filtrarProgramados = (rows: ProgramadoRow[]) => {
         const q = programadosFiltro.trim().toLowerCase();
         if (
             q === '' &&
@@ -2833,10 +2910,10 @@ export default function RadicarSolicitud({
             programadosHasta === '' &&
             programadosQuirofano === ''
         ) {
-            return programadosRows;
+            return rows;
         }
 
-        return programadosRows.filter((r) => {
+        return rows.filter((r) => {
             if (programadosQuirofano === 'sin' && r.quirofanoId !== null) {
                 return false;
             }
@@ -2877,13 +2954,18 @@ export default function RadicarSolicitud({
                     .includes(q)
             );
         });
-    }, [
-        programadosRows,
-        programadosFiltro,
-        programadosDesde,
-        programadosHasta,
-        programadosQuirofano,
-    ]);
+    };
+    const programadosFiltrados = useMemo(
+        () => filtrarProgramados(programadosRows),
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [
+            programadosRows,
+            programadosFiltro,
+            programadosDesde,
+            programadosHasta,
+            programadosQuirofano,
+        ],
+    );
 
     // Filas filtradas en el orden elegido en los encabezados. Sin orden se
     // respeta el del servidor (más reciente primero). Los vacíos van al final.
@@ -2917,9 +2999,34 @@ export default function RadicarSolicitud({
     const exportarProgramadosExcel = async () => {
         if (programadosFiltrados.length === 0) return;
 
+        // Si la grilla llegó recortada, se piden todas: el Excel no lleva
+        // límite. Se les aplican los mismos filtros y el mismo orden.
+        let rows = programadosOrdenados;
+        if (programadosTruncado) {
+            setProgramadosExportando(true);
+            try {
+                const tipo =
+                    programadosTipo === 'cirugia'
+                        ? ''
+                        : `&tipo=${programadosTipo}`;
+                const d = await traerParaExportar(
+                    `/tools/radicar-solicitud/programados?exportar=1${tipo}`,
+                );
+                if (!d) return;
+                rows = ordenarFilas(
+                    filtrarProgramados(d.rows as ProgramadoRow[]),
+                    programadosOrden,
+                    valorOrdenProgramado,
+                );
+            } finally {
+                setProgramadosExportando(false);
+            }
+        }
+        if (rows.length === 0) return;
+
         const XLSX = await import('xlsx');
 
-        const filas = programadosOrdenados.map((r) => ({
+        const filas = rows.map((r) => ({
             'N° Caso': r.codrad,
             Ámbito: nombreAmbito(r.ambito),
             Paciente: r.paciente,
@@ -2939,17 +3046,7 @@ export default function RadicarSolicitud({
         }));
 
         const hoja = XLSX.utils.json_to_sheet(filas);
-        hoja['!cols'] = Object.keys(filas[0]).map((clave) => ({
-            wch: Math.min(
-                45,
-                Math.max(
-                    clave.length + 2,
-                    ...filas.map(
-                        (f) => String(f[clave as keyof typeof f] ?? '').length,
-                    ),
-                ),
-            ),
-        }));
+        hoja['!cols'] = anchosExcel(filas, 45);
 
         const libro = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(libro, hoja, 'Programados');
@@ -3594,7 +3691,8 @@ export default function RadicarSolicitud({
             if (v) params.set(k, v);
         });
         const endpoint = esConsulta ? 'consulta' : 'informe';
-        fetch(`/tools/radicar-solicitud/${endpoint}?${params.toString()}`, {
+        const url = `/tools/radicar-solicitud/${endpoint}?${params.toString()}`;
+        fetch(url, {
             headers: { Accept: 'application/json' },
         })
             // Sin sesión no se vacía la grilla: un informe en blanco se lee
@@ -3614,6 +3712,7 @@ export default function RadicarSolicitud({
 
                 setInfRows(d.rows ?? []);
                 setInfTruncado(Boolean(d.truncado));
+                setInfUrl(url);
                 setInfPeriodoProg({
                     inicial: params.get('programadoInicial') ?? '',
                     final: params.get('programadoFinal') ?? '',
@@ -3633,10 +3732,28 @@ export default function RadicarSolicitud({
     const exportarInformeExcel = async () => {
         if (!infRows || infRows.length === 0) return;
 
+        // En el mismo orden que la grilla. Si el resultado llegó recortado
+        // por volumen, se pide completo: el Excel no lleva límite.
+        let rows = infRowsOrdenadas;
+        if (infTruncado && infUrl) {
+            setInfExportando(true);
+            try {
+                const d = await traerParaExportar(`${infUrl}&exportar=1`);
+                if (!d) return;
+                rows = ordenarFilas(
+                    d.rows as InformeRow[],
+                    infOrden,
+                    valorOrdenInforme,
+                );
+            } finally {
+                setInfExportando(false);
+            }
+        }
+        if (rows.length === 0) return;
+
         const XLSX = await import('xlsx');
 
-        // En el mismo orden que la grilla.
-        const filas = infRowsOrdenadas.map((r) => ({
+        const filas = rows.map((r) => ({
             'N° Caso': r.codrad,
             Ámbito: nombreAmbito(r.ambito),
             'Fecha Recibido': r.fechaRecibido ?? '',
@@ -3684,17 +3801,7 @@ export default function RadicarSolicitud({
 
         const hoja = XLSX.utils.json_to_sheet(filas);
         // Ancho de columna aproximado al contenido más largo de cada una.
-        hoja['!cols'] = Object.keys(filas[0]).map((clave) => ({
-            wch: Math.min(
-                45,
-                Math.max(
-                    clave.length + 2,
-                    ...filas.map(
-                        (f) => String(f[clave as keyof typeof f] ?? '').length,
-                    ),
-                ),
-            ),
-        }));
+        hoja['!cols'] = anchosExcel(filas, 45);
 
         const libro = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(
@@ -5271,12 +5378,17 @@ export default function RadicarSolicitud({
                                                 size="sm"
                                                 onClick={exportarGrillaExcel}
                                                 disabled={
-                                                    casosFiltrados.length === 0
+                                                    casosFiltrados.length ===
+                                                        0 || exportandoGrilla
                                                 }
-                                                title="Descargar en Excel las radicaciones que muestra la grilla con los filtros aplicados"
+                                                title="Descargar en Excel todas las radicaciones con los filtros aplicados, sin límite de registros"
                                                 className="h-8 gap-1.5 bg-green-700 text-white hover:bg-green-800"
                                             >
-                                                <FileSpreadsheet className="size-4" />
+                                                {exportandoGrilla ? (
+                                                    <LoaderCircle className="size-4 animate-spin" />
+                                                ) : (
+                                                    <FileSpreadsheet className="size-4" />
+                                                )}
                                                 Exportar Excel
                                             </Button>
                                         </div>
@@ -5303,6 +5415,7 @@ export default function RadicarSolicitud({
                                                 Se muestran las primeras{' '}
                                                 {casosListaTope}: acote el rango
                                                 de fechas para ver el resto.
+                                                Exportar Excel descarga todas.
                                             </span>
                                         )}
                                     </div>
@@ -7366,7 +7479,11 @@ export default function RadicarSolicitud({
                                     type="button"
                                     variant="outline"
                                     onClick={exportarInformeExcel}
-                                    disabled={!infRows || infRows.length === 0}
+                                    disabled={
+                                        !infRows ||
+                                        infRows.length === 0 ||
+                                        infExportando
+                                    }
                                     title={
                                         infRows && infRows.length > 0
                                             ? 'Descargar en Excel lo que muestra la grilla'
@@ -7374,7 +7491,11 @@ export default function RadicarSolicitud({
                                     }
                                     className="mt-4 ml-2 gap-2 text-[#2d3e83] disabled:opacity-40 dark:text-white"
                                 >
-                                    <FileSpreadsheet className="size-4" />
+                                    {infExportando ? (
+                                        <LoaderCircle className="size-4 animate-spin" />
+                                    ) : (
+                                        <FileSpreadsheet className="size-4" />
+                                    )}
                                     Exportar a Excel
                                 </Button>
                             </form>
@@ -7384,7 +7505,8 @@ export default function RadicarSolicitud({
                                     El informe se recortó por volumen: se
                                     muestran los movimientos más recientes.
                                     Acota el rango de fechas o usa los filtros
-                                    para ver el resto.
+                                    para ver el resto. Exportar a Excel descarga
+                                    el resultado completo.
                                 </p>
                             )}
 
@@ -8407,11 +8529,18 @@ export default function RadicarSolicitud({
                             type="button"
                             variant="outline"
                             onClick={exportarProgramadosExcel}
-                            disabled={programadosFiltrados.length === 0}
+                            disabled={
+                                programadosFiltrados.length === 0 ||
+                                programadosExportando
+                            }
                             title="Descargar en Excel lo que muestra la grilla"
                             className="gap-2 text-green-700 disabled:opacity-40 dark:text-green-400"
                         >
-                            <FileSpreadsheet className="size-4" />
+                            {programadosExportando ? (
+                                <LoaderCircle className="size-4 animate-spin" />
+                            ) : (
+                                <FileSpreadsheet className="size-4" />
+                            )}
                             Exportar a Excel
                         </Button>
                     </div>
