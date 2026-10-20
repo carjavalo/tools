@@ -296,3 +296,54 @@ test('a non super admin cannot promote an existing user to super admin', functio
 
     expect($target->fresh()->rol)->toBe('Medico');
 });
+
+test('the user listing can be filtered by role', function () {
+    $admin = User::factory()->create();
+    User::factory()->count(2)->create(['rol' => 'Medico']);
+    User::factory()->create(['rol' => 'Operador']);
+
+    $this->actingAs($admin)
+        ->get('/tools/gestion-usuarios?rol=Medico')
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('users.total', 2)
+            ->where('filters.rol', 'Medico')
+            ->where('users.data.0.rol', 'Medico')
+        );
+});
+
+test('the role filter list hides super admin for a non super admin', function () {
+    $operador = User::factory()->create(['rol' => 'Operador']);
+
+    $this->actingAs($operador)
+        ->get('/tools/gestion-usuarios')
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('rolesFiltro', fn ($roles) => ! collect($roles)->pluck('Nombre')->contains('Super Admin'))
+        );
+});
+
+test('export returns every user of the current filter, without pagination', function () {
+    $admin = User::factory()->create();
+    User::factory()->count(15)->create(['rol' => 'Medico', 'name' => 'Medico']);
+    User::factory()->create(['rol' => 'Operador']);
+
+    $rows = $this->actingAs($admin)
+        ->getJson('/tools/gestion-usuarios/exportar?rol=Medico')
+        ->assertOk()
+        ->json('rows');
+
+    expect($rows)->toHaveCount(15)
+        ->and(collect($rows)->pluck('rol')->unique()->all())->toBe(['Medico'])
+        ->and($rows[0])->not->toHaveKey('password');
+});
+
+test('export never includes super admin users for a non super admin', function () {
+    $operador = User::factory()->create(['rol' => 'Operador']);
+    User::factory()->create(['rol' => 'Super Admin']);
+
+    $rows = $this->actingAs($operador)
+        ->getJson('/tools/gestion-usuarios/exportar?rol=Super%20Admin')
+        ->assertOk()
+        ->json('rows');
+
+    expect($rows)->toBeEmpty();
+});

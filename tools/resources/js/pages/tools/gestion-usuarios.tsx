@@ -28,6 +28,7 @@ import {
     ChevronLeft,
     ChevronRight,
     Eye,
+    FileSpreadsheet,
     LoaderCircle,
     Pencil,
     Search,
@@ -80,9 +81,10 @@ interface Paginated<T> {
 
 interface PageProps {
     users: Paginated<ManagedUser>;
-    filters: { search: string; perPage: number };
+    filters: { search: string; rol: string; perPage: number };
     tiposDocumento: TipoDocOption[];
     rolesList: TipoDocOption[];
+    rolesFiltro: TipoDocOption[];
     epsList: TipoDocOption[];
     especialidadesList: EspecialidadOption[];
 }
@@ -149,17 +151,22 @@ function formatDate(value: string | null) {
     }
 }
 
+// El Select de Radix no admite value="" : este valor representa "todos".
+const TODOS_LOS_ROLES = '__todos__';
+
 export default function GestionUsuarios({
     users,
     filters,
     tiposDocumento,
     rolesList,
+    rolesFiltro,
     epsList,
     especialidadesList,
 }: PageProps) {
     const { flash } = usePage<SharedData>().props;
     const acciones = usePermisosVista('gestion-usuarios');
     const [search, setSearch] = useState(filters.search ?? '');
+    const [exportando, setExportando] = useState(false);
     const didMount = useRef(false);
     const [formOpen, setFormOpen] = useState(false);
     const [editingId, setEditingId] = useState<number | null>(null);
@@ -195,7 +202,7 @@ export default function GestionUsuarios({
         const timer = setTimeout(() => {
             router.get(
                 '/tools/gestion-usuarios',
-                { search, perPage: filters.perPage },
+                { search, rol: filters.rol, perPage: filters.perPage },
                 { preserveState: true, preserveScroll: true, replace: true },
             );
         }, 350);
@@ -205,7 +212,7 @@ export default function GestionUsuarios({
     const goToPage = (page: number) => {
         router.get(
             '/tools/gestion-usuarios',
-            { search, perPage: filters.perPage, page },
+            { search, rol: filters.rol, perPage: filters.perPage, page },
             { preserveState: true, preserveScroll: true },
         );
     };
@@ -213,9 +220,102 @@ export default function GestionUsuarios({
     const changePerPage = (n: number) => {
         router.get(
             '/tools/gestion-usuarios',
-            { search, perPage: n },
+            { search, rol: filters.rol, perPage: n },
             { preserveState: true, preserveScroll: true, replace: true },
         );
+    };
+
+    const changeRol = (rol: string) => {
+        router.get(
+            '/tools/gestion-usuarios',
+            {
+                search,
+                rol: rol === TODOS_LOS_ROLES ? '' : rol,
+                perPage: filters.perPage,
+            },
+            { preserveState: true, preserveScroll: true, replace: true },
+        );
+    };
+
+    // Exporta todos los usuarios del filtro actual (no solo la página visible).
+    const exportarExcel = async () => {
+        setExportando(true);
+        try {
+            const params = new URLSearchParams();
+            if (search) params.set('search', search);
+            if (filters.rol) params.set('rol', filters.rol);
+
+            let rows: ManagedUser[];
+            try {
+                const r = await fetch(
+                    `/tools/gestion-usuarios/exportar?${params.toString()}`,
+                    { headers: { Accept: 'application/json' } },
+                );
+                if (!r.ok) {
+                    setNotice({
+                        type: 'error',
+                        msg: 'No se pudo exportar a Excel.',
+                    });
+                    return;
+                }
+                rows = (await r.json()).rows;
+            } catch {
+                setNotice({
+                    type: 'error',
+                    msg: 'No se pudo exportar a Excel: falló la conexión con el servidor.',
+                });
+                return;
+            }
+
+            if (rows.length === 0) {
+                setNotice({
+                    type: 'error',
+                    msg: 'No hay usuarios para exportar con el filtro actual.',
+                });
+                return;
+            }
+
+            const XLSX = await import('xlsx');
+
+            const filas = rows.map((u) => ({
+                Nombres: u.name ?? '',
+                'Primer apellido': u.Apellido1 ?? '',
+                'Segundo apellido': u.apellido2 ?? '',
+                'Tipo documento': u.tipo_Docu ?? '',
+                Documento: u.Numero_D ?? '',
+                EPS: u.Eps ?? '',
+                'Teléfono 1': u.Telefono1 ?? '',
+                'Teléfono 2': u.telefono2 ?? '',
+                Dirección: u.Direccion ?? '',
+                Email: u.email ?? '',
+                Rol: u.rol || 'paciente',
+                Estado: u.email_verified_at ? 'Verificado' : 'Pendiente',
+                Registrado: formatDate(u.created_at),
+            }));
+
+            const hoja = XLSX.utils.json_to_sheet(filas);
+            hoja['!cols'] = Object.keys(filas[0]).map((clave) => {
+                let max = clave.length + 2;
+                for (const f of filas) {
+                    max = Math.max(
+                        max,
+                        String(f[clave as keyof typeof f]).length,
+                    );
+                }
+                return { wch: Math.min(50, max) };
+            });
+
+            const libro = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(libro, hoja, 'Usuarios');
+
+            const hoy = new Date().toISOString().slice(0, 10);
+            const sufijoRol = filters.rol
+                ? `-${filters.rol.toLowerCase().replace(/\s+/g, '-')}`
+                : '';
+            XLSX.writeFile(libro, `usuarios${sufijoRol}-${hoy}.xlsx`);
+        } finally {
+            setExportando(false);
+        }
     };
 
     const openCreate = () => {
@@ -326,15 +426,51 @@ export default function GestionUsuarios({
 
                 {/* Tarjeta de tabla */}
                 <div className="flex flex-1 flex-col overflow-hidden rounded-xl border bg-card shadow-sm">
-                    <div className="flex flex-col gap-3 border-b p-4 sm:flex-row sm:items-center sm:justify-between">
-                        <div className="relative w-full sm:max-w-xs">
-                            <Search className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
-                            <Input
-                                value={search}
-                                onChange={(e) => setSearch(e.target.value)}
-                                placeholder="Buscar por nombre, correo o documento…"
-                                className="pl-9"
-                            />
+                    <div className="flex flex-col gap-3 border-b p-4 lg:flex-row lg:items-center lg:justify-between">
+                        <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center lg:w-auto">
+                            <div className="relative w-full sm:max-w-xs">
+                                <Search className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+                                <Input
+                                    value={search}
+                                    onChange={(e) => setSearch(e.target.value)}
+                                    placeholder="Buscar por nombre, correo o documento…"
+                                    className="pl-9"
+                                />
+                            </div>
+                            <Select
+                                value={filters.rol || TODOS_LOS_ROLES}
+                                onValueChange={changeRol}
+                            >
+                                <SelectTrigger
+                                    className="w-full sm:w-48"
+                                    aria-label="Filtrar por rol"
+                                >
+                                    <SelectValue placeholder="Todos los roles" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value={TODOS_LOS_ROLES}>
+                                        Todos los roles
+                                    </SelectItem>
+                                    {rolesFiltro.map((r) => (
+                                        <SelectItem key={r.id} value={r.Nombre}>
+                                            {r.Nombre}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                            <Button
+                                variant="outline"
+                                className="gap-2"
+                                onClick={exportarExcel}
+                                disabled={exportando || users.total === 0}
+                            >
+                                {exportando ? (
+                                    <LoaderCircle className="size-4 animate-spin" />
+                                ) : (
+                                    <FileSpreadsheet className="size-4 text-green-700 dark:text-green-400" />
+                                )}
+                                Exportar a Excel
+                            </Button>
                         </div>
                         <div className="flex items-center gap-3">
                             <span className="text-sm text-muted-foreground">

@@ -8,6 +8,8 @@ use App\Models\Permiso;
 use App\Models\Role;
 use App\Models\TipoDocumento;
 use App\Models\User;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -18,12 +20,32 @@ use Inertia\Response;
 
 class UserManagementController extends Controller
 {
+    /** Columnas del listado y de la exportación a Excel. */
+    private const COLUMNAS_LISTADO = [
+        'id',
+        'name',
+        'Apellido1',
+        'apellido2',
+        'rol',
+        'tipo_Docu',
+        'Numero_D',
+        'email',
+        'Telefono1',
+        'telefono2',
+        'Direccion',
+        'Eps',
+        'codesp',
+        'email_verified_at',
+        'created_at',
+    ];
+
     /**
      * Listado de usuarios.
      */
     public function index(Request $request): Response
     {
         $search = trim((string) $request->query('search', ''));
+        $rol = trim((string) $request->query('rol', ''));
         $perPage = (int) $request->query('perPage', 12);
         if (! in_array($perPage, [12, 24, 36], true)) {
             $perPage = 12;
@@ -33,40 +55,19 @@ class UserManagementController extends Controller
         // Admin. Para cualquier otro rol es como si no existieran.
         $viewerIsSuperAdmin = $request->user()?->isSuperAdmin() ?? false;
 
-        $users = User::query()
-            ->when(! $viewerIsSuperAdmin, fn ($query) => $query->where('rol', '!=', User::SUPER_ADMIN))
-            ->when($search !== '', function ($query) use ($search) {
-                $query->where(function ($sub) use ($search) {
-                    $sub->where('name', 'like', "%{$search}%")
-                        ->orWhere('Apellido1', 'like', "%{$search}%")
-                        ->orWhere('apellido2', 'like', "%{$search}%")
-                        ->orWhere('email', 'like', "%{$search}%")
-                        ->orWhere('Numero_D', 'like', "%{$search}%");
-                });
-            })
-            ->orderByDesc('created_at')
-            ->paginate($perPage, [
-                'id',
-                'name',
-                'Apellido1',
-                'apellido2',
-                'rol',
-                'tipo_Docu',
-                'Numero_D',
-                'email',
-                'Telefono1',
-                'telefono2',
-                'Direccion',
-                'Eps',
-                'codesp',
-                'email_verified_at',
-                'created_at',
-            ])
+        $users = $this->usuariosFiltrados($request)
+            ->paginate($perPage, self::COLUMNAS_LISTADO)
             ->withQueryString();
 
         return Inertia::render('tools/gestion-usuarios', [
             'users' => $users,
-            'filters' => ['search' => $search, 'perPage' => $perPage],
+            'filters' => ['search' => $search, 'rol' => $rol, 'perPage' => $perPage],
+            // Roles del filtro: todos los existentes (no solo los asignables),
+            // para poder consultar a cualquier usuario visible.
+            'rolesFiltro' => Role::query()
+                ->when(! $viewerIsSuperAdmin, fn ($query) => $query->where('Nombre', '!=', User::SUPER_ADMIN))
+                ->orderBy('Nombre')
+                ->get(['id', 'Nombre']),
             'tiposDocumento' => TipoDocumento::query()
                 ->where('Estado', true)
                 ->orderBy('Nombre')
@@ -90,6 +91,41 @@ class UserManagementController extends Controller
                 ->orderBy('Nombre')
                 ->get(['id', 'espcodser', 'Nombre']),
         ]);
+    }
+
+    /**
+     * Todos los usuarios del filtro actual (búsqueda y rol), sin paginar.
+     * La usa el botón Exportar a Excel.
+     */
+    public function exportar(Request $request): JsonResponse
+    {
+        return response()->json([
+            'rows' => $this->usuariosFiltrados($request)->get(self::COLUMNAS_LISTADO),
+        ]);
+    }
+
+    /**
+     * Consulta de usuarios con los filtros del listado (?search= y ?rol=).
+     */
+    private function usuariosFiltrados(Request $request): Builder
+    {
+        $search = trim((string) $request->query('search', ''));
+        $rol = trim((string) $request->query('rol', ''));
+        $viewerIsSuperAdmin = $request->user()?->isSuperAdmin() ?? false;
+
+        return User::query()
+            ->when(! $viewerIsSuperAdmin, fn ($query) => $query->where('rol', '!=', User::SUPER_ADMIN))
+            ->when($rol !== '', fn ($query) => $query->where('rol', $rol))
+            ->when($search !== '', function ($query) use ($search) {
+                $query->where(function ($sub) use ($search) {
+                    $sub->where('name', 'like', "%{$search}%")
+                        ->orWhere('Apellido1', 'like', "%{$search}%")
+                        ->orWhere('apellido2', 'like', "%{$search}%")
+                        ->orWhere('email', 'like', "%{$search}%")
+                        ->orWhere('Numero_D', 'like', "%{$search}%");
+                });
+            })
+            ->orderByDesc('created_at');
     }
 
     /**
