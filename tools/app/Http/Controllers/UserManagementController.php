@@ -8,6 +8,7 @@ use App\Models\Permiso;
 use App\Models\Role;
 use App\Models\TipoDocumento;
 use App\Models\User;
+use Closure;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -138,6 +139,7 @@ class UserManagementController extends Controller
             null,
             $viewerIsSuperAdmin,
             Permiso::rolesAsignablesPara($request->user()),
+            $request,
         ));
 
         // Sin contraseña (médicos) el usuario queda sin acceso al sistema.
@@ -176,7 +178,7 @@ class UserManagementController extends Controller
             $asignables[] = $user->rol;
         }
 
-        $validated = $request->validate($this->rules($user, $viewerIsSuperAdmin, $asignables));
+        $validated = $request->validate($this->rules($user, $viewerIsSuperAdmin, $asignables, $request));
 
         if (! empty($validated['password'])) {
             $validated['password'] = Hash::make($validated['password']);
@@ -220,8 +222,12 @@ class UserManagementController extends Controller
      *
      * @return array<string, mixed>
      */
-    private function rules(?User $user = null, bool $canAssignSuperAdmin = true, ?array $rolesPermitidos = null): array
-    {
+    private function rules(
+        ?User $user = null,
+        bool $canAssignSuperAdmin = true,
+        ?array $rolesPermitidos = null,
+        ?Request $request = null,
+    ): array {
         $rolRules = ['required', 'string', 'exists:roles,Nombre'];
 
         // Un no-Super-Admin no puede asignar el rol Super Admin (es como si no existiera).
@@ -235,12 +241,41 @@ class UserManagementController extends Controller
         }
 
         return [
-            'name' => ['required', 'string', 'max:255'],
+            // Para no repetir usuarios: el nombre completo (nombres + apellidos)
+            // no puede repetirse, sin importar mayúsculas ni espacios.
+            'name' => [
+                'required',
+                'string',
+                'max:255',
+                function (string $attribute, mixed $value, Closure $fail) use ($request, $user) {
+                    if ($this->nombreCompletoRepetido(
+                        (string) $value,
+                        (string) $request?->input('Apellido1', ''),
+                        (string) $request?->input('apellido2', ''),
+                        $user?->id,
+                    )) {
+                        $fail('Ya existe un usuario registrado con ese nombre y apellidos.');
+                    }
+                },
+            ],
             'rol' => $rolRules,
             'Apellido1' => ['nullable', 'string', 'max:50'],
             'apellido2' => ['nullable', 'string', 'max:50'],
             'tipo_Docu' => ['nullable', 'string', 'max:120'],
-            'Numero_D' => ['nullable', 'string', 'max:20'],
+            'Numero_D' => [
+                'nullable',
+                'string',
+                'max:20',
+                function (string $attribute, mixed $value, Closure $fail) use ($user) {
+                    $repetido = User::query()
+                        ->whereRaw('TRIM(Numero_D) = ?', [trim((string) $value)])
+                        ->when($user, fn ($query) => $query->whereKeyNot($user->id))
+                        ->exists();
+                    if ($repetido) {
+                        $fail('Ya existe un usuario registrado con ese número de documento.');
+                    }
+                },
+            ],
             // El médico no inicia sesión: el correo es opcional para ese rol y
             // obligatorio para todos los demás, paciente incluido.
             'email' => [
@@ -249,7 +284,16 @@ class UserManagementController extends Controller
                 'string',
                 'email',
                 'max:255',
-                Rule::unique('users', 'email')->ignore($user?->id),
+                // Sin importar mayúsculas: Ana@x.com y ana@x.com son el mismo correo.
+                function (string $attribute, mixed $value, Closure $fail) use ($user) {
+                    $repetido = User::query()
+                        ->whereRaw('LOWER(TRIM(email)) = ?', [mb_strtolower(trim((string) $value))])
+                        ->when($user, fn ($query) => $query->whereKeyNot($user->id))
+                        ->exists();
+                    if ($repetido) {
+                        $fail('Ya existe un usuario registrado con ese correo electrónico.');
+                    }
+                },
             ],
             'Telefono1' => ['nullable', 'string', 'max:50'],
             'telefono2' => ['nullable', 'string', 'max:50'],
@@ -269,5 +313,35 @@ class UserManagementController extends Controller
                 ? ['nullable', 'confirmed', Password::defaults()]
                 : ['required_unless:rol,Medico,paciente', 'nullable', 'confirmed', Password::defaults()],
         ];
+    }
+
+    /**
+     * ¿Hay otro usuario con el mismo nombre completo? Se compara en minúsculas
+     * y con los espacios normalizados, sobre el nombre completo y no campo a
+     * campo: "Juan Carlos" + "Pérez" es lo mismo que "Juan" + "Carlos Pérez".
+     */
+    private function nombreCompletoRepetido(string $name, string $apellido1, string $apellido2, ?int $ignorarId): bool
+    {
+        $buscado = $this->normalizarNombre("{$name} {$apellido1} {$apellido2}");
+        if ($buscado === '') {
+            return false;
+        }
+
+        // Prefiltro en BD por la primera palabra (siempre va en el campo
+        // nombres); la comparación exacta se hace en PHP.
+        $primera = explode(' ', $buscado)[0];
+
+        return User::query()
+            ->where('name', 'like', "%{$primera}%")
+            ->when($ignorarId, fn ($query) => $query->whereKeyNot($ignorarId))
+            ->get(['id', 'name', 'Apellido1', 'apellido2'])
+            ->contains(fn (User $otro) => $this->normalizarNombre(
+                "{$otro->name} {$otro->Apellido1} {$otro->apellido2}"
+            ) === $buscado);
+    }
+
+    private function normalizarNombre(string $nombre): string
+    {
+        return mb_strtolower(trim((string) preg_replace('/\s+/u', ' ', $nombre)));
     }
 }

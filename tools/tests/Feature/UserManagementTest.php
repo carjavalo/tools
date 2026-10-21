@@ -347,3 +347,103 @@ test('export never includes super admin users for a non super admin', function (
 
     expect($rows)->toBeEmpty();
 });
+
+/** Datos válidos para crear un usuario; cada prueba cambia lo que necesita. */
+function datosUsuarioNuevo(array $cambios = []): array
+{
+    return array_merge([
+        'name' => 'Juan',
+        'rol' => 'Operador',
+        'Apellido1' => 'Pérez',
+        'apellido2' => 'Gómez',
+        'tipo_Docu' => 'CC',
+        'Numero_D' => '123456789',
+        'email' => 'juan.perez@example.com',
+        'password' => 'password',
+        'password_confirmation' => 'password',
+    ], $cambios);
+}
+
+test('a user cannot be created with a document number already registered', function () {
+    $admin = User::factory()->create();
+    User::factory()->create(['Numero_D' => '123456789']);
+
+    $this->actingAs($admin)
+        ->from('/tools/gestion-usuarios')
+        ->post('/tools/gestion-usuarios', datosUsuarioNuevo(['Numero_D' => ' 123456789 ']))
+        ->assertSessionHasErrors(['Numero_D']);
+
+    expect(User::where('Numero_D', '123456789')->count())->toBe(1);
+});
+
+test('a user cannot be created with an email already registered in another case', function () {
+    $admin = User::factory()->create();
+    User::factory()->create(['email' => 'juan.perez@example.com']);
+
+    $this->actingAs($admin)
+        ->from('/tools/gestion-usuarios')
+        ->post('/tools/gestion-usuarios', datosUsuarioNuevo(['email' => 'Juan.PEREZ@Example.com']))
+        ->assertSessionHasErrors(['email']);
+});
+
+test('a user cannot be created with the same full name regardless of case and spaces', function () {
+    $admin = User::factory()->create();
+    User::factory()->create(['name' => 'Juan Carlos', 'Apellido1' => 'Pérez', 'apellido2' => 'Gómez']);
+
+    $this->actingAs($admin)
+        ->from('/tools/gestion-usuarios')
+        ->post('/tools/gestion-usuarios', datosUsuarioNuevo([
+            'name' => 'JUAN  carlos ',
+            'Apellido1' => 'pérez',
+            'apellido2' => 'GÓMEZ',
+        ]))
+        ->assertSessionHasErrors(['name']);
+
+    // También si las palabras se repartieron distinto entre nombres y apellidos.
+    $this->actingAs($admin)
+        ->from('/tools/gestion-usuarios')
+        ->post('/tools/gestion-usuarios', datosUsuarioNuevo([
+            'name' => 'Juan',
+            'Apellido1' => 'Carlos Pérez',
+            'apellido2' => 'Gómez',
+        ]))
+        ->assertSessionHasErrors(['name']);
+});
+
+test('a user with a different full name, document and email can be created', function () {
+    $admin = User::factory()->create();
+    User::factory()->create(['name' => 'Juan', 'Apellido1' => 'Pérez', 'apellido2' => 'Gómez', 'Numero_D' => '1']);
+
+    $this->actingAs($admin)
+        ->post('/tools/gestion-usuarios', datosUsuarioNuevo(['apellido2' => 'Gómez Ruiz']))
+        ->assertSessionHasNoErrors()
+        ->assertRedirect(route('tools.gestion-usuarios'));
+});
+
+test('editing a user keeps its own document, email and name without flagging duplicates', function () {
+    $admin = User::factory()->create();
+    $target = User::factory()->create([
+        'name' => 'Juan', 'Apellido1' => 'Pérez', 'apellido2' => 'Gómez',
+        'Numero_D' => '123456789', 'email' => 'juan.perez@example.com', 'rol' => 'Operador',
+    ]);
+
+    $this->actingAs($admin)
+        ->put('/tools/gestion-usuarios/'.$target->id, datosUsuarioNuevo([
+            'password' => '', 'password_confirmation' => '', 'Telefono1' => '3000000000',
+        ]))
+        ->assertSessionHasNoErrors()
+        ->assertRedirect(route('tools.gestion-usuarios'));
+});
+
+test('editing a user cannot take the document of another user', function () {
+    $admin = User::factory()->create();
+    User::factory()->create(['Numero_D' => '999']);
+    $target = User::factory()->create(['email' => 'juan.perez@example.com', 'rol' => 'Operador']);
+
+    $this->actingAs($admin)
+        ->from('/tools/gestion-usuarios')
+        ->put('/tools/gestion-usuarios/'.$target->id, datosUsuarioNuevo([
+            'Numero_D' => '999', 'password' => '', 'password_confirmation' => '',
+        ]))
+        ->assertSessionHasErrors(['Numero_D']);
+});
