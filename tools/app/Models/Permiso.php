@@ -72,6 +72,11 @@ class Permiso extends Model
         // subir o reemplazar el PDF del paquete de un caso ya radicado (el
         // mismo de Nueva Radicación / Radicado Hospitalario). Viene apagado.
         ['key' => 'radicar-solicitud-subir-paquete', 'titulo' => 'Asignar subir paquete', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver']],
+        // Botón "Importar Censo Hospitalario" de Gestión de Usuarios: carga los
+        // pacientes del Excel del censo en users. Va justo debajo de "Asignar
+        // subir paquete" y viene apagado: solo el Super Admin lo tiene hasta
+        // que se asigne a un rol.
+        ['key' => 'gestion-usuarios-importar-censo', 'titulo' => 'Boton Importar Censo Hospitalario', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver']],
         ['key' => 'gestion-usuarios', 'titulo' => 'Gestión de Usuarios', 'grupo' => 'Herramientas', 'acciones' => ['ver', 'crear', 'editar', 'borrar']],
         ['key' => 'gestion-servicios', 'titulo' => 'Gestión Servicios', 'grupo' => 'Herramientas', 'acciones' => ['ver', 'crear', 'editar', 'borrar']],
         ['key' => 'gestion-quirofano-qx', 'titulo' => 'Gestión Quirófanos QX', 'grupo' => 'Herramientas', 'acciones' => ['ver', 'crear', 'editar', 'borrar']],
@@ -112,6 +117,7 @@ class Permiso extends Model
         'radicar-solicitud-seguimiento-cvascular',
         'radicar-solicitud-seguimiento-espe-programa',
         'radicar-solicitud-subir-paquete',
+        'gestion-usuarios-importar-censo',
     ];
 
     /**

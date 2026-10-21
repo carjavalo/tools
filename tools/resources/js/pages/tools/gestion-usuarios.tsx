@@ -1,3 +1,4 @@
+import ImportarCensoDialog from '@/components/importar-censo-dialog';
 import InputError from '@/components/input-error';
 import { Button } from '@/components/ui/button';
 import {
@@ -33,6 +34,7 @@ import {
     Pencil,
     Search,
     Trash2,
+    Upload,
     UserPlus,
     Users,
     XCircle,
@@ -163,8 +165,14 @@ export default function GestionUsuarios({
     epsList,
     especialidadesList,
 }: PageProps) {
-    const { flash } = usePage<SharedData>().props;
+    const { flash, auth } = usePage<SharedData>().props;
     const acciones = usePermisosVista('gestion-usuarios');
+    // Botón Importar Censo Hospitalario: hay que asignarlo expresamente en el
+    // Gestor de Permisos; sin asignar, solo lo ve el Super Admin.
+    const puedeImportarCenso =
+        auth.user?.rol === 'Super Admin' ||
+        auth.permisos?.['gestion-usuarios-importar-censo']?.ver === true;
+    const [censoOpen, setCensoOpen] = useState(false);
     const [search, setSearch] = useState(filters.search ?? '');
     const [exportando, setExportando] = useState(false);
     const didMount = useRef(false);
@@ -398,12 +406,24 @@ export default function GestionUsuarios({
                             </p>
                         </div>
                     </div>
-                    {acciones.crear && (
-                        <Button onClick={openCreate} className="gap-2">
-                            <UserPlus className="size-4" />
-                            Crear usuario
-                        </Button>
-                    )}
+                    <div className="flex flex-wrap items-center gap-2">
+                        {puedeImportarCenso && (
+                            <Button
+                                variant="outline"
+                                onClick={() => setCensoOpen(true)}
+                                className="gap-2"
+                            >
+                                <Upload className="size-4" />
+                                Importar Censo Hospitalario
+                            </Button>
+                        )}
+                        {acciones.crear && (
+                            <Button onClick={openCreate} className="gap-2">
+                                <UserPlus className="size-4" />
+                                Crear usuario
+                            </Button>
+                        )}
+                    </div>
                 </div>
 
                 {/* Notificación */}
@@ -994,6 +1014,8 @@ export default function GestionUsuarios({
                     </form>
                 </DialogContent>
             </Dialog>
+
+            <ImportarCensoDialog open={censoOpen} onOpenChange={setCensoOpen} />
 
             {/* Diálogo Ver */}
             <Dialog

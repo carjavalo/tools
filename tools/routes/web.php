@@ -104,6 +104,7 @@ Route::prefix('tools')->name('tools.')->group(function () {
         Route::get('gestion-usuarios', [App\Http\Controllers\UserManagementController::class, 'index'])->name('gestion-usuarios');
         Route::get('gestion-usuarios/exportar', [App\Http\Controllers\UserManagementController::class, 'exportar'])->name('gestion-usuarios.exportar');
         Route::post('gestion-usuarios', [App\Http\Controllers\UserManagementController::class, 'store'])->name('gestion-usuarios.store');
+        Route::post('gestion-usuarios/importar-censo', [App\Http\Controllers\UserManagementController::class, 'importarCenso'])->name('gestion-usuarios.importar-censo');
         Route::put('gestion-usuarios/{user}', [App\Http\Controllers\UserManagementController::class, 'update'])->name('gestion-usuarios.update');
         Route::delete('gestion-usuarios/{user}', [App\Http\Controllers\UserManagementController::class, 'destroy'])->name('gestion-usuarios.destroy');
 

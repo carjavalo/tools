@@ -42,6 +42,20 @@ class CheckPermisoVista
             return $this->denegar($request, 'ver');
         }
 
+        // Botón "Importar Censo Hospitalario" de Gestión de Usuarios: se rige
+        // solo por su sub-vista y hay que asignarla expresamente al rol.
+        if ($vista === 'gestion-usuarios' && $request->segment(3) === 'importar-censo') {
+            $permisoCenso = Permiso::where('role_id', $role->id)
+                ->where('vista', 'gestion-usuarios-importar-censo')
+                ->first();
+
+            if (! $permisoCenso || ! $permisoCenso->ver) {
+                return $this->denegar($request, 'ver');
+            }
+
+            return $next($request);
+        }
+
         // Pestañas de Radicar Solicitud: sus endpoints se rigen además por el
         // permiso "ver" de la pestaña correspondiente.
         if ($vista === 'radicar-solicitud') {

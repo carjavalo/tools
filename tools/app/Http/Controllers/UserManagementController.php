@@ -13,6 +13,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Password;
@@ -21,6 +22,9 @@ use Inertia\Response;
 
 class UserManagementController extends Controller
 {
+    /** Filas del Censo Hospitalario que se procesan por petición. */
+    public const LOTE_CENSO = 100;
+
     /** Columnas del listado y de la exportación a Excel. */
     private const COLUMNAS_LISTADO = [
         'id',
@@ -103,6 +107,133 @@ class UserManagementController extends Controller
         return response()->json([
             'rows' => $this->usuariosFiltrados($request)->get(self::COLUMNAS_LISTADO),
         ]);
+    }
+
+    /**
+     * Importa un lote de pacientes del Censo Hospitalario.
+     *
+     * El navegador lee el Excel (hojas Hospitalización, Urgencias, Extensión
+     * y Egresados) y manda en lotes las columnas Nombre, Identificación,
+     * Documento y Responsable; las reglas de negocio se aplican aquí:
+     *  - "HUV EVARISTO" no es un paciente y se omite, igual que la fila sin
+     *    nombre o sin documento.
+     *  - Nombre: 1.ª palabra → Apellido1, 2.ª → apellido2, el resto → name.
+     *  - rol paciente, email {documento}@notiene.com y contraseña = documento.
+     *  - El paciente cuyo documento (o correo) ya está en users se ignora, así
+     *    que el censo se puede cargar a diario sin duplicar a nadie.
+     */
+    public function importarCenso(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'filas' => ['required', 'array', 'max:'.self::LOTE_CENSO],
+            'filas.*.nombre' => ['nullable', 'string', 'max:1000'],
+            'filas.*.identificacion' => ['nullable', 'string', 'max:1000'],
+            'filas.*.documento' => ['nullable', 'string', 'max:1000'],
+            'filas.*.responsable' => ['nullable', 'string', 'max:1000'],
+        ]);
+
+        $resumen = ['creados' => 0, 'existentes' => 0, 'omitidos' => 0];
+
+        // Filas válidas del lote, una por documento.
+        $pacientes = [];
+        foreach ($validated['filas'] as $fila) {
+            $nombre = $this->normalizarEspacios((string) ($fila['nombre'] ?? ''));
+            $documento = trim((string) ($fila['documento'] ?? ''));
+
+            if ($nombre === ''
+                || mb_strtolower($nombre) === 'huv evaristo'
+                || $documento === ''
+                || mb_strlen($documento) > 20) {
+                $resumen['omitidos']++;
+
+                continue;
+            }
+
+            if (isset($pacientes[$documento])) {
+                $resumen['existentes']++;
+
+                continue;
+            }
+
+            $pacientes[$documento] = [
+                'nombre' => $nombre,
+                'tipo' => trim((string) ($fila['identificacion'] ?? '')),
+                'eps' => trim((string) ($fila['responsable'] ?? '')),
+            ];
+        }
+
+        if ($pacientes === []) {
+            return response()->json($resumen);
+        }
+
+        $documentos = array_map('strval', array_keys($pacientes));
+        $docsExistentes = User::query()
+            ->whereIn(DB::raw('TRIM(Numero_D)'), $documentos)
+            ->pluck('Numero_D')
+            ->map(fn ($d) => trim((string) $d))
+            ->flip();
+        $correosExistentes = User::query()
+            ->whereIn(DB::raw('LOWER(email)'), array_map(fn ($d) => mb_strtolower("{$d}@notiene.com"), $documentos))
+            ->pluck('email')
+            ->map(fn ($e) => mb_strtolower((string) $e))
+            ->flip();
+
+        // La contraseña es el propio documento, así que un costo de bcrypt alto
+        // no la protege más y solo hace lenta la primera carga (miles de
+        // pacientes). Laravel la vuelve a cifrar con el costo normal si el
+        // paciente llega a iniciar sesión.
+        $costo = min(10, (int) config('hashing.bcrypt.rounds', 12));
+
+        foreach ($pacientes as $documento => $p) {
+            $documento = (string) $documento;
+            $email = "{$documento}@notiene.com";
+
+            if ($docsExistentes->has($documento) || $correosExistentes->has(mb_strtolower($email))) {
+                $resumen['existentes']++;
+
+                continue;
+            }
+
+            [$apellido1, $apellido2, $name] = $this->partirNombreCenso($p['nombre']);
+
+            User::create([
+                'name' => mb_substr($name, 0, 255),
+                'Apellido1' => $apellido1 !== null ? mb_substr($apellido1, 0, 50) : null,
+                'apellido2' => $apellido2 !== null ? mb_substr($apellido2, 0, 50) : null,
+                'tipo_Docu' => $p['tipo'] !== '' ? mb_substr($p['tipo'], 0, 120) : null,
+                'Numero_D' => $documento,
+                'Eps' => $p['eps'] !== '' ? mb_substr($p['eps'], 0, 120) : null,
+                'rol' => 'paciente',
+                'email' => $email,
+                'password' => Hash::make($documento, ['rounds' => $costo]),
+            ]);
+            $resumen['creados']++;
+        }
+
+        return response()->json($resumen);
+    }
+
+    /**
+     * Reparte el Nombre del censo: 1.ª palabra → Apellido1, 2.ª → apellido2,
+     * de la 3.ª en adelante → name. Con solo dos palabras ("BONILLA AMPARO")
+     * son apellido y nombre; con una sola, va al nombre (name es obligatorio).
+     *
+     * @return array{0: ?string, 1: ?string, 2: string}
+     */
+    private function partirNombreCenso(string $nombre): array
+    {
+        $palabras = explode(' ', $nombre);
+
+        return match (count($palabras)) {
+            1 => [null, null, $palabras[0]],
+            2 => [$palabras[0], null, $palabras[1]],
+            default => [$palabras[0], $palabras[1], implode(' ', array_slice($palabras, 2))],
+        };
+    }
+
+    private function normalizarEspacios(string $texto): string
+    {
+        return trim((string) preg_replace('/\s+/u', ' ', $texto));
     }
 
     /**
