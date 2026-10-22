@@ -34,6 +34,9 @@ class Permiso extends Model
         // Variante de Informes con una sola fila por radicación (su último
         // movimiento) y filtro por EPS. Viene apagada hasta asignarla al rol.
         ['key' => 'radicar-solicitud-consultas', 'titulo' => 'Pestaña Consultas', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver']],
+        // Copia de Consultas con filtro por tipo de programado (Estado QX) y
+        // por Fecha Vencimiento Autorización. Apagada hasta asignarla al rol.
+        ['key' => 'radicar-solicitud-consulta-general', 'titulo' => 'Pestaña Consulta General', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver']],
         ['key' => 'radicar-solicitud-modificar', 'titulo' => 'Botón Modificar Radicado (Historial)', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver']],
         ['key' => 'radicar-solicitud-cotizaciones', 'titulo' => 'Formulario Cotizaciones de Conceptos No Convenidos (Historial)', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver']],
         // Versión reducida del formulario Aplicar Modificaciones: solo Estado
@@ -115,6 +118,7 @@ class Permiso extends Model
     public const VISTAS_OPT_IN = [
         'radicar-solicitud-hospitalario',
         'radicar-solicitud-consultas',
+        'radicar-solicitud-consulta-general',
         'radicar-solicitud-programados',
         'radicar-solicitud-ver-programados',
         'radicar-solicitud-ver-programados-hemo',

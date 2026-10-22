@@ -109,6 +109,7 @@ class CheckPermisoVista
                 $sub === 'grilla-exportar' => 'radicar-solicitud-historial',
                 $sub === 'informe' => 'radicar-solicitud-informes',
                 $sub === 'consulta' => 'radicar-solicitud-consultas',
+                $sub === 'consulta-general' => 'radicar-solicitud-consulta-general',
                 // Radicar: el mismo endpoint sirve a Nueva Radicación y a su
                 // réplica Radicado Hospitalario; la pestaña dice cuál permiso
                 // aplica.

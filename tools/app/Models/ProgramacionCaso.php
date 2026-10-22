@@ -101,6 +101,16 @@ class ProgramacionCaso extends Model
         $nombre = $codestsecundario
             ? EstRadisecundario::find($codestsecundario)?->Nombre
             : null;
+
+        return self::tipoDeNombreEstadoQx($nombre);
+    }
+
+    /**
+     * Grilla que corresponde al nombre de un Estado QX. Sirve cuando el
+     * catálogo ya está cargado y no se quiere una consulta por programación.
+     */
+    public static function tipoDeNombreEstadoQx(?string $nombre): string
+    {
         $normalizado = str_replace(' ', '', strtolower(Str::ascii((string) $nombre)));
 
         return match (true) {

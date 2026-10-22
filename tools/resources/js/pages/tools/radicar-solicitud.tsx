@@ -41,6 +41,7 @@ import {
     FileText,
     Hospital,
     ListChecks,
+    ListFilter,
     LoaderCircle,
     Lock,
     MapPin,
@@ -341,6 +342,9 @@ interface InformeRow {
     // Fecha y Hora Prog. de cada cirugía programada del caso, la más reciente
     // primero. Vacío si nunca se programó.
     fechasProgramacion: string[];
+    // Solo CONSULTA GENERAL: las mismas programaciones con su tipo (el Estado
+    // QX con que se programó).
+    programaciones?: { fecha: string; tipo: TipoProgramados }[];
 }
 
 type ProcRow = { cusv_id: string; N_Autorizacion: string };
@@ -412,6 +416,7 @@ const PESTANAS = [
     'historial',
     'informes',
     'consultas',
+    'consulta-general',
 ] as const;
 type Pestana = (typeof PESTANAS)[number];
 
@@ -870,6 +875,33 @@ const EMPTY_SEG_ENDO = { ...EMPTY_SEG_HEMO };
 /** Qué grilla muestra el modal "Ver programados". */
 type TipoProgramados = 'cirugia' | 'hemo' | 'cvascular' | 'endo';
 
+/**
+ * Filtro "Tipo de programado" de CONSULTA GENERAL: el Estado QX con que se
+ * programó el caso. 'nombre' va en el selector; 'corto', junto a cada fecha
+ * de la grilla y del Excel.
+ */
+const TIPOS_PROGRAMADO: {
+    clave: TipoProgramados;
+    nombre: string;
+    corto: string;
+}[] = [
+    { clave: 'cirugia', nombre: 'Programados (cirugía)', corto: 'Cirugía' },
+    {
+        clave: 'hemo',
+        nombre: 'Programado x Hemodinamia',
+        corto: 'Hemodinamia',
+    },
+    {
+        clave: 'cvascular',
+        nombre: 'Programado Cirugía Cardio Vascular',
+        corto: 'Cardio Vascular',
+    },
+    { clave: 'endo', nombre: 'Programado x Endoscopia', corto: 'Endoscopia' },
+];
+
+const nombreCortoTipoProgramado = (tipo: string) =>
+    TIPOS_PROGRAMADO.find((t) => t.clave === tipo)?.corto ?? tipo;
+
 /** Orden elegido en los encabezados de una grilla (null = el original). */
 type Orden<C extends string> = { col: C; dir: 'asc' | 'desc' } | null;
 
@@ -1131,9 +1163,22 @@ const EMPTY_INF = {
     // Fecha Inicial / Fecha Final, que es el de los movimientos.
     programadoInicial: '',
     programadoFinal: '',
-    // EPS del paciente (nombre). Solo lo ofrece la pestaña CONSULTAS.
+    // EPS del paciente (nombre). Solo lo ofrecen CONSULTAS y CONSULTA GENERAL.
     eps: '',
+    // Solo CONSULTA GENERAL: tipo de programado (TipoProgramados; vacío =
+    // todos), que acota el período de programados, y el período de la Fecha
+    // Vencimiento Autorización.
+    tipoProgramado: '',
+    vencimientoInicial: '',
+    vencimientoFinal: '',
 };
+
+/** Filtros que solo envía CONSULTA GENERAL. */
+const FILTROS_CONSULTA_GENERAL = [
+    'tipoProgramado',
+    'vencimientoInicial',
+    'vencimientoFinal',
+];
 
 /** Muestra un monto en pesos; '—' cuando no hay valor. */
 function formatoMoneda(valor: string | number | null | undefined): string {
@@ -2237,6 +2282,8 @@ export default function RadicarSolicitud({
     const [infPeriodoProg, setInfPeriodoProg] = useState({
         inicial: '',
         final: '',
+        // Tipo de programado aplicado (solo CONSULTA GENERAL; vacío = todos).
+        tipo: '',
     });
 
     // Texto largo del informe (Cambio y Observación) mostrado en un panel
@@ -3907,8 +3954,16 @@ export default function RadicarSolicitud({
 
     // CONSULTAS reutiliza la grilla y los filtros de INFORMES, pero pide al
     // servidor una sola fila por radicación (su último movimiento) y suma el
-    // filtro por EPS.
-    const esConsulta = tab === 'consultas';
+    // filtro por EPS. CONSULTA GENERAL es una copia de CONSULTAS con los
+    // filtros de tipo de programado y de vencimiento de la autorización.
+    const esConsultaGeneral = tab === 'consulta-general';
+    const esConsulta = tab === 'consultas' || esConsultaGeneral;
+    // Qué grilla se está viendo: al cambiar, se descarta el resultado.
+    const modoInforme = esConsultaGeneral
+        ? 'general'
+        : esConsulta
+          ? 'consulta'
+          : 'informe';
 
     // Opciones del filtro EPS: nombres únicos del catálogo, en orden.
     const epsOpciones = useMemo(
@@ -3919,8 +3974,9 @@ export default function RadicarSolicitud({
         [epsList],
     );
 
-    // Al pasar entre INFORMES y CONSULTAS se descarta el resultado: son
-    // grillas distintas y una no debe verse con los datos de la otra.
+    // Al pasar entre INFORMES, CONSULTAS y CONSULTA GENERAL se descarta el
+    // resultado: son grillas distintas y una no debe verse con los datos de
+    // la otra.
     useEffect(() => {
         setInfRows(null);
         setInfTruncado(false);
@@ -3928,7 +3984,7 @@ export default function RadicarSolicitud({
         setInfPagina(1);
         setInfOrden(null);
         setFlotante(null);
-    }, [esConsulta]);
+    }, [modoInforme]);
 
     // Tramo del informe que se está viendo. El total y la última página salen
     // de las filas ya cargadas, así que cambiar de página no pide nada al
@@ -3954,19 +4010,22 @@ export default function RadicarSolicitud({
         setInfPagina(1);
     };
 
-    // ¿El informe se generó con período de programados?
+    // ¿El informe se generó con período de programados (o, en CONSULTA
+    // GENERAL, con tipo de programado)?
     const hayPeriodoProg = Boolean(
-        infPeriodoProg.inicial || infPeriodoProg.final,
+        infPeriodoProg.inicial || infPeriodoProg.final || infPeriodoProg.tipo,
     );
 
     // ¿Una Fecha y Hora de Programación ("Y-m-d H:i") cae en ese período? Se
     // compara solo el día, con ambos extremos incluidos, igual que el servidor.
-    const enPeriodoProg = (fecha: string) => {
+    // Con tipo de programado, además debe ser de ese tipo.
+    const enPeriodoProg = (fecha: string, tipo?: string) => {
         const dia = fecha.slice(0, 10);
 
         return (
             (!infPeriodoProg.inicial || dia >= infPeriodoProg.inicial) &&
-            (!infPeriodoProg.final || dia <= infPeriodoProg.final)
+            (!infPeriodoProg.final || dia <= infPeriodoProg.final) &&
+            (!infPeriodoProg.tipo || tipo === infPeriodoProg.tipo)
         );
     };
 
@@ -4010,6 +4069,18 @@ export default function RadicarSolicitud({
             return;
         }
 
+        if (
+            esConsultaGeneral &&
+            inf.vencimientoInicial &&
+            inf.vencimientoFinal &&
+            inf.vencimientoInicial > inf.vencimientoFinal
+        ) {
+            setInfError(
+                'La fecha inicial de vencimiento de la autorización no puede ser posterior a la fecha final.',
+            );
+            return;
+        }
+
         setInfLoading(true);
         // Las filas se reemplazan: un panel abierto quedaría apuntando a una
         // celda que ya no existe, y la página actual podría no existir en el
@@ -4018,11 +4089,19 @@ export default function RadicarSolicitud({
         setInfPagina(1);
         const params = new URLSearchParams();
         Object.entries(inf).forEach(([k, v]) => {
-            // El filtro EPS es propio de CONSULTAS.
+            // El filtro EPS es propio de CONSULTAS (y CONSULTA GENERAL); el
+            // tipo de programado y el vencimiento, de CONSULTA GENERAL.
             if (k === 'eps' && !esConsulta) return;
+            if (FILTROS_CONSULTA_GENERAL.includes(k) && !esConsultaGeneral) {
+                return;
+            }
             if (v) params.set(k, v);
         });
-        const endpoint = esConsulta ? 'consulta' : 'informe';
+        const endpoint = esConsultaGeneral
+            ? 'consulta-general'
+            : esConsulta
+              ? 'consulta'
+              : 'informe';
         const url = `/tools/radicar-solicitud/${endpoint}?${params.toString()}`;
         fetch(url, {
             headers: { Accept: 'application/json' },
@@ -4048,6 +4127,7 @@ export default function RadicarSolicitud({
                 setInfPeriodoProg({
                     inicial: params.get('programadoInicial') ?? '',
                     final: params.get('programadoFinal') ?? '',
+                    tipo: params.get('tipoProgramado') ?? '',
                 });
             })
             .catch(() => setInfRows([]))
@@ -4089,7 +4169,15 @@ export default function RadicarSolicitud({
             'N° Caso': r.codrad,
             Ámbito: nombreAmbito(r.ambito),
             'Fecha Recibido': r.fechaRecibido ?? '',
-            'Fecha y Hora de Programación': r.fechasProgramacion.join(' / '),
+            // En CONSULTA GENERAL cada fecha lleva su tipo de programado.
+            'Fecha y Hora de Programación': r.programaciones
+                ? r.programaciones
+                      .map(
+                          (p) =>
+                              `${p.fecha} (${nombreCortoTipoProgramado(p.tipo)})`,
+                      )
+                      .join(' / ')
+                : r.fechasProgramacion.join(' / '),
             Documento: r.documento,
             Paciente: r.paciente,
             Teléfonos: r.telefonos,
@@ -4139,14 +4227,20 @@ export default function RadicarSolicitud({
         XLSX.utils.book_append_sheet(
             libro,
             hoja,
-            esConsulta ? 'Consulta' : 'Informe',
+            esConsultaGeneral
+                ? 'Consulta General'
+                : esConsulta
+                  ? 'Consulta'
+                  : 'Informe',
         );
 
         const hoy = new Date().toISOString().slice(0, 10);
-        XLSX.writeFile(
-            libro,
-            `${esConsulta ? 'consulta' : 'informe'}-radicaciones-${hoy}.xlsx`,
-        );
+        const prefijo = esConsultaGeneral
+            ? 'consulta-general'
+            : esConsulta
+              ? 'consulta'
+              : 'informe';
+        XLSX.writeFile(libro, `${prefijo}-radicaciones-${hoy}.xlsx`);
     };
 
     /**
@@ -4251,8 +4345,11 @@ export default function RadicarSolicitud({
     // sin asignar no aparece. Las demás pestañas, sin configurar, se permiten.
     const tabPermitida = (key: Pestana) =>
         esSuperAdmin ||
-        // Radicado Hospitalario y Consultas se asignan expresamente.
-        (key === 'hospitalario' || key === 'consultas'
+        // Radicado Hospitalario, Consultas y Consulta General se asignan
+        // expresamente.
+        (key === 'hospitalario' ||
+        key === 'consultas' ||
+        key === 'consulta-general'
             ? permisosUsuario[`radicar-solicitud-${key}`]?.ver === true
             : permisosUsuario[`radicar-solicitud-${key}`]?.ver !== false);
 
@@ -4481,9 +4578,12 @@ export default function RadicarSolicitud({
         puedeEditarProgramacion ||
         puedeBorrarProgramacion;
 
-    // INFORMES y CONSULTAS comparten la misma pantalla.
+    // INFORMES, CONSULTAS y CONSULTA GENERAL comparten la misma pantalla.
     const verInformesConsultas =
-        (tab === 'informes' || tab === 'consultas') && tabPermitida(tab);
+        (tab === 'informes' ||
+            tab === 'consultas' ||
+            tab === 'consulta-general') &&
+        tabPermitida(tab);
 
     const tabs = [
         { key: 'nueva' as const, label: 'NUEVA RADICACIÓN', icon: FilePlus2 },
@@ -4499,6 +4599,11 @@ export default function RadicarSolicitud({
         },
         { key: 'informes' as const, label: 'INFORMES', icon: BarChart3 },
         { key: 'consultas' as const, label: 'CONSULTAS', icon: ListChecks },
+        {
+            key: 'consulta-general' as const,
+            label: 'CONSULTA GENERAL',
+            icon: ListFilter,
+        },
     ].filter((t) => tabPermitida(t.key));
 
     // Si la pestaña activa no está permitida, se pasa a la primera visible.
@@ -7545,16 +7650,20 @@ export default function RadicarSolicitud({
                                     className="flex size-10 items-center justify-center rounded-xl text-white"
                                     style={{ backgroundColor: BRAND }}
                                 >
-                                    {esConsulta ? (
+                                    {esConsultaGeneral ? (
+                                        <ListFilter className="size-5" />
+                                    ) : esConsulta ? (
                                         <ListChecks className="size-5" />
                                     ) : (
                                         <BarChart3 className="size-5" />
                                     )}
                                 </div>
                                 <h1 className="text-lg font-bold tracking-tight text-foreground">
-                                    {esConsulta
-                                        ? 'Consulta de Radicaciones'
-                                        : 'Generación de Informes'}
+                                    {esConsultaGeneral
+                                        ? 'Consulta General de Radicaciones'
+                                        : esConsulta
+                                          ? 'Consulta de Radicaciones'
+                                          : 'Generación de Informes'}
                                 </h1>
                             </div>
 
@@ -7564,9 +7673,11 @@ export default function RadicarSolicitud({
                                 cualquier usuario. Se dice en pantalla para que
                                 nadie la confunda con las demás. */}
                             <p className="mb-4 rounded-lg border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-                                {esConsulta
-                                    ? 'Esta grilla muestra todas las radicaciones con un solo registro por cada una: su última modificación, sin importar el usuario ni el área que la hizo. Los PDF del paquete y de los conceptos cotizados se pueden abrir desde aquí.'
-                                    : 'Esta grilla muestra todas las radicaciones y todos los cambios registrados, sin importar el estado de la radicación ni los estados asignados a tu rol. Los PDF del paquete y de los conceptos cotizados se pueden abrir desde aquí.'}
+                                {esConsultaGeneral
+                                    ? 'Igual que CONSULTAS (un registro por radicación: su última modificación), con dos filtros más: el tipo de programado según el Estado QX —que se combina con Fecha Inicial y Final Programados— y el período de la Fecha Vencimiento Autorización. Exportar a Excel descarga el resultado filtrado.'
+                                    : esConsulta
+                                      ? 'Esta grilla muestra todas las radicaciones con un solo registro por cada una: su última modificación, sin importar el usuario ni el área que la hizo. Los PDF del paquete y de los conceptos cotizados se pueden abrir desde aquí.'
+                                      : 'Esta grilla muestra todas las radicaciones y todos los cambios registrados, sin importar el estado de la radicación ni los estados asignados a tu rol. Los PDF del paquete y de los conceptos cotizados se pueden abrir desde aquí.'}
                             </p>
 
                             {/* Filtros */}
@@ -7827,6 +7938,46 @@ export default function RadicarSolicitud({
                                             title="Filtra por la Fecha y Hora de Programación de la cirugía"
                                         />
                                     </Field>
+                                    {/* CONSULTA GENERAL: con qué Estado QX se
+                                        programó. Acota Fecha Inicial y Final
+                                        Programados a ese tipo; sin fechas,
+                                        trae los casos con alguna programación
+                                        de ese tipo. */}
+                                    {esConsultaGeneral && (
+                                        <Field label="Tipo de Programado (Estado QX)">
+                                            <Select
+                                                value={
+                                                    inf.tipoProgramado ||
+                                                    'todos'
+                                                }
+                                                onValueChange={(v) =>
+                                                    setInfField(
+                                                        'tipoProgramado',
+                                                        v === 'todos' ? '' : v,
+                                                    )
+                                                }
+                                            >
+                                                <SelectTrigger title="Se combina con Fecha Inicial y Final Programados">
+                                                    <SelectValue placeholder="Todos" />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="todos">
+                                                        Todos
+                                                    </SelectItem>
+                                                    {TIPOS_PROGRAMADO.map(
+                                                        (t) => (
+                                                            <SelectItem
+                                                                key={t.clave}
+                                                                value={t.clave}
+                                                            >
+                                                                {t.nombre}
+                                                            </SelectItem>
+                                                        ),
+                                                    )}
+                                                </SelectContent>
+                                            </Select>
+                                        </Field>
+                                    )}
                                     {esConsulta && (
                                         <Field label="EPS">
                                             <EpsCombobox
@@ -7837,6 +7988,48 @@ export default function RadicarSolicitud({
                                                 }
                                             />
                                         </Field>
+                                    )}
+                                    {/* CONSULTA GENERAL: Fecha Vencimiento
+                                        Autorización de Nueva Radicación. */}
+                                    {esConsultaGeneral && (
+                                        <>
+                                            <Field label="Fecha Inicial Venc. Autorización">
+                                                <Input
+                                                    type="date"
+                                                    value={
+                                                        inf.vencimientoInicial
+                                                    }
+                                                    max={
+                                                        inf.vencimientoFinal ||
+                                                        undefined
+                                                    }
+                                                    onChange={(e) =>
+                                                        setInfField(
+                                                            'vencimientoInicial',
+                                                            e.target.value,
+                                                        )
+                                                    }
+                                                    title="Filtra por la Fecha Vencimiento Autorización de la radicación"
+                                                />
+                                            </Field>
+                                            <Field label="Fecha Final Venc. Autorización">
+                                                <Input
+                                                    type="date"
+                                                    value={inf.vencimientoFinal}
+                                                    min={
+                                                        inf.vencimientoInicial ||
+                                                        undefined
+                                                    }
+                                                    onChange={(e) =>
+                                                        setInfField(
+                                                            'vencimientoFinal',
+                                                            e.target.value,
+                                                        )
+                                                    }
+                                                    title="Filtra por la Fecha Vencimiento Autorización de la radicación"
+                                                />
+                                            </Field>
+                                        </>
                                     )}
                                 </div>
                                 {infError && (
@@ -7965,47 +8158,67 @@ export default function RadicarSolicitud({
                                                         posterior, se atenúan
                                                         sin ocultarse. */}
                                                     <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">
+                                                        {/* En CONSULTA GENERAL
+                                                            cada fecha lleva su
+                                                            tipo de programado y
+                                                            el resaltado exige
+                                                            también el tipo
+                                                            filtrado. */}
                                                         {r.fechasProgramacion
                                                             .length === 0
                                                             ? '—'
-                                                            : r.fechasProgramacion.map(
-                                                                  (f) => {
-                                                                      const resaltar =
-                                                                          hayPeriodoProg &&
-                                                                          enPeriodoProg(
-                                                                              f,
-                                                                          );
-                                                                      const atenuar =
-                                                                          hayPeriodoProg &&
-                                                                          !resaltar;
-
-                                                                      return (
-                                                                          <div
-                                                                              key={
-                                                                                  f
-                                                                              }
-                                                                              title={
-                                                                                  resaltar
-                                                                                      ? 'Dentro del período programados filtrado'
-                                                                                      : atenuar
-                                                                                        ? 'Fuera del período programados filtrado'
-                                                                                        : undefined
-                                                                              }
-                                                                              className={
-                                                                                  resaltar
-                                                                                      ? 'font-semibold text-[#2d3e83] dark:text-white'
-                                                                                      : atenuar
-                                                                                        ? 'opacity-50'
-                                                                                        : undefined
-                                                                              }
-                                                                          >
-                                                                              {
-                                                                                  f
-                                                                              }
-                                                                          </div>
+                                                            : (
+                                                                  r.programaciones ??
+                                                                  r.fechasProgramacion.map(
+                                                                      (
+                                                                          fecha,
+                                                                      ) => ({
+                                                                          fecha,
+                                                                          tipo: undefined,
+                                                                      }),
+                                                                  )
+                                                              ).map((p) => {
+                                                                  const resaltar =
+                                                                      hayPeriodoProg &&
+                                                                      enPeriodoProg(
+                                                                          p.fecha,
+                                                                          p.tipo,
                                                                       );
-                                                                  },
-                                                              )}
+                                                                  const atenuar =
+                                                                      hayPeriodoProg &&
+                                                                      !resaltar;
+
+                                                                  return (
+                                                                      <div
+                                                                          key={`${p.fecha}|${p.tipo ?? ''}`}
+                                                                          title={
+                                                                              resaltar
+                                                                                  ? 'Dentro del período programados filtrado'
+                                                                                  : atenuar
+                                                                                    ? 'Fuera del período programados filtrado'
+                                                                                    : undefined
+                                                                          }
+                                                                          className={
+                                                                              resaltar
+                                                                                  ? 'font-semibold text-[#2d3e83] dark:text-white'
+                                                                                  : atenuar
+                                                                                    ? 'opacity-50'
+                                                                                    : undefined
+                                                                          }
+                                                                      >
+                                                                          {
+                                                                              p.fecha
+                                                                          }
+                                                                          {p.tipo && (
+                                                                              <span className="ml-1.5 rounded bg-[#2d3e83]/10 px-1.5 py-0.5 text-[10px] font-medium text-[#2d3e83] dark:bg-white/10 dark:text-white">
+                                                                                  {nombreCortoTipoProgramado(
+                                                                                      p.tipo,
+                                                                                  )}
+                                                                              </span>
+                                                                          )}
+                                                                      </div>
+                                                                  );
+                                                              })}
                                                     </td>
                                                     <td className="px-3 py-2 text-muted-foreground">
                                                         {r.documento}

@@ -60,6 +60,13 @@ class RadicarCasoController extends Controller
      */
     public const PAQUETE_MAX_MB = 100;
 
+    /**
+     * Tipos de programación (grillas "Ver programados"), según el Estado QX
+     * con que se programó: Programados (cirugía), Programado x Hemodinamia,
+     * Programado Cirugia Cardio Vascular y Programado x Endoscopia.
+     */
+    private const TIPOS_PROGRAMACION = ['cirugia', 'hemo', 'cvascular', 'endo'];
+
     private const CAMPOS_TRAZABLES = [
         'Codesp' => 'Especialidad',
         'codsubesp' => 'Subespecialidad',
@@ -267,10 +274,11 @@ class RadicarCasoController extends Controller
             return true;
         }
 
-        // La pestaña Consultas muestra los mismos enlaces; como viene
-        // apagada, solo cuenta si está asignada expresamente al rol.
+        // Las pestañas Consultas y Consulta General muestran los mismos
+        // enlaces; como vienen apagadas, solo cuentan si están asignadas
+        // expresamente al rol.
         return Permiso::where('role_id', $role->id)
-            ->where('vista', 'radicar-solicitud-consultas')
+            ->whereIn('vista', ['radicar-solicitud-consultas', 'radicar-solicitud-consulta-general'])
             ->where('ver', true)
             ->exists();
     }
@@ -1595,6 +1603,32 @@ class RadicarCasoController extends Controller
     }
 
     /**
+     * Limita una consulta de ProgramacionCaso a las de una grilla: 'hemo',
+     * 'cvascular', 'endo' (por su Estado QX) o 'cirugia' (el resto, incluidas
+     * las anteriores a que se guardara el Estado QX). Un tipo desconocido no
+     * trae nada. Lo comparten la grilla "Ver programados" y CONSULTA GENERAL,
+     * para que un caso cuente como del mismo tipo en las dos.
+     */
+    private function filtrarTipoProgramacion($query, string $tipo)
+    {
+        $porTipo = [
+            'hemo' => $this->estadosQxHemodinamia(),
+            'cvascular' => $this->estadosQxCardiovascular(),
+            'endo' => $this->estadosQxEndoscopia(),
+        ];
+
+        if ($tipo === 'cirugia') {
+            $propias = array_values(array_unique(array_merge(...array_values($porTipo))));
+
+            return $query->where(fn ($q) => $q
+                ->whereNull('codestsecundario')
+                ->orWhereNotIn('codestsecundario', $propias));
+        }
+
+        return $query->whereIn('codestsecundario', $porTipo[$tipo] ?? []);
+    }
+
+    /**
      * Grilla de radicaciones programadas para cirugía. Alimenta el modal
      * "Ver Programados": cada fila cruza una programación con su radicación,
      * el paciente, la especialidad, el especialista y los PDFs (paquete y
@@ -1611,21 +1645,13 @@ class RadicarCasoController extends Controller
     public function programados(Request $request): JsonResponse
     {
         $exportar = $this->prepararExportacion($request);
-        $porTipo = [
-            'hemo' => $this->estadosQxHemodinamia(),
-            'cvascular' => $this->estadosQxCardiovascular(),
-            'endo' => $this->estadosQxEndoscopia(),
-        ];
-        $propias = array_values(array_unique(array_merge(...array_values($porTipo))));
+        $tipo = $request->query('tipo');
 
         $programaciones = ProgramacionCaso::query()
-            ->when(
-                $request->query('tipo'),
-                fn ($q, $tipo) => $q->whereIn('codestsecundario', is_string($tipo) ? ($porTipo[$tipo] ?? []) : []),
-                fn ($q) => $q->where(fn ($q) => $q
-                    ->whereNull('codestsecundario')
-                    ->orWhereNotIn('codestsecundario', $propias)),
-            )
+            ->tap(fn ($q) => $this->filtrarTipoProgramacion(
+                $q,
+                $tipo === null || $tipo === '' ? 'cirugia' : (is_string($tipo) ? $tipo : '?'),
+            ))
             ->orderByDesc('fecha_programacion')
             ->orderByDesc('id')
             // Exportar a Excel trae todas; la grilla, hasta el tope.
@@ -1937,11 +1963,25 @@ class RadicarCasoController extends Controller
     }
 
     /**
+     * Pestaña CONSULTA GENERAL: igual a CONSULTAS, más dos filtros propios:
+     *  - tipoProgramado: con qué Estado QX se programó (cirugía, Hemodinamia,
+     *    Cirugía Cardio Vascular o Endoscopia). Se combina con Fecha Inicial /
+     *    Final Programados: el período cuenta solo para ese tipo.
+     *  - vencimientoInicial / vencimientoFinal: la Fecha Vencimiento
+     *    Autorización de Nueva Radicación.
+     */
+    public function consultaGeneral(Request $request): JsonResponse
+    {
+        return $this->generarInforme($request, true, true);
+    }
+
+    /**
      * Arma el informe de trazabilidad. Con $soloUltimo cada radicación aporta
      * solo su movimiento más reciente (pestaña CONSULTAS); sin él, todos sus
-     * movimientos (pestaña INFORMES).
+     * movimientos (pestaña INFORMES). Con $general suma los filtros de
+     * CONSULTA GENERAL y dice de qué tipo es cada programación.
      */
-    private function generarInforme(Request $request, bool $soloUltimo): JsonResponse
+    private function generarInforme(Request $request, bool $soloUltimo, bool $general = false): JsonResponse
     {
         // Las modificaciones hechas por un Super Admin son invisibles para
         // cualquier otro rol: sus filas de trazabilidad se omiten por completo.
@@ -1971,12 +2011,22 @@ class RadicarCasoController extends Controller
             'fechaFinal' => ['nullable', 'date'],
             'programadoInicial' => ['nullable', 'date'],
             'programadoFinal' => ['nullable', 'date'],
+            // Solo CONSULTA GENERAL: Fecha Vencimiento Autorización.
+            'vencimientoInicial' => ['nullable', 'date'],
+            'vencimientoFinal' => ['nullable', 'date'],
         ], [], [
             'fechaInicial' => 'fecha inicial',
             'fechaFinal' => 'fecha final',
             'programadoInicial' => 'fecha inicial programados',
             'programadoFinal' => 'fecha final programados',
+            'vencimientoInicial' => 'fecha inicial vencimiento autorización',
+            'vencimientoFinal' => 'fecha final vencimiento autorización',
         ]);
+        // Filtros propios de CONSULTA GENERAL; las demás pestañas los ignoran.
+        $tipoProgF = $general ? trim((string) $request->query('tipoProgramado', '')) : '';
+        $tipoProgF = in_array($tipoProgF, self::TIPOS_PROGRAMACION, true) ? $tipoProgF : '';
+        $vencInicialF = $general ? ($periodo['vencimientoInicial'] ?? null) : null;
+        $vencFinalF = $general ? ($periodo['vencimientoFinal'] ?? null) : null;
         // Normalizadas a Y-m-d: más abajo se comparan como texto contra la
         // fecha de radicación.
         $desde = isset($periodo['fechaInicial']) ? \Illuminate\Support\Carbon::parse($periodo['fechaInicial'])->toDateString() : null;
@@ -2006,13 +2056,19 @@ class RadicarCasoController extends Controller
             // alguna cirugía programada dentro de él. Vale cualquiera de sus
             // programaciones, no solo la última: la grilla "Ver programados"
             // también las muestra todas.
-            ->when($progInicialF !== null || $progFinalF !== null, fn ($q) => $q->whereIn(
+            // En CONSULTA GENERAL el tipo de programado (Estado QX) acota esas
+            // programaciones: con período, debe ser una del tipo dentro de él;
+            // sin período, basta con alguna del tipo.
+            ->when($progInicialF !== null || $progFinalF !== null || $tipoProgF !== '', fn ($q) => $q->whereIn(
                 'codrad',
                 ProgramacionCaso::query()
                     ->when($progInicialF !== null, fn ($p) => $p->whereDate('fecha_programacion', '>=', $progInicialF))
                     ->when($progFinalF !== null, fn ($p) => $p->whereDate('fecha_programacion', '<=', $progFinalF))
+                    ->when($tipoProgF !== '', fn ($p) => $this->filtrarTipoProgramacion($p, $tipoProgF))
                     ->select('codrad'),
             ))
+            ->when($vencInicialF !== null, fn ($q) => $q->whereDate('fechavenautorizacion', '>=', $vencInicialF))
+            ->when($vencFinalF !== null, fn ($q) => $q->whereDate('fechavenautorizacion', '<=', $vencFinalF))
             ->when($consecutivoF !== '', fn ($q) => $q->where('codrad', (int) $consecutivoF))
             ->when($ambitoF !== '', fn ($q) => $q->where('ambito', $ambitoF))
             ->when($documentoF !== '', fn ($q) => $q->where('Ndocumento', $documentoF))
@@ -2133,7 +2189,7 @@ class RadicarCasoController extends Controller
             $fechasProgramacion = ProgramacionCaso::whereIn('codrad', $codrads)
                 ->whereNotNull('fecha_programacion')
                 ->orderByDesc('fecha_programacion')
-                ->get(['codrad', 'fecha_programacion'])
+                ->get(['codrad', 'fecha_programacion', 'codestsecundario'])
                 ->groupBy('codrad');
 
             $rangoFecha = function ($query) use ($desde, $hasta) {
@@ -2218,7 +2274,7 @@ class RadicarCasoController extends Controller
                 ->unique()
                 ->flip();
 
-            $datosCaso = function (RadicarCaso $caso) use ($estados, $usuarios, $subesp, $especialidades, $pacientes, $adjuntosCotizacion, $convenios, $anexados, $codigosCups, $fechasProgramacion) {
+            $datosCaso = function (RadicarCaso $caso) use ($estados, $estadosSec, $usuarios, $subesp, $especialidades, $pacientes, $adjuntosCotizacion, $convenios, $anexados, $codigosCups, $fechasProgramacion, $general) {
                 $med = $caso->codMed ? $usuarios->get($caso->codMed) : null;
                 $pac = $caso->Ndocumento ? $pacientes->get($caso->Ndocumento) : null;
                 $procs = $anexados->get((string) $caso->codrad) ?? collect();
@@ -2277,6 +2333,19 @@ class RadicarCasoController extends Controller
                     'fechasProgramacion' => ($fechasProgramacion->get($caso->codrad) ?? collect())
                         ->map(fn (ProgramacionCaso $p) => $p->fecha_programacion->format('Y-m-d H:i'))
                         ->unique()->values()->all(),
+                    // CONSULTA GENERAL: cada programación con su tipo (cirugia,
+                    // hemo, cvascular o endo), para ver por qué entró el caso.
+                    ...($general ? [
+                        'programaciones' => ($fechasProgramacion->get($caso->codrad) ?? collect())
+                            ->map(fn (ProgramacionCaso $p) => [
+                                'fecha' => $p->fecha_programacion->format('Y-m-d H:i'),
+                                'tipo' => ProgramacionCaso::tipoDeNombreEstadoQx(
+                                    $p->codestsecundario ? ($estadosSec[(int) $p->codestsecundario] ?? null) : null,
+                                ),
+                            ])
+                            ->unique(fn ($p) => $p['fecha'].'|'.$p['tipo'])
+                            ->values()->all(),
+                    ] : []),
                 ];
             };
 
