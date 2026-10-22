@@ -2686,19 +2686,36 @@ class RadicarCasoController extends Controller
     }
 
     /**
-     * Sube o reemplaza el PDF del paquete de un caso ya radicado (botón
-     * "Subir paquete" del formulario Aplicar Modificaciones). Es para cuando
-     * la radicación quedó con el documento pendiente. El permiso lo valida el
-     * middleware con la sub-vista "Asignar subir paquete".
+     * Sube el PDF del paquete de un caso ya radicado o le anexa documentos
+     * (botón "Subir paquete" / "Anexar al paquete" del formulario Aplicar
+     * Modificaciones). El permiso lo valida el middleware con la sub-vista
+     * "Asignar subir paquete".
+     *
+     * Para anexar, el navegador une el paquete vigente con los PDF nuevos y
+     * manda el resultado con modo=anexar y paquete_base (el paquete sobre el
+     * que unió). Si mientras tanto otro usuario cambió el paquete, se rechaza
+     * con 409: guardar la unión borraría lo que el otro anexó.
      */
     public function subirPaquete(Request $request, RadicarCaso $caso): JsonResponse
     {
         $request->validate([
             'paquete' => ['required', ...array_slice($this->reglasPaquete(), 1)],
+            'modo' => ['nullable', Rule::in(['anexar'])],
+            'paquete_base' => ['nullable', 'string', 'max:255'],
+            'anexos' => ['nullable', 'array', 'max:50'],
+            'anexos.*' => ['string', 'max:255'],
+            'paginas_anexadas' => ['nullable', 'integer', 'min:1'],
         ], [
             'paquete.required' => 'Seleccione el PDF del paquete.',
             ...$this->mensajesPaquete(),
         ]);
+
+        $anexar = $request->input('modo') === 'anexar';
+        if ($anexar && basename((string) $caso->paquete) !== (string) $request->input('paquete_base')) {
+            return response()->json([
+                'message' => 'El paquete del caso cambió mientras se preparaba el anexo (otro usuario lo modificó). Vuelva a anexar los documentos sobre la versión actual.',
+            ], 409);
+        }
 
         $paqueteAnterior = $caso->paquete;
         $nuevo = $this->guardarPaquete($request, $paqueteAnterior, $caso->codrad, $caso->Ndocumento);
@@ -2706,10 +2723,25 @@ class RadicarCasoController extends Controller
         // Igual que al modificar el radicado: el cambio y su rastro en la
         // bitácora van juntos.
         try {
-            DB::transaction(function () use ($caso, $nuevo, $request) {
+            DB::transaction(function () use ($caso, $nuevo, $request, $anexar) {
                 $antes = $caso->getRawOriginal();
                 $caso->update(['paquete' => $nuevo]);
                 $this->registrarCambios($caso, $antes, $request, 'modificacion');
+
+                // Qué documentos se sumaron: el cambio de archivo solo dice
+                // que el paquete es otro.
+                if ($anexar) {
+                    $anexos = implode(', ', $request->input('anexos', [])) ?: 'PDF anexado';
+                    $paginas = $request->integer('paginas_anexadas');
+                    $this->registrarEvento(
+                        $caso->codrad,
+                        $request,
+                        'modificacion',
+                        'Anexo al paquete',
+                        null,
+                        $paginas > 0 ? "{$anexos} ({$paginas} ".($paginas === 1 ? 'página' : 'páginas').')' : $anexos,
+                    );
+                }
             });
         } catch (\Throwable $e) {
             $this->limpiarPaquete($nuevo, $paqueteAnterior);

@@ -1016,6 +1016,50 @@ test('el botón Subir paquete reemplaza el PDF y solo lo usa el rol asignado', f
     expect(Permiso::VISTAS_OPT_IN)->toContain('radicar-solicitud-subir-paquete');
 });
 
+test('anexar al paquete guarda la unión, deja rastro de los anexos y no pisa un cambio ajeno', function () {
+    Storage::fake('public');
+    $admin = User::factory()->create();
+    $caso = RadicarCaso::create(['Ndocumento' => '9710', 'estRad' => '1']);
+    $url = "/tools/radicar-solicitud/{$caso->codrad}/paquete";
+
+    $this->actingAs($admin)
+        ->postJson($url, ['paquete' => UploadedFile::fake()->create('original.pdf', 64, 'application/pdf')])
+        ->assertOk();
+    $original = $caso->refresh()->paquete;
+
+    // El navegador une el paquete vigente con los anexos y manda el resultado.
+    $this->actingAs($admin)
+        ->postJson($url, [
+            'paquete' => UploadedFile::fake()->create('paquete.pdf', 128, 'application/pdf'),
+            'modo' => 'anexar',
+            'paquete_base' => basename($original),
+            'anexos' => ['historia.pdf', 'orden.pdf'],
+            'paginas_anexadas' => 3,
+        ])
+        ->assertOk();
+
+    $unido = $caso->refresh()->paquete;
+    expect($unido)->not->toBe($original);
+    Storage::disk('public')->assertExists($unido);
+    Storage::disk('public')->assertMissing($original);
+    expect(TrazabilidadCaso::where('codrad', $caso->codrad)->where('etiqueta', 'Anexo al paquete')->value('nuevo'))
+        ->toBe('historia.pdf, orden.pdf (3 páginas)');
+
+    // Si el paquete cambió mientras se unía (otro usuario anexó o lo cambió),
+    // se rechaza y se conserva el vigente.
+    $this->actingAs($admin)
+        ->postJson($url, [
+            'paquete' => UploadedFile::fake()->create('paquete.pdf', 128, 'application/pdf'),
+            'modo' => 'anexar',
+            'paquete_base' => basename($original),
+            'anexos' => ['tarde.pdf'],
+        ])
+        ->assertStatus(409);
+
+    expect($caso->refresh()->paquete)->toBe($unido)
+        ->and(Storage::disk('public')->allFiles('paquetes'))->toHaveCount(1);
+});
+
 test('el paquete se guarda con el radicado y el documento del paciente en el nombre', function () {
     Storage::fake('public');
     $admin = User::factory()->create();

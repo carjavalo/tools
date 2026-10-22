@@ -1172,6 +1172,9 @@ function sesionCaducada(r: Response): boolean {
     return true;
 }
 
+/** Problema con un PDF al unir el paquete: su mensaje se muestra tal cual. */
+class ErrorPdfPaquete extends Error {}
+
 /**
  * Convierte una respuesta fallida en un mensaje que diga qué pasó.
  *
@@ -1697,9 +1700,12 @@ export default function RadicarSolicitud({
     // Sin esto un rechazo del servidor (validación, permisos) no dejaba rastro
     // en pantalla y el formulario parecía haber guardado.
     const [segError, setSegError] = useState<string | null>(null);
-    // Botón "Subir paquete" del formulario Aplicar Modificaciones.
-    const [subiendoPaquete, setSubiendoPaquete] = useState(false);
-    const [paqueteOk, setPaqueteOk] = useState(false);
+    // Botón "Subir paquete" / "Anexar al paquete" del formulario Aplicar
+    // Modificaciones. La etapa es el texto del botón mientras trabaja (unir
+    // los PDF o subir); null = libre. El aviso de éxito dice qué se guardó.
+    const [paqueteEtapa, setPaqueteEtapa] = useState<string | null>(null);
+    const subiendoPaquete = paqueteEtapa !== null;
+    const [paqueteOk, setPaqueteOk] = useState<string | null>(null);
     const [paqueteError, setPaqueteError] = useState<string | null>(null);
     // Formulario básico: estado propio para que, cuando un rol tenga los dos
     // formularios, lo que se escriba en uno no se mezcle con el otro ni sus
@@ -3450,59 +3456,159 @@ export default function RadicarSolicitud({
 
     // Al abrir otro caso no se arrastra el aviso del paquete del anterior.
     useEffect(() => {
-        setPaqueteOk(false);
+        setPaqueteOk(null);
         setPaqueteError(null);
     }, [caso?.codrad]);
 
     /**
-     * Sube (o reemplaza) el PDF del paquete del caso abierto apenas se escoge.
-     * Es independiente de "Aplicar Modificaciones": no exige diligenciar el
-     * resto del formulario.
+     * Botón "Subir paquete" / "Anexar al paquete" del caso abierto: actúa
+     * apenas se escogen los PDF, sin exigir el resto del formulario.
+     *
+     * Admite varios PDF. Si el caso ya tiene paquete, se le anexan al final en
+     * el orden escogido; si no, se unen en uno solo. La unión se hace aquí con
+     * pdf-lib —que abre los PDF escaneados modernos (1.5+, comprimidos) que la
+     * librería del servidor no lee— y se sube el resultado como el paquete
+     * nuevo. El servidor rechaza la unión si otro usuario cambió el paquete
+     * mientras tanto, para no borrar lo que ese otro anexó.
      */
-    const subirPaquete = (input: HTMLInputElement) => {
+    const subirPaquete = async (input: HTMLInputElement) => {
         if (!caso) return;
-        setPaqueteOk(false);
+        const archivos = Array.from(input.files ?? []);
+        input.value = '';
+        if (archivos.length === 0) return;
+        setPaqueteOk(null);
         setPaqueteError(null);
-        const archivo = paqueteValido(input, setPaqueteError);
-        if (!archivo) return;
 
-        const fd = new FormData();
-        fd.append('paquete', archivo);
-        setSubiendoPaquete(true);
-        fetch(`/tools/radicar-solicitud/${caso.codrad}/paquete`, {
-            method: 'POST',
-            headers: {
-                Accept: 'application/json',
-                'X-XSRF-TOKEN': getXsrfToken(),
-            },
-            body: fd,
-        })
-            .then(async (r) => {
-                if (r.status === 422) {
-                    const d = await r.json();
-                    const primero = Object.values(
-                        (d.errors ?? {}) as Record<string, string[]>,
-                    )[0]?.[0];
-                    setPaqueteError(primero ?? 'Revisa el PDF del paquete.');
-                    return null;
+        const noPdf = archivos.find(
+            (a) => a.type !== 'application/pdf' && !/\.pdf$/i.test(a.name),
+        );
+        if (noPdf) {
+            setPaqueteError(`"${noPdf.name}" no es un archivo PDF.`);
+            return;
+        }
+
+        const anexar = Boolean(caso.paquete && caso.paqueteUrl);
+        try {
+            let archivo: File;
+            let paginas = 0;
+            if (!anexar && archivos.length === 1) {
+                // Primer paquete de un solo PDF: se sube tal cual.
+                archivo = archivos[0];
+            } else {
+                setPaqueteEtapa('Uniendo PDF…');
+                const { PDFDocument } = await import('pdf-lib');
+                const unido = await PDFDocument.create();
+                const copiar = async (bytes: ArrayBuffer, nombre: string) => {
+                    let doc;
+                    try {
+                        doc = await PDFDocument.load(bytes, {
+                            ignoreEncryption: true,
+                        });
+                    } catch {
+                        throw new ErrorPdfPaquete(
+                            `No se pudo leer "${nombre}": el PDF está dañado o no es válido.`,
+                        );
+                    }
+                    if (doc.isEncrypted) {
+                        throw new ErrorPdfPaquete(
+                            `"${nombre}" está protegido con contraseña. Quítele la protección antes de anexarlo.`,
+                        );
+                    }
+                    const copiadas = await unido.copyPages(
+                        doc,
+                        doc.getPageIndices(),
+                    );
+                    copiadas.forEach((p) => unido.addPage(p));
+                    return copiadas.length;
+                };
+
+                if (anexar) {
+                    const r = await fetch(caso.paqueteUrl as string);
+                    if (!r.ok) {
+                        setPaqueteError(
+                            `No se pudo leer el paquete actual para anexarle documentos: ${await mensajeDeError(r)}`,
+                        );
+                        return;
+                    }
+                    await copiar(
+                        await r.arrayBuffer(),
+                        `el paquete actual (${caso.paquete})`,
+                    );
                 }
-                if (!r.ok) {
-                    setPaqueteError(await mensajeDeError(r));
-                    return null;
+                for (const a of archivos) {
+                    paginas += await copiar(await a.arrayBuffer(), a.name);
                 }
-                return r.json();
-            })
-            .then((d) => {
-                if (d && d.ok) {
-                    setCaso(d.caso);
-                    setPaqueteOk(true);
-                }
-            })
-            .catch(() => setPaqueteError('No fue posible subir el paquete.'))
-            .finally(() => {
-                setSubiendoPaquete(false);
-                input.value = '';
-            });
+                // El cast es solo de tipos (TS 5.7+ no acepta el Uint8Array
+                // de pdf-lib como BlobPart); evita copiar bytes de más.
+                const bytes = (await unido.save()) as BlobPart;
+                archivo = new File([bytes], 'paquete.pdf', {
+                    type: 'application/pdf',
+                });
+            }
+
+            if (archivo.size > paqueteMaxMb * 1024 * 1024) {
+                const pesa = (archivo.size / (1024 * 1024)).toFixed(1);
+                setPaqueteError(
+                    `El paquete${anexar ? ' con los anexos' : ''} pesaría ${pesa} MB y el máximo permitido es ${paqueteMaxMb} MB.`,
+                );
+                return;
+            }
+
+            const fd = new FormData();
+            fd.append('paquete', archivo);
+            if (anexar) {
+                fd.append('modo', 'anexar');
+                fd.append('paquete_base', caso.paquete as string);
+                archivos.forEach((a) => fd.append('anexos[]', a.name));
+                fd.append('paginas_anexadas', String(paginas));
+            }
+
+            setPaqueteEtapa('Subiendo…');
+            const r = await fetch(
+                `/tools/radicar-solicitud/${caso.codrad}/paquete`,
+                {
+                    method: 'POST',
+                    headers: {
+                        Accept: 'application/json',
+                        'X-XSRF-TOKEN': getXsrfToken(),
+                    },
+                    body: fd,
+                },
+            );
+            if (r.status === 422) {
+                const d = await r.json();
+                const primero = Object.values(
+                    (d.errors ?? {}) as Record<string, string[]>,
+                )[0]?.[0];
+                setPaqueteError(primero ?? 'Revisa el PDF del paquete.');
+                return;
+            }
+            if (!r.ok) {
+                setPaqueteError(await mensajeDeError(r));
+                return;
+            }
+            const d = await r.json();
+            if (d && d.ok) {
+                setCaso(d.caso);
+                const docs =
+                    archivos.length === 1
+                        ? '1 documento'
+                        : `${archivos.length} documentos`;
+                setPaqueteOk(
+                    anexar
+                        ? `Se anexaron ${docs} (${paginas} ${paginas === 1 ? 'página' : 'páginas'}) al paquete.`
+                        : 'Paquete guardado.',
+                );
+            }
+        } catch (e) {
+            setPaqueteError(
+                e instanceof ErrorPdfPaquete
+                    ? e.message
+                    : 'No fue posible subir el paquete.',
+            );
+        } finally {
+            setPaqueteEtapa(null);
+        }
     };
 
     const aplicarModificacion = (e: FormEvent) => {
@@ -4076,6 +4182,16 @@ export default function RadicarSolicitud({
         esSuperAdmin ||
         permisosUsuario['radicar-solicitud-subir-paquete']?.ver === true;
 
+    // Texto y ayuda del botón del paquete: si el caso ya tiene uno, el botón
+    // anexa documentos al final; si no, sube el primero (uno o varios PDF).
+    const textoBotonPaquete = () =>
+        paqueteEtapa ??
+        (caso?.paqueteUrl ? 'Anexar al paquete' : 'Subir paquete');
+    const ayudaBotonPaquete = () =>
+        caso?.paqueteUrl
+            ? `Anexar uno o varios PDF al final del paquete actual (el paquete completo, máx. ${paqueteMaxMb} MB)`
+            : `Subir el PDF del paquete; si escoge varios, se unen en uno (máx. ${paqueteMaxMb} MB)`;
+
     /**
      * Versión compacta del botón "Subir paquete", junto al "Ver PDF" del
      * detalle del caso. Es para los roles que no tienen ninguno de los dos
@@ -4087,6 +4203,7 @@ export default function RadicarSolicitud({
                 <input
                     type="file"
                     accept="application/pdf"
+                    multiple
                     className="hidden"
                     onChange={(e) => subirPaquete(e.target)}
                 />
@@ -4099,19 +4216,17 @@ export default function RadicarSolicitud({
                                 .previousElementSibling as HTMLInputElement | null
                         )?.click()
                     }
-                    title={`${caso.paqueteUrl ? 'Reemplazar' : 'Subir'} el PDF del paquete (máx. ${paqueteMaxMb} MB)`}
+                    title={ayudaBotonPaquete()}
                     className="inline-flex items-center gap-1.5 rounded-md bg-[#2d3e83]/10 px-2.5 py-1 text-xs font-medium text-[#2d3e83] transition-colors hover:bg-[#2d3e83]/20 disabled:opacity-60 dark:bg-white/10 dark:text-white"
                 >
                     {subiendoPaquete ? (
                         <LoaderCircle className="size-3.5 animate-spin" />
+                    ) : caso.paqueteUrl ? (
+                        <FilePlus2 className="size-3.5" />
                     ) : (
                         <Upload className="size-3.5" />
                     )}
-                    {subiendoPaquete
-                        ? 'Subiendo…'
-                        : caso.paqueteUrl
-                          ? 'Cambiar paquete'
-                          : 'Subir paquete'}
+                    {textoBotonPaquete()}
                 </button>
                 {paqueteError && (
                     <span className="w-full text-xs font-normal text-red-600 dark:text-red-400">
@@ -4120,7 +4235,7 @@ export default function RadicarSolicitud({
                 )}
                 {paqueteOk && !paqueteError && (
                     <span className="w-full text-xs font-normal text-green-700 dark:text-green-400">
-                        Paquete guardado.
+                        {paqueteOk}
                     </span>
                 )}
             </>
@@ -4137,6 +4252,7 @@ export default function RadicarSolicitud({
                 <input
                     type="file"
                     accept="application/pdf"
+                    multiple
                     className="hidden"
                     onChange={(e) => subirPaquete(e.target)}
                 />
@@ -4150,23 +4266,17 @@ export default function RadicarSolicitud({
                                 .previousElementSibling as HTMLInputElement | null
                         )?.click()
                     }
-                    title={
-                        caso.paqueteUrl
-                            ? 'Reemplazar el PDF del paquete del caso'
-                            : 'Subir el PDF del paquete del caso'
-                    }
+                    title={ayudaBotonPaquete()}
                     className="w-full justify-start gap-2 text-[#2d3e83] dark:text-white"
                 >
                     {subiendoPaquete ? (
                         <LoaderCircle className="size-4 animate-spin" />
+                    ) : caso.paqueteUrl ? (
+                        <FilePlus2 className="size-4" />
                     ) : (
                         <Upload className="size-4" />
                     )}
-                    {subiendoPaquete
-                        ? 'Subiendo…'
-                        : caso.paqueteUrl
-                          ? 'Cambiar paquete'
-                          : 'Subir paquete'}
+                    {textoBotonPaquete()}
                 </Button>
                 <span className="text-xs text-muted-foreground">
                     {paqueteError ? (
@@ -4175,7 +4285,7 @@ export default function RadicarSolicitud({
                         </span>
                     ) : caso.paqueteUrl ? (
                         <>
-                            {paqueteOk ? 'Paquete guardado: ' : 'Actual: '}
+                            {paqueteOk ? `${paqueteOk} ` : 'Actual: '}
                             <a
                                 href={caso.paqueteUrl}
                                 target="_blank"
