@@ -21,7 +21,7 @@ test('el censo crea pacientes repartiendo el nombre y con correo y clave del doc
             filaCenso('  CEBALLOS   PAZ SEBASTIAN ', '13107017', 'TI', 'ASMET SALUD EPS SAS'),
         ]])
         ->assertOk()
-        ->assertExactJson(['creados' => 2, 'existentes' => 0, 'omitidos' => 0]);
+        ->assertJson(['creados' => 2, 'existentes' => 0, 'omitidos' => 0]);
 
     $jorge = User::where('Numero_D', '1151950143')->first();
     expect($jorge->Apellido1)->toBe('BASTIDAS')
@@ -53,7 +53,7 @@ test('el censo omite HUV EVARISTO sin importar mayúsculas y las filas sin docum
             filaCenso('', '555'),
         ]])
         ->assertOk()
-        ->assertExactJson(['creados' => 0, 'existentes' => 0, 'omitidos' => 4]);
+        ->assertJson(['creados' => 0, 'existentes' => 0, 'omitidos' => 4]);
 
     expect(User::whereIn('Numero_D', ['760010452', '760010453', '555'])->exists())->toBeFalse();
 });
@@ -71,7 +71,7 @@ test('el censo ignora a los pacientes cuyo documento o correo ya existe', functi
             filaCenso('BOYA RODRIGUEZ MARIA MARTHA', '37893220'),
         ]])
         ->assertOk()
-        ->assertExactJson(['creados' => 1, 'existentes' => 3, 'omitidos' => 0]);
+        ->assertJson(['creados' => 1, 'existentes' => 3, 'omitidos' => 0]);
 
     // El existente no se toca.
     expect(User::where('Numero_D', '1002855477')->count())->toBe(1)
@@ -81,7 +81,7 @@ test('el censo ignora a los pacientes cuyo documento o correo ya existe', functi
     // Cargar el mismo censo otra vez no crea nada.
     $this->actingAs($admin)
         ->postJson(URL_CENSO, ['filas' => [filaCenso('BOYA RODRIGUEZ MARIA MARTHA', '37893220')]])
-        ->assertExactJson(['creados' => 0, 'existentes' => 1, 'omitidos' => 0]);
+        ->assertJson(['creados' => 0, 'existentes' => 1, 'omitidos' => 0]);
 });
 
 test('un nombre de dos palabras queda como apellido y nombre', function () {
@@ -137,4 +137,48 @@ test('el lote del censo tiene tope de filas', function () {
     $this->actingAs($admin)
         ->postJson(URL_CENSO, ['filas' => $filas])
         ->assertUnprocessable();
+});
+
+test('el censo devuelve el resultado de cada fila, en orden, para exportarlo', function () {
+    $admin = User::factory()->create();
+    User::factory()->create([
+        'Numero_D' => '1002855477', 'name' => 'Luis', 'Apellido1' => 'Gutierrez', 'apellido2' => null, 'rol' => 'paciente',
+    ]);
+
+    $resultados = $this->actingAs($admin)
+        ->postJson(URL_CENSO, ['filas' => [
+            filaCenso('HUV EVARISTO', '760010452', 'SI'),
+            filaCenso('BASTIDAS BENAVIDES JORGE LUIS', '1151950143'),
+            filaCenso('GUTIERREZ GUTIERREZ LUIS FERNANDO', '1002855477'),
+            filaCenso('PEREZ GOMEZ ANA', ''),
+        ]])
+        ->assertOk()
+        ->json('resultados');
+
+    expect($resultados)->toHaveCount(4)
+        ->and($resultados[0])->toBe(['estado' => 'omitido', 'motivo' => 'HUV EVARISTO'])
+        ->and($resultados[1]['estado'])->toBe('creado')
+        ->and($resultados[1]['usuario'])->toMatchArray([
+            'Apellido1' => 'BASTIDAS', 'apellido2' => 'BENAVIDES', 'name' => 'JORGE LUIS',
+            'Numero_D' => '1151950143', 'email' => '1151950143@notiene.com',
+        ])
+        ->and($resultados[1]['usuario'])->not->toHaveKey('password')
+        ->and($resultados[2])->toBe([
+            'estado' => 'existente', 'motivo' => 'Documento ya registrado',
+            'registrado' => 'Luis Gutierrez', 'rol' => 'paciente',
+        ])
+        ->and($resultados[3])->toBe(['estado' => 'omitido', 'motivo' => 'Sin documento']);
+});
+
+test('el resultado del censo no revela a un Super Admin a quien no lo es', function () {
+    $rol = Role::create(['Nombre' => 'Censo', 'Estado' => true]);
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'gestion-usuarios-importar-censo', 'ver' => true]);
+    $usuario = User::factory()->create(['rol' => 'Censo']);
+    User::factory()->create(['rol' => 'Super Admin', 'Numero_D' => '999', 'name' => 'Root']);
+
+    $this->actingAs($usuario)
+        ->postJson(URL_CENSO, ['filas' => [filaCenso('PEREZ GOMEZ ANA', '999')]])
+        ->assertOk()
+        ->assertJsonPath('resultados.0.registrado', 'Usuario del sistema')
+        ->assertJsonPath('resultados.0.rol', null);
 });

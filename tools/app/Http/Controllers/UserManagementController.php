@@ -134,83 +134,114 @@ class UserManagementController extends Controller
 
         $resumen = ['creados' => 0, 'existentes' => 0, 'omitidos' => 0];
 
+        // Resultado de cada fila, en el mismo orden del lote: con él el
+        // navegador exporta a Excel cuáles se crearon, cuáles ya existían y
+        // cuáles se omitieron.
+        $resultados = [];
+
         // Filas válidas del lote, una por documento.
         $pacientes = [];
-        foreach ($validated['filas'] as $fila) {
+        foreach ($validated['filas'] as $i => $fila) {
             $nombre = $this->normalizarEspacios((string) ($fila['nombre'] ?? ''));
             $documento = trim((string) ($fila['documento'] ?? ''));
 
-            if ($nombre === ''
-                || mb_strtolower($nombre) === 'huv evaristo'
-                || $documento === ''
-                || mb_strlen($documento) > 20) {
+            $motivo = match (true) {
+                $nombre === '' => 'Sin nombre',
+                mb_strtolower($nombre) === 'huv evaristo' => 'HUV EVARISTO',
+                $documento === '' => 'Sin documento',
+                mb_strlen($documento) > 20 => 'Documento de más de 20 caracteres',
+                default => null,
+            };
+
+            if ($motivo !== null) {
                 $resumen['omitidos']++;
+                $resultados[$i] = ['estado' => 'omitido', 'motivo' => $motivo];
 
                 continue;
             }
 
             if (isset($pacientes[$documento])) {
                 $resumen['existentes']++;
+                $resultados[$i] = ['estado' => 'existente', 'motivo' => 'Repetido en el archivo'];
 
                 continue;
             }
 
             $pacientes[$documento] = [
+                'indice' => $i,
                 'nombre' => $nombre,
                 'tipo' => trim((string) ($fila['identificacion'] ?? '')),
                 'eps' => trim((string) ($fila['responsable'] ?? '')),
             ];
         }
 
-        if ($pacientes === []) {
-            return response()->json($resumen);
-        }
+        if ($pacientes !== []) {
+            $documentos = array_map('strval', array_keys($pacientes));
+            $correos = array_map(fn ($d) => mb_strtolower("{$d}@notiene.com"), $documentos);
 
-        $documentos = array_map('strval', array_keys($pacientes));
-        $docsExistentes = User::query()
-            ->whereIn(DB::raw('TRIM(Numero_D)'), $documentos)
-            ->pluck('Numero_D')
-            ->map(fn ($d) => trim((string) $d))
-            ->flip();
-        $correosExistentes = User::query()
-            ->whereIn(DB::raw('LOWER(email)'), array_map(fn ($d) => mb_strtolower("{$d}@notiene.com"), $documentos))
-            ->pluck('email')
-            ->map(fn ($e) => mb_strtolower((string) $e))
-            ->flip();
+            // Usuarios que ya tienen el documento o el correo, para decir a
+            // quién pertenecen en la exportación.
+            $existentes = User::query()
+                ->whereIn(DB::raw('TRIM(Numero_D)'), $documentos)
+                ->orWhereIn(DB::raw('LOWER(email)'), $correos)
+                ->get(['id', 'name', 'Apellido1', 'apellido2', 'rol', 'Numero_D', 'email']);
+            $porDocumento = $existentes->keyBy(fn (User $u) => trim((string) $u->Numero_D));
+            $porCorreo = $existentes->keyBy(fn (User $u) => mb_strtolower((string) $u->email));
 
-        // La contraseña es el propio documento, así que un costo de bcrypt alto
-        // no la protege más y solo hace lenta la primera carga (miles de
-        // pacientes). Laravel la vuelve a cifrar con el costo normal si el
-        // paciente llega a iniciar sesión.
-        $costo = min(10, (int) config('hashing.bcrypt.rounds', 12));
+            // Un Super Admin no existe para quien no lo es: no se revela su nombre.
+            $viewerIsSuperAdmin = $request->user()?->isSuperAdmin() ?? false;
+            $registradoComo = fn (User $u) => ! $viewerIsSuperAdmin && $u->isSuperAdmin()
+                ? ['registrado' => 'Usuario del sistema', 'rol' => null]
+                : ['registrado' => trim("{$u->name} {$u->Apellido1} {$u->apellido2}"), 'rol' => $u->rol];
 
-        foreach ($pacientes as $documento => $p) {
-            $documento = (string) $documento;
-            $email = "{$documento}@notiene.com";
+            // La contraseña es el propio documento, así que un costo de bcrypt
+            // alto no la protege más y solo hace lenta la primera carga (miles
+            // de pacientes). Laravel la vuelve a cifrar con el costo normal si
+            // el paciente llega a iniciar sesión.
+            $costo = min(10, (int) config('hashing.bcrypt.rounds', 12));
 
-            if ($docsExistentes->has($documento) || $correosExistentes->has(mb_strtolower($email))) {
-                $resumen['existentes']++;
+            foreach ($pacientes as $documento => $p) {
+                $documento = (string) $documento;
+                $email = "{$documento}@notiene.com";
 
-                continue;
+                $existente = $porDocumento->get($documento);
+                $motivo = 'Documento ya registrado';
+                if (! $existente) {
+                    $existente = $porCorreo->get(mb_strtolower($email));
+                    $motivo = 'Correo ya registrado';
+                }
+
+                if ($existente) {
+                    $resumen['existentes']++;
+                    $resultados[$p['indice']] = ['estado' => 'existente', 'motivo' => $motivo, ...$registradoComo($existente)];
+
+                    continue;
+                }
+
+                [$apellido1, $apellido2, $name] = $this->partirNombreCenso($p['nombre']);
+
+                $usuario = User::create([
+                    'name' => mb_substr($name, 0, 255),
+                    'Apellido1' => $apellido1 !== null ? mb_substr($apellido1, 0, 50) : null,
+                    'apellido2' => $apellido2 !== null ? mb_substr($apellido2, 0, 50) : null,
+                    'tipo_Docu' => $p['tipo'] !== '' ? mb_substr($p['tipo'], 0, 120) : null,
+                    'Numero_D' => $documento,
+                    'Eps' => $p['eps'] !== '' ? mb_substr($p['eps'], 0, 120) : null,
+                    'rol' => 'paciente',
+                    'email' => $email,
+                    'password' => Hash::make($documento, ['rounds' => $costo]),
+                ]);
+                $resumen['creados']++;
+                $resultados[$p['indice']] = [
+                    'estado' => 'creado',
+                    'usuario' => $usuario->only(['id', 'Apellido1', 'apellido2', 'name', 'tipo_Docu', 'Numero_D', 'Eps', 'email']),
+                ];
             }
-
-            [$apellido1, $apellido2, $name] = $this->partirNombreCenso($p['nombre']);
-
-            User::create([
-                'name' => mb_substr($name, 0, 255),
-                'Apellido1' => $apellido1 !== null ? mb_substr($apellido1, 0, 50) : null,
-                'apellido2' => $apellido2 !== null ? mb_substr($apellido2, 0, 50) : null,
-                'tipo_Docu' => $p['tipo'] !== '' ? mb_substr($p['tipo'], 0, 120) : null,
-                'Numero_D' => $documento,
-                'Eps' => $p['eps'] !== '' ? mb_substr($p['eps'], 0, 120) : null,
-                'rol' => 'paciente',
-                'email' => $email,
-                'password' => Hash::make($documento, ['rounds' => $costo]),
-            ]);
-            $resumen['creados']++;
         }
 
-        return response()->json($resumen);
+        ksort($resultados);
+
+        return response()->json([...$resumen, 'resultados' => array_values($resultados)]);
     }
 
     /**
