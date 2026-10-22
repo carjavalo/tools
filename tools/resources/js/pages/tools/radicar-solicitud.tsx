@@ -1118,7 +1118,10 @@ const EMPTY_INF = {
     fechaFinal: '',
     consecutivo: '',
     documento: '',
+    // Médico: el texto digitado (se busca por palabras) y, si se escogió de
+    // la lista, su id (se filtra exacto).
     medico: '',
+    medicoId: '',
     especialidad: '',
     subespecialidad: '',
     estado: '',
@@ -1452,6 +1455,178 @@ function EpsCombobox({
                                 {o || 'Todas'}
                             </button>
                         ))
+                    )}
+                </div>
+            )}
+        </div>
+    );
+}
+
+/** Nombre completo de un médico, como lo muestran los selectores. */
+function nombreMedico(m: MedicoOpt): string {
+    return [m.name, m.Apellido1, m.apellido2].filter(Boolean).join(' ');
+}
+
+/** Tope de sugerencias a la vista: el resto aparece al seguir digitando. */
+const TOPE_SUGERENCIAS_MEDICO = 100;
+
+/**
+ * Filtro Médico de INFORMES y CONSULTAS: se digita libremente y, a la vez,
+ * despliega los usuarios con rol Médico que coinciden con lo escrito (cada
+ * palabra en el nombre o los apellidos, sin distinguir mayúsculas ni tildes,
+ * igual que el servidor). Lo digitado se busca por palabras; el médico
+ * escogido de la lista se filtra exacto, por su id. Flechas + Enter para
+ * elegir; Escape cierra.
+ */
+function MedicoCombobox({
+    medicos,
+    texto,
+    medicoId,
+    onChange,
+}: {
+    medicos: MedicoOpt[];
+    texto: string;
+    medicoId: string;
+    onChange: (texto: string, medicoId: string) => void;
+}) {
+    const [open, setOpen] = useState(false);
+    // -1 = ninguna resaltada: Enter deja el texto digitado y genera la consulta.
+    const [activo, setActivo] = useState(-1);
+    const ref = useRef<HTMLDivElement>(null);
+    const listaRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const handler = (ev: MouseEvent) => {
+            if (ref.current && !ref.current.contains(ev.target as Node)) {
+                setOpen(false);
+            }
+        };
+        document.addEventListener('mousedown', handler);
+        return () => document.removeEventListener('mousedown', handler);
+    }, []);
+
+    const normalizar = (t: string) =>
+        t.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+
+    const opciones = useMemo(
+        () =>
+            medicos
+                .map((m) => ({ id: String(m.id), nombre: nombreMedico(m) }))
+                .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es')),
+        [medicos],
+    );
+
+    // Con un médico ya escogido se ofrece la lista completa, para cambiarlo.
+    const coincidentes = useMemo(() => {
+        const palabras = medicoId
+            ? []
+            : normalizar(texto).split(/\s+/).filter(Boolean);
+        return palabras.length === 0
+            ? opciones
+            : opciones.filter((o) => {
+                  const nombre = normalizar(o.nombre);
+                  return palabras.every((p) => nombre.includes(p));
+              });
+    }, [opciones, texto, medicoId]);
+    const visibles = coincidentes.slice(0, TOPE_SUGERENCIAS_MEDICO);
+
+    useEffect(() => setActivo(-1), [texto]);
+
+    // La opción resaltada con el teclado se mantiene a la vista.
+    useEffect(() => {
+        listaRef.current
+            ?.querySelector<HTMLElement>(`[data-idx="${activo}"]`)
+            ?.scrollIntoView({ block: 'nearest' });
+    }, [activo]);
+
+    const elegir = (id: string, nombre: string) => {
+        onChange(nombre, id);
+        setOpen(false);
+    };
+
+    return (
+        <div ref={ref} className="relative">
+            <Input
+                value={texto}
+                onFocus={(e) => {
+                    setOpen(true);
+                    e.currentTarget.select();
+                }}
+                onChange={(e) => {
+                    // Al digitar deja de ser un médico escogido: vuelve a
+                    // buscarse por palabras.
+                    onChange(e.target.value, '');
+                    setOpen(true);
+                }}
+                onKeyDown={(e) => {
+                    if (e.key === 'ArrowDown') {
+                        e.preventDefault();
+                        setOpen(true);
+                        setActivo((i) => Math.min(i + 1, visibles.length - 1));
+                    } else if (e.key === 'ArrowUp') {
+                        e.preventDefault();
+                        setActivo((i) => Math.max(i - 1, -1));
+                    } else if (e.key === 'Enter' && open && activo >= 0) {
+                        // Enter elige el médico resaltado, no envía el
+                        // formulario; sin resaltado, genera la consulta.
+                        e.preventDefault();
+                        const o = visibles[activo];
+                        if (o) elegir(o.id, o.nombre);
+                    } else if (e.key === 'Escape' || e.key === 'Tab') {
+                        setOpen(false);
+                    }
+                }}
+                placeholder="Digite o seleccione el médico…"
+                autoComplete="off"
+                className="pr-8"
+            />
+            {texto ? (
+                <button
+                    type="button"
+                    onClick={() => {
+                        onChange('', '');
+                        setOpen(false);
+                    }}
+                    title="Quitar el filtro de médico"
+                    className="absolute top-1/2 right-2.5 -translate-y-1/2 rounded-sm opacity-60 hover:opacity-100"
+                >
+                    <X className="size-4" />
+                </button>
+            ) : (
+                <ChevronDown className="pointer-events-none absolute top-1/2 right-3 size-4 -translate-y-1/2 opacity-50" />
+            )}
+            {open && (
+                <div
+                    ref={listaRef}
+                    className="absolute z-50 mt-1 max-h-64 w-full min-w-[16rem] overflow-y-auto rounded-md border bg-popover p-1 shadow-md"
+                >
+                    {visibles.length === 0 ? (
+                        <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                            {opciones.length === 0
+                                ? 'No hay médicos registrados.'
+                                : `Ningún médico coincide con «${texto.trim()}»; se buscará lo digitado.`}
+                        </div>
+                    ) : (
+                        <>
+                            {visibles.map((o, i) => (
+                                <button
+                                    key={o.id}
+                                    type="button"
+                                    data-idx={i}
+                                    onMouseEnter={() => setActivo(i)}
+                                    onClick={() => elegir(o.id, o.nombre)}
+                                    className={`flex w-full rounded-sm px-2 py-1.5 text-left text-sm ${i === activo ? 'bg-muted' : ''} ${o.id === medicoId ? 'font-semibold text-[#2d3e83] dark:text-white' : ''}`}
+                                >
+                                    {o.nombre}
+                                </button>
+                            ))}
+                            {coincidentes.length > visibles.length && (
+                                <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                                    {coincidentes.length - visibles.length}{' '}
+                                    médicos más: siga digitando para acotar.
+                                </div>
+                            )}
+                        </>
                     )}
                 </div>
             )}
@@ -7452,15 +7627,17 @@ export default function RadicarSolicitud({
                                         />
                                     </Field>
                                     <Field label="Médico">
-                                        <Input
-                                            value={inf.medico}
-                                            onChange={(e) =>
-                                                setInfField(
-                                                    'medico',
-                                                    e.target.value,
-                                                )
+                                        <MedicoCombobox
+                                            medicos={medicosList}
+                                            texto={inf.medico}
+                                            medicoId={inf.medicoId}
+                                            onChange={(medico, medicoId) =>
+                                                setInf((p) => ({
+                                                    ...p,
+                                                    medico,
+                                                    medicoId,
+                                                }))
                                             }
-                                            placeholder="Nombre del médico"
                                         />
                                     </Field>
                                     <Field label="Especialidad">

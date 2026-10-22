@@ -1529,6 +1529,30 @@ test('cada filtro del informe deja solo las radicaciones que le corresponden', f
         ->and($casos('medico='.urlencode('ALEXANDER GOMEZ')))->toBe([]);
 });
 
+test('el médico escogido de la lista filtra exacto en informes y consultas', function () {
+    $user = User::factory()->create();
+    $estado = EstRadicado::create(['Nombre' => 'Recibido', 'Estado' => true]);
+    // Por palabras, "ANA RUIZ" también encaja en "ANA MARIA RUIZ LOPEZ".
+    $ana = User::factory()->create(['rol' => 'Medico', 'name' => 'ANA', 'Apellido1' => 'RUIZ', 'apellido2' => null]);
+    $anaMaria = User::factory()->create(['rol' => 'Medico', 'name' => 'ANA MARIA', 'Apellido1' => 'RUIZ', 'apellido2' => 'LOPEZ']);
+
+    $deAna = RadicarCaso::create(['Ndocumento' => '1101', 'estRad' => (string) $estado->id, 'codMed' => (string) $ana->id]);
+    $deAnaMaria = RadicarCaso::create(['Ndocumento' => '1102', 'estRad' => (string) $estado->id, 'codMed' => (string) $anaMaria->id]);
+
+    $casos = fn (string $endpoint, string $query) => collect(
+        $this->actingAs($user)->getJson("/tools/radicar-solicitud/{$endpoint}?{$query}")->assertOk()->json('rows')
+    )->pluck('codrad')->unique()->sort()->values()->all();
+
+    foreach (['informe', 'consulta'] as $endpoint) {
+        // Digitado: por palabras, trae a las dos.
+        expect($casos($endpoint, 'medico='.urlencode('ANA RUIZ')))->toBe([$deAna->codrad, $deAnaMaria->codrad])
+            // Escogido de la lista: solo el suyo, aunque el texto encaje en otros.
+            ->and($casos($endpoint, 'medico='.urlencode('ANA RUIZ').'&medicoId='.$ana->id))->toBe([$deAna->codrad])
+            // Un id que no es número se ignora y vuelve a la búsqueda por palabras.
+            ->and($casos($endpoint, 'medico='.urlencode('ANA RUIZ').'&medicoId=abc'))->toBe([$deAna->codrad, $deAnaMaria->codrad]);
+    }
+});
+
 test('Fecha Inicial y Final del informe filtran por el momento de los movimientos', function () {
     $user = User::factory()->create();
 

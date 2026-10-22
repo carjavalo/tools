@@ -1989,6 +1989,14 @@ class RadicarCasoController extends Controller
         // contra cada columna por separado, "ALEXANDER OBANDO" no encontraba
         // al médico que sí aparecía buscando solo "OBANDO".
         $palabrasMedico = preg_split('/\s+/u', $medicoF, -1, PREG_SPLIT_NO_EMPTY);
+        // Médico escogido de la lista del filtro: va por su id, exacto. Por
+        // palabras, "ANA RUIZ" traería también a "ANA MARIA RUIZ LOPEZ".
+        $medicoIdF = trim((string) $request->query('medicoId', ''));
+        if (ctype_digit($medicoIdF)) {
+            $palabrasMedico = [];
+        } else {
+            $medicoIdF = '';
+        }
 
         // 1) Radicaciones que entran al informe. El filtrado por atributos del
         //    caso (estado, especialidad, subespecialidad, médico, documento)
@@ -2015,6 +2023,7 @@ class RadicarCasoController extends Controller
             ->when($estadoF !== '', fn ($q) => $q->where('estRad', $estadoF))
             ->when($espF !== '', fn ($q) => $q->where('Codesp', $espF))
             ->when($subF !== '', fn ($q) => $q->where('codsubesp', $subF))
+            ->when($medicoIdF !== '', fn ($q) => $q->where('codMed', $medicoIdF))
             ->when($palabrasMedico !== [], fn ($q) => $q->whereIn(
                 'codMed',
                 User::query()
