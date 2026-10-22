@@ -1497,6 +1497,7 @@ class RadicarCasoController extends Controller
                 'radicar-solicitud-seguimiento-basico',
                 'radicar-solicitud-seguimiento-hemo',
                 'radicar-solicitud-seguimiento-cvascular',
+                'radicar-solicitud-seguimiento-endo',
                 'radicar-solicitud-seguimiento-espe-programa',
             ])
             ->get()
@@ -1511,7 +1512,8 @@ class RadicarCasoController extends Controller
         $otro = (! $completo || $completo->ver)
             || (bool) $permisos->get('radicar-solicitud-seguimiento-basico')?->ver
             || (bool) $permisos->get('radicar-solicitud-seguimiento-hemo')?->ver
-            || (bool) $permisos->get('radicar-solicitud-seguimiento-cvascular')?->ver;
+            || (bool) $permisos->get('radicar-solicitud-seguimiento-cvascular')?->ver
+            || (bool) $permisos->get('radicar-solicitud-seguimiento-endo')?->ver;
 
         return ! $otro;
     }
@@ -1565,6 +1567,16 @@ class RadicarCasoController extends Controller
     }
 
     /**
+     * Ids de los Estados QX de Endoscopia ("Programado x Endoscopia").
+     *
+     * @return list<string>
+     */
+    private function estadosQxEndoscopia(): array
+    {
+        return $this->estadosQxQueContienen('endoscopia');
+    }
+
+    /**
      * Ids de los Estados QX cuyo nombre —sin tildes, mayúsculas ni espacios—
      * contiene el texto dado.
      *
@@ -1591,24 +1603,25 @@ class RadicarCasoController extends Controller
      *
      * Con ?tipo=hemo trae solo las programaciones hechas con Estado QX
      * "Programado x Hemodinamia" (formulario Hemo); con ?tipo=cvascular, las
-     * de "Programado Cirugia Cardio Vascular" (formulario Cvascular); sin él,
+     * de "Programado Cirugia Cardio Vascular" (formulario Cvascular); con
+     * ?tipo=endo, las de "Programado x Endoscopia" (formulario Endo); sin él,
      * las demás (cirugía), incluidas las anteriores a que se guardara el
      * Estado QX.
      */
     public function programados(Request $request): JsonResponse
     {
         $exportar = $this->prepararExportacion($request);
-        $hemodinamia = $this->estadosQxHemodinamia();
-        $cardiovascular = $this->estadosQxCardiovascular();
-        $propias = array_values(array_unique([...$hemodinamia, ...$cardiovascular]));
+        $porTipo = [
+            'hemo' => $this->estadosQxHemodinamia(),
+            'cvascular' => $this->estadosQxCardiovascular(),
+            'endo' => $this->estadosQxEndoscopia(),
+        ];
+        $propias = array_values(array_unique(array_merge(...array_values($porTipo))));
 
         $programaciones = ProgramacionCaso::query()
             ->when(
                 $request->query('tipo'),
-                fn ($q, $tipo) => $q->whereIn(
-                    'codestsecundario',
-                    $tipo === 'cvascular' ? $cardiovascular : ($tipo === 'hemo' ? $hemodinamia : []),
-                ),
+                fn ($q, $tipo) => $q->whereIn('codestsecundario', is_string($tipo) ? ($porTipo[$tipo] ?? []) : []),
                 fn ($q) => $q->where(fn ($q) => $q
                     ->whereNull('codestsecundario')
                     ->orWhereNotIn('codestsecundario', $propias)),
@@ -2547,7 +2560,7 @@ class RadicarCasoController extends Controller
     }
 
     /**
-     * Observaciones acumulables (OB TFX, Observaciones Prg / Hemo / Cvascular):
+     * Observaciones acumulables (OB TFX, Observaciones Prg / Hemo / Cvascular / Endo):
      * firma el texto nuevo y lo agrega al final de lo ya registrado, como
      * Observaciones CCX. Devuelve null si no se escribió nada. El tope se mide
      * en bytes porque las columnas son TEXT.
@@ -2573,7 +2586,7 @@ class RadicarCasoController extends Controller
 
     /**
      * Observaciones de programación ya registradas en el caso para una grilla
-     * (cirugía, Hemo o Cvascular): las de su programación más reciente, que
+     * (cirugía, Hemo, Cvascular o Endo): las de su programación más reciente, que
      * lleva el acumulado de las anteriores.
      */
     private function observacionesPrgDelCaso(int $codrad, string $tipo): ?string
@@ -2987,11 +3000,13 @@ class RadicarCasoController extends Controller
             // Acumulado de Observaciones de la Revisión Clínica Hemodinamia.
             'obsRevisionHemo' => $caso->obs_revision_hemo,
             // Observaciones de programación ya registradas, por grilla: las
-            // muestran en solo lectura los formularios completo, Hemo y Cvascular.
+            // muestran en solo lectura los formularios completo, Hemo,
+            // Cvascular y Endo.
             'obsPrg' => [
                 'cirugia' => $this->observacionesPrgDelCaso($caso->codrad, 'cirugia'),
                 'hemo' => $this->observacionesPrgDelCaso($caso->codrad, 'hemo'),
                 'cvascular' => $this->observacionesPrgDelCaso($caso->codrad, 'cvascular'),
+                'endo' => $this->observacionesPrgDelCaso($caso->codrad, 'endo'),
             ],
             'procedimientos' => $procedimientos,
             'autorizaciones' => $procs->pluck('N_Autorizacion')->filter()->values(),

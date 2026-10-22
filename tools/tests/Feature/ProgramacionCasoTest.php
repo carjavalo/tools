@@ -150,10 +150,117 @@ test('el formulario Espe_Programa solo anexa Observaciones CCX', function () {
 
     expect(Permiso::VISTAS_OPT_IN)->toContain('radicar-solicitud-seguimiento-espe-programa');
 
-    // En el Gestor de Permisos queda justo debajo del formulario Cvascular.
+    // En el Gestor de Permisos queda justo debajo del formulario Endo (que a su
+    // vez va justo debajo del Cvascular).
     $keys = Permiso::vistasKeys();
-    expect($keys[array_search('radicar-solicitud-seguimiento-cvascular', $keys, true) + 1])
+    expect($keys[array_search('radicar-solicitud-seguimiento-endo', $keys, true) + 1])
         ->toBe('radicar-solicitud-seguimiento-espe-programa');
+});
+
+test('la grilla Endo solo trae lo programado por Endoscopia y la de cirugía no la incluye', function () {
+    $admin = User::factory()->create();
+    $programados = EstRadisecundario::create(['Nombre' => 'Programados', 'Estado' => true]);
+    $hemo = EstRadisecundario::create(['Nombre' => 'Programado x Hemodinamia', 'Estado' => true]);
+    $endo = EstRadisecundario::create(['Nombre' => 'Programado x Endoscopia', 'Estado' => true]);
+
+    $cx = ProgramacionCaso::create(['codrad' => RadicarCaso::create(['Ndocumento' => '4700', 'estRad' => '1'])->codrad, 'codestsecundario' => (string) $programados->id]);
+    $hm = ProgramacionCaso::create(['codrad' => RadicarCaso::create(['Ndocumento' => '4701', 'estRad' => '1'])->codrad, 'codestsecundario' => (string) $hemo->id]);
+    $en = ProgramacionCaso::create(['codrad' => RadicarCaso::create(['Ndocumento' => '4702', 'estRad' => '1'])->codrad, 'codestsecundario' => (string) $endo->id]);
+
+    $ids = fn (string $url) => collect($this->actingAs($admin)->getJson($url)->assertOk()->json('rows'))->pluck('id')->all();
+
+    expect($ids('/tools/radicar-solicitud/programados?tipo=endo'))->toBe([$en->id])
+        ->and($ids('/tools/radicar-solicitud/programados?tipo=hemo'))->toBe([$hm->id])
+        ->and($ids('/tools/radicar-solicitud/programados'))->toBe([$cx->id])
+        ->and($en->tipoGrilla())->toBe('endo');
+});
+
+test('el formulario Endo programa y su botón Ver prog Endoscopia da la grilla sin el formulario', function () {
+    $rol = Role::create(['Nombre' => 'Consulta Endo', 'Estado' => true]);
+    $usuario = User::factory()->create(['rol' => 'Consulta Endo']);
+    $endo = EstRadisecundario::create(['Nombre' => 'Programado x Endoscopia', 'Estado' => true]);
+    $caso = RadicarCaso::create(['Ndocumento' => '4710', 'estRad' => '1']);
+
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud', 'ver' => true]);
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud-seguimiento', 'ver' => false]);
+
+    // Sin el formulario Endo ni su botón: no entra ni guarda.
+    $this->actingAs($usuario)
+        ->getJson('/tools/radicar-solicitud/programados?tipo=endo')
+        ->assertForbidden();
+    $this->actingAs($usuario)
+        ->postJson("/tools/radicar-solicitud/{$caso->codrad}/seguimiento", ['codestsecundario' => (string) $endo->id])
+        ->assertForbidden();
+
+    // Con el formulario Endo: guarda la programación (con sus observaciones,
+    // que el caso devuelve en su propia grilla) y ve su grilla.
+    $form = Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud-seguimiento-endo', 'ver' => true]);
+    $this->actingAs($usuario)
+        ->postJson("/tools/radicar-solicitud/{$caso->codrad}/seguimiento", [
+            'codestsecundario' => (string) $endo->id,
+            'observaciones_prg' => 'Colonoscopia',
+        ])
+        ->assertOk()
+        ->assertJsonPath('caso.obsPrg.endo', fn ($v) => str_contains($v, 'Colonoscopia'))
+        ->assertJsonPath('caso.obsPrg.hemo', null);
+    expect(ProgramacionCaso::where('codrad', $caso->codrad)->value('codestsecundario'))->toBe((string) $endo->id);
+    $this->actingAs($usuario)
+        ->getJson('/tools/radicar-solicitud/programados?tipo=endo')
+        ->assertOk()
+        ->assertJsonCount(1, 'rows');
+
+    // Solo con el botón "Ver prog Endoscopia": ve la grilla Endo, pero no la
+    // de Hemo ni la de Cvascular.
+    $form->delete();
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud-ver-programados-endo', 'ver' => true]);
+    $this->actingAs($usuario)
+        ->getJson('/tools/radicar-solicitud/programados?tipo=endo')
+        ->assertOk();
+    $this->actingAs($usuario)
+        ->getJson('/tools/radicar-solicitud/programados?tipo=hemo')
+        ->assertForbidden();
+    $this->actingAs($usuario)
+        ->getJson('/tools/radicar-solicitud/programados?tipo=cvascular')
+        ->assertForbidden();
+});
+
+test('el botón Ver prog Endoscopia con editar y borrar solo manipula las programaciones de Endoscopia', function () {
+    $rol = Role::create(['Nombre' => 'Programador Endo', 'Estado' => true]);
+    $usuario = User::factory()->create(['rol' => 'Programador Endo']);
+    $programados = EstRadisecundario::create(['Nombre' => 'Programados', 'Estado' => true]);
+    $endo = EstRadisecundario::create(['Nombre' => 'Programado x Endoscopia', 'Estado' => true]);
+
+    $cx = ProgramacionCaso::create(['codrad' => RadicarCaso::create(['Ndocumento' => '4720', 'estRad' => '1'])->codrad, 'codestsecundario' => (string) $programados->id]);
+    $en = ProgramacionCaso::create(['codrad' => RadicarCaso::create(['Ndocumento' => '4721', 'estRad' => '1'])->codrad, 'codestsecundario' => (string) $endo->id]);
+
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud', 'ver' => true]);
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud-ver-programados-endo', 'ver' => true, 'editar' => true, 'borrar' => true]);
+
+    $this->actingAs($usuario)->putJson("/tools/radicar-solicitud/programacion/{$en->id}", ['observaciones_prg' => 'x'])->assertOk();
+    $this->actingAs($usuario)->putJson("/tools/radicar-solicitud/programacion/{$cx->id}", ['observaciones_prg' => 'x'])->assertForbidden();
+    $this->actingAs($usuario)->deleteJson("/tools/radicar-solicitud/programacion/{$cx->id}")->assertForbidden();
+    $this->actingAs($usuario)->deleteJson("/tools/radicar-solicitud/programacion/{$en->id}")->assertOk();
+
+    expect(ProgramacionCaso::find($en->id))->toBeNull();
+});
+
+test('el formulario Endo y su botón van en el Gestor debajo de los de Cvascular y vienen apagados', function () {
+    $vistas = collect(Permiso::VISTAS);
+    $keys = $vistas->pluck('key')->values();
+    $posicion = fn (string $key) => $keys->search($key);
+
+    expect($vistas->firstWhere('key', 'radicar-solicitud-seguimiento-endo')['titulo'])
+        ->toBe('Formulario Aplicar Modificaciones (Historial) Endo')
+        ->and($posicion('radicar-solicitud-seguimiento-endo'))
+        ->toBe($posicion('radicar-solicitud-seguimiento-cvascular') + 1)
+        ->and($vistas->firstWhere('key', 'radicar-solicitud-ver-programados-endo')['titulo'])
+        ->toBe('Botón Ver prog Endoscopia (Formulario Aplicar Modificaciones Endoscopia)')
+        ->and($vistas->firstWhere('key', 'radicar-solicitud-ver-programados-endo')['acciones'])
+        ->toBe(['ver', 'editar', 'borrar'])
+        ->and($posicion('radicar-solicitud-ver-programados-endo'))
+        ->toBe($posicion('radicar-solicitud-ver-programados-cvascular') + 1)
+        ->and(Permiso::VISTAS_OPT_IN)->toContain('radicar-solicitud-seguimiento-endo')
+        ->and(Permiso::VISTAS_OPT_IN)->toContain('radicar-solicitud-ver-programados-endo');
 });
 
 test('las observaciones de programación se acumulan firmadas por grilla', function () {

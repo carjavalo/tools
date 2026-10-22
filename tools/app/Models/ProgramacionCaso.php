@@ -82,8 +82,9 @@ class ProgramacionCaso extends Model
 
     /**
      * Grilla "Ver programados" a la que pertenece según su Estado QX:
-     * 'cvascular' (Cirugía Cardio Vascular), 'hemo' (Hemodinamia) o 'cirugia'
-     * (el resto, incluidas las anteriores a que se guardara el Estado QX). Se
+     * 'cvascular' (Cirugía Cardio Vascular), 'hemo' (Hemodinamia), 'endo'
+     * (Endoscopia) o 'cirugia' (el resto, incluidas las anteriores a que se
+     * guardara el Estado QX). Se
      * resuelve por el nombre, igual que el filtro de la grilla.
      */
     public function tipoGrilla(): string
@@ -105,6 +106,7 @@ class ProgramacionCaso extends Model
         return match (true) {
             str_contains($normalizado, 'cardiovascular') => 'cvascular',
             str_contains($normalizado, 'hemodinamia') => 'hemo',
+            str_contains($normalizado, 'endoscopia') => 'endo',
             default => 'cirugia',
         };
     }

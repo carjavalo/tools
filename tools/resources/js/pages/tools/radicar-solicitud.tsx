@@ -269,6 +269,7 @@ interface CasoDetalle {
         cirugia: string | null;
         hemo: string | null;
         cvascular: string | null;
+        endo: string | null;
     };
     codMed: string | null;
     // Especialidad (código espcodser) para el select de Modificar Radicado.
@@ -860,8 +861,14 @@ const EMPTY_SEG_HEMO = {
  */
 const EMPTY_SEG_CVASCULAR = { ...EMPTY_SEG_HEMO };
 
+/**
+ * Formulario Endo del Historial: copia del Hemo para Endoscopia (Estado QX
+ * "Programado x Endoscopia").
+ */
+const EMPTY_SEG_ENDO = { ...EMPTY_SEG_HEMO };
+
 /** Qué grilla muestra el modal "Ver programados". */
-type TipoProgramados = 'cirugia' | 'hemo' | 'cvascular';
+type TipoProgramados = 'cirugia' | 'hemo' | 'cvascular' | 'endo';
 
 /** Orden elegido en los encabezados de una grilla (null = el original). */
 type Orden<C extends string> = { col: C; dir: 'asc' | 'desc' } | null;
@@ -1655,7 +1662,11 @@ export default function RadicarSolicitud({
     // la programación de cirugía ('especialista'). Así el mismo modal sirve a
     // los dos selectores sin pisarse.
     const [medicoDestino, setMedicoDestino] = useState<
-        'codMed' | 'especialista' | 'especialistaHemo' | 'especialistaCvascular'
+        | 'codMed'
+        | 'especialista'
+        | 'especialistaHemo'
+        | 'especialistaCvascular'
+        | 'especialistaEndo'
     >('codMed');
     // Lista de médicos del selector: parte de la prop del servidor y crece
     // cuando se crea uno desde el modal, sin recargar la página.
@@ -1711,6 +1722,11 @@ export default function RadicarSolicitud({
     const [segCvascularError, setSegCvascularError] = useState<string | null>(
         null,
     );
+    // Formulario Endo: copia del Hemo, con su propio estado.
+    const [segEndo, setSegEndo] = useState({ ...EMPTY_SEG_ENDO });
+    const [aplicandoEndo, setAplicandoEndo] = useState(false);
+    const [segEndoOk, setSegEndoOk] = useState(false);
+    const [segEndoError, setSegEndoError] = useState<string | null>(null);
     // Formulario Espe_Programa: solo anexa Observaciones CCX.
     const [segEspePrograma, setSegEspePrograma] = useState({
         ObservacionCCX: '',
@@ -1730,8 +1746,9 @@ export default function RadicarSolicitud({
     // Estado QX = Programados, con sus datos de programación de cirugía.
     const [programadosOpen, setProgramadosOpen] = useState(false);
     // Qué grilla muestra el modal: la de cirugía (formulario completo) o la de
-    // Hemodinamia (formulario Hemo, Estado QX "Programado x Hemodinamia") o la
-    // de Cirugía Cardio Vascular (formulario Cvascular).
+    // Hemodinamia (formulario Hemo, Estado QX "Programado x Hemodinamia"), la
+    // de Cirugía Cardio Vascular (formulario Cvascular) o la de Endoscopia
+    // (formulario Endo, Estado QX "Programado x Endoscopia").
     const [programadosTipo, setProgramadosTipo] =
         useState<TipoProgramados>('cirugia');
     const [programadosRows, setProgramadosRows] = useState<ProgramadoRow[]>([]);
@@ -2388,7 +2405,8 @@ export default function RadicarSolicitud({
         destino:
             | 'especialista'
             | 'especialistaHemo'
-            | 'especialistaCvascular' = 'especialista',
+            | 'especialistaCvascular'
+            | 'especialistaEndo' = 'especialista',
     ) => {
         setUserErrors({});
         setEditandoId(null);
@@ -2523,6 +2541,11 @@ export default function RadicarSolicitud({
                         );
                     } else if (medicoDestino === 'especialistaCvascular') {
                         setSegCvascularField(
+                            'especialista_medico_id',
+                            String(medico.id),
+                        );
+                    } else if (medicoDestino === 'especialistaEndo') {
+                        setSegEndoField(
                             'especialista_medico_id',
                             String(medico.id),
                         );
@@ -2706,6 +2729,23 @@ export default function RadicarSolicitud({
                 )?.Nombre,
             ),
         [estadosSecundarios, segCvascular.codestsecundario],
+    );
+
+    // Formulario Endo: igual que el Hemo.
+    const setSegEndoField = (campo: string, valor: string) =>
+        setSegEndo((prev) => ({ ...prev, [campo]: valor }));
+
+    const setEstadoQxEndo = (valor: string) =>
+        setSegEndo((prev) => ({ ...prev, ...cambiosEstadoQx(valor) }));
+
+    const segEndoEsProgramado = useMemo(
+        () =>
+            esEstadoProgramado(
+                estadosSecundarios.find(
+                    (s) => String(s.id) === String(segEndo.codestsecundario),
+                )?.Nombre,
+            ),
+        [estadosSecundarios, segEndo.codestsecundario],
     );
 
     // Trae la grilla desde el servidor. Se usa al abrir el modal y después de
@@ -3518,6 +3558,17 @@ export default function RadicarSolicitud({
         );
     };
 
+    const aplicarModificacionEndo = (e: FormEvent) => {
+        e.preventDefault();
+        enviarSeguimiento(
+            segEndo,
+            () => setSegEndo({ ...EMPTY_SEG_ENDO }),
+            setAplicandoEndo,
+            setSegEndoOk,
+            setSegEndoError,
+        );
+    };
+
     /** Formulario Espe_Programa: manda solo el texto nuevo de Observaciones CCX. */
     const aplicarModificacionEspePrograma = (e: FormEvent) => {
         e.preventDefault();
@@ -3958,6 +4009,11 @@ export default function RadicarSolicitud({
         permisosUsuario['radicar-solicitud-seguimiento-cvascular']?.ver ===
             true;
 
+    // Formulario Endo (Historial): copia del Hemo, misma regla.
+    const puedeAplicarModificacionesEndo =
+        esSuperAdmin ||
+        permisosUsuario['radicar-solicitud-seguimiento-endo']?.ver === true;
+
     // Formulario Espe_Programa (Historial): solo Observaciones CCX. Misma
     // regla de asignación expresa.
     const puedeAplicarModificacionesEspePrograma =
@@ -3975,14 +4031,13 @@ export default function RadicarSolicitud({
     const puedeVerRadicadoProgramado =
         esSuperAdmin || programadosCfg?.ver === true;
     // Editar y borrar también los habilita el botón "Ver programados" de la
-    // grilla abierta (cirugía, Hemo o Cvascular) si tiene esa acción asignada.
+    // grilla abierta (cirugía, Hemo, Cvascular o Endo) si tiene esa acción
+    // asignada.
     const botonProgramadosCfg =
         permisosUsuario[
-            programadosTipo === 'hemo'
-                ? 'radicar-solicitud-ver-programados-hemo'
-                : programadosTipo === 'cvascular'
-                  ? 'radicar-solicitud-ver-programados-cvascular'
-                  : 'radicar-solicitud-ver-programados'
+            programadosTipo === 'cirugia'
+                ? 'radicar-solicitud-ver-programados'
+                : `radicar-solicitud-ver-programados-${programadosTipo}`
         ];
     const puedeEditarProgramacion =
         esSuperAdmin ||
@@ -4007,10 +4062,14 @@ export default function RadicarSolicitud({
         esSuperAdmin ||
         permisosUsuario['radicar-solicitud-ver-programados-cvascular']?.ver ===
             true;
+    const puedeBotonProgramadosEndo =
+        esSuperAdmin ||
+        permisosUsuario['radicar-solicitud-ver-programados-endo']?.ver === true;
     const hayBotonesProgramados =
         puedeBotonProgramados ||
         puedeBotonProgramadosHemo ||
-        puedeBotonProgramadosCvascular;
+        puedeBotonProgramadosCvascular ||
+        puedeBotonProgramadosEndo;
     // Botón "Subir paquete" del formulario Aplicar Modificaciones: hay que
     // asignarlo en el Gestor de Permisos ("Asignar subir paquete").
     const puedeSubirPaquete =
@@ -4232,6 +4291,19 @@ export default function RadicarSolicitud({
                                     >
                                         <CalendarClock className="size-4" />
                                         Ver prog Cvascular
+                                    </Button>
+                                )}
+                                {puedeBotonProgramadosEndo && (
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => abrirProgramados('endo')}
+                                        title="Ver las radicaciones programadas por Endoscopia"
+                                        className="gap-2 text-[#2d3e83] dark:text-white"
+                                    >
+                                        <CalendarClock className="size-4" />
+                                        Ver Prog Endoscopia
                                     </Button>
                                 )}
                             </div>
@@ -5871,6 +5943,7 @@ export default function RadicarSolicitud({
                                                             !puedeAplicarModificaciones &&
                                                             !puedeAplicarModificacionesHemo &&
                                                             !puedeAplicarModificacionesCvascular &&
+                                                            !puedeAplicarModificacionesEndo &&
                                                             botonPaqueteCompacto()}
                                                     </span>
                                                 }
@@ -6743,6 +6816,31 @@ export default function RadicarSolicitud({
                                             error: segCvascularError,
                                         },
                                         {
+                                            key: 'endo',
+                                            visible:
+                                                puedeAplicarModificacionesEndo,
+                                            titulo: 'Formulario Endo — recepción del servicio',
+                                            valores: segEndo,
+                                            setCampo: setSegEndoField,
+                                            estadoQx: {
+                                                valores: segEndo,
+                                                onChange: setEstadoQxEndo,
+                                                esProgramado:
+                                                    segEndoEsProgramado,
+                                            },
+                                            sufijo: 'Endo',
+                                            tipoProgramados:
+                                                'endo' as TipoProgramados,
+                                            tituloProgramados:
+                                                'Ver las radicaciones programadas por Endoscopia',
+                                            destinoEspecialista:
+                                                'especialistaEndo' as const,
+                                            onSubmit: aplicarModificacionEndo,
+                                            ocupado: aplicandoEndo,
+                                            ok: segEndoOk,
+                                            error: segEndoError,
+                                        },
+                                        {
                                             // Solo Observaciones CCX: ver el
                                             // acumulado y anexarle texto.
                                             key: 'espePrograma',
@@ -7031,14 +7129,11 @@ export default function RadicarSolicitud({
                                                                 label={`Observaciones ${f.sufijo}`}
                                                                 className="md:col-span-2 lg:col-span-3"
                                                                 registrado={
-                                                                    f.tipoProgramados ===
-                                                                    'cvascular'
-                                                                        ? caso
-                                                                              .obsPrg
-                                                                              ?.cvascular
-                                                                        : caso
-                                                                              .obsPrg
-                                                                              ?.hemo
+                                                                    caso
+                                                                        .obsPrg?.[
+                                                                        f
+                                                                            .tipoProgramados
+                                                                    ]
                                                                 }
                                                                 value={
                                                                     f.estadoQx
@@ -7080,8 +7175,9 @@ export default function RadicarSolicitud({
                                                             />
                                                         )}
                                                     {/* Paquete en los
-                                                        formularios Hemo y
-                                                        Cvascular: de último,
+                                                        formularios Hemo,
+                                                        Cvascular y Endo: de
+                                                        último,
                                                         tras Estado QX y la
                                                         programación. */}
                                                     {f.estadoQx !== null &&
@@ -7140,7 +7236,10 @@ export default function RadicarSolicitud({
                                                             {f.key ===
                                                             'cvascular'
                                                                 ? 'Ver prog Cvascular'
-                                                                : 'Ver programados'}
+                                                                : f.key ===
+                                                                    'endo'
+                                                                  ? 'Ver Prog Endoscopia'
+                                                                  : 'Ver programados'}
                                                         </Button>
                                                     )}
                                                 </div>
@@ -8442,14 +8541,18 @@ export default function RadicarSolicitud({
                                 ? 'Radicaciones programadas por Hemodinamia'
                                 : programadosTipo === 'cvascular'
                                   ? 'Radicaciones programadas para Cirugía Cardio Vascular'
-                                  : 'Radicaciones programadas para cirugía'}
+                                  : programadosTipo === 'endo'
+                                    ? 'Radicaciones programadas por Endoscopia'
+                                    : 'Radicaciones programadas para cirugía'}
                         </DialogTitle>
                         <DialogDescription>
                             {programadosTipo === 'hemo'
                                 ? 'Casos programados con Estado QX en “Programado x Hemodinamia”.'
                                 : programadosTipo === 'cvascular'
                                   ? 'Casos programados con Estado QX en “Programado Cirugia Cardio Vascular”.'
-                                  : 'Casos con Estado QX en “Programados”.'}{' '}
+                                  : programadosTipo === 'endo'
+                                    ? 'Casos programados con Estado QX en “Programado x Endoscopia”.'
+                                    : 'Casos con Estado QX en “Programados”.'}{' '}
                             Se ordenan por fecha y hora de programación, de la
                             más reciente a la más antigua.
                         </DialogDescription>

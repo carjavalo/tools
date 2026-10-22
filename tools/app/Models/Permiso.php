@@ -49,6 +49,10 @@ class Permiso extends Model
         // trae solo el Estado QX "Programado Cirugia Cardio Vascular". Como el
         // de Hemo, apagado hasta que se asigne al rol.
         ['key' => 'radicar-solicitud-seguimiento-cvascular', 'titulo' => 'Formulario Aplicar Modificaciones (Historial) Cvascular', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver']],
+        // Copia del formulario Hemo para Endoscopia: su grilla trae solo el
+        // Estado QX "Programado x Endoscopia". Como el de Hemo, apagado hasta
+        // que se asigne al rol.
+        ['key' => 'radicar-solicitud-seguimiento-endo', 'titulo' => 'Formulario Aplicar Modificaciones (Historial) Endo', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver']],
         // Formulario reducido a Observaciones CCX: deja ver el acumulado y
         // anexarle texto, nada más. Si es el único formulario del rol, el
         // servidor descarta cualquier otro campo. Apagado hasta asignarlo.
@@ -68,6 +72,7 @@ class Permiso extends Model
         ['key' => 'radicar-solicitud-ver-programados', 'titulo' => 'Botón Ver programados (Formulario Aplicar Modificaciones)', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver', 'editar', 'borrar']],
         ['key' => 'radicar-solicitud-ver-programados-hemo', 'titulo' => 'Botón Ver programados Hemo (Formulario Aplicar Modificaciones Hemo)', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver', 'editar', 'borrar']],
         ['key' => 'radicar-solicitud-ver-programados-cvascular', 'titulo' => 'Botón Ver prog Cvascular (Formulario Aplicar Modificaciones Cvascular)', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver', 'editar', 'borrar']],
+        ['key' => 'radicar-solicitud-ver-programados-endo', 'titulo' => 'Botón Ver prog Endoscopia (Formulario Aplicar Modificaciones Endoscopia)', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver', 'editar', 'borrar']],
         // Botón "Subir paquete" del formulario Aplicar Modificaciones: deja
         // subir o reemplazar el PDF del paquete de un caso ya radicado (el
         // mismo de Nueva Radicación / Radicado Hospitalario). Viene apagado.
@@ -115,6 +120,8 @@ class Permiso extends Model
         'radicar-solicitud-ver-programados-hemo',
         'radicar-solicitud-ver-programados-cvascular',
         'radicar-solicitud-seguimiento-cvascular',
+        'radicar-solicitud-ver-programados-endo',
+        'radicar-solicitud-seguimiento-endo',
         'radicar-solicitud-seguimiento-espe-programa',
         'radicar-solicitud-subir-paquete',
         'gestion-usuarios-importar-censo',

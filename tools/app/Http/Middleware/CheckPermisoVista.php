@@ -67,7 +67,7 @@ class CheckPermisoVista
             // botón por su propia acción. Hay que asignarla expresamente: sin
             // fila guardada no se autoriza (el Super Admin ya pasó arriba).
             // También autoriza el botón "Ver programados" de la grilla a la que
-            // pertenece la programación (cirugía, Hemo o Cvascular), si tiene
+            // pertenece la programación (cirugía, Hemo, Cvascular o Endo), si tiene
             // asignada la misma acción.
             if ($sub === 'programacion') {
                 $accionGrilla = $request->isMethod('DELETE') ? 'borrar' : 'editar';
@@ -215,6 +215,7 @@ class CheckPermisoVista
                 'radicar-solicitud-seguimiento-basico',
                 'radicar-solicitud-seguimiento-hemo',
                 'radicar-solicitud-seguimiento-cvascular',
+                'radicar-solicitud-seguimiento-endo',
                 'radicar-solicitud-seguimiento-espe-programa',
             ])
             ->get()
@@ -224,12 +225,14 @@ class CheckPermisoVista
         $basico = $permisos->get('radicar-solicitud-seguimiento-basico');
         $hemo = $permisos->get('radicar-solicitud-seguimiento-hemo');
         $cvascular = $permisos->get('radicar-solicitud-seguimiento-cvascular');
+        $endo = $permisos->get('radicar-solicitud-seguimiento-endo');
         $espePrograma = $permisos->get('radicar-solicitud-seguimiento-espe-programa');
 
         return (! $completo || $completo->ver)
             || ($basico && $basico->ver)
             || ($hemo && $hemo->ver)
             || ($cvascular && $cvascular->ver)
+            || ($endo && $endo->ver)
             || ($espePrograma && $espePrograma->ver);
     }
 
@@ -241,12 +244,13 @@ class CheckPermisoVista
      */
     private function puedeVerProgramados(int $roleId, string $tipo): bool
     {
-        // Hemo y Cvascular se asignan expresamente; la de cirugía no.
-        $hemo = in_array($tipo, ['hemo', 'cvascular'], true);
+        // Hemo, Cvascular y Endo se asignan expresamente; la de cirugía no.
+        $hemo = in_array($tipo, ['hemo', 'cvascular', 'endo'], true);
 
         [$formulario, $boton] = match ($tipo) {
             'hemo' => ['radicar-solicitud-seguimiento-hemo', 'radicar-solicitud-ver-programados-hemo'],
             'cvascular' => ['radicar-solicitud-seguimiento-cvascular', 'radicar-solicitud-ver-programados-cvascular'],
+            'endo' => ['radicar-solicitud-seguimiento-endo', 'radicar-solicitud-ver-programados-endo'],
             default => ['radicar-solicitud-seguimiento', 'radicar-solicitud-ver-programados'],
         };
 
@@ -285,6 +289,7 @@ class CheckPermisoVista
         $boton = match ($programacion->tipoGrilla()) {
             'hemo' => 'radicar-solicitud-ver-programados-hemo',
             'cvascular' => 'radicar-solicitud-ver-programados-cvascular',
+            'endo' => 'radicar-solicitud-ver-programados-endo',
             default => 'radicar-solicitud-ver-programados',
         };
 
