@@ -85,6 +85,11 @@ class Permiso extends Model
         // subir paquete" y viene apagado: solo el Super Admin lo tiene hasta
         // que se asigne a un rol.
         ['key' => 'gestion-usuarios-importar-censo', 'titulo' => 'Boton Importar Censo Hospitalario', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver']],
+        // Filtro "Usuarios por rol" de Gestión de Usuarios: muestra cuántos
+        // usuarios hay por rol y deja filtrar el listado por cada uno. Va justo
+        // debajo de "Boton Importar Censo Hospitalario" y viene apagado: solo
+        // el Super Admin lo tiene hasta que se asigne a un rol.
+        ['key' => 'gestion-usuarios-conteo-roles', 'titulo' => 'Filtro Usuarios por Rol', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver']],
         ['key' => 'gestion-usuarios', 'titulo' => 'Gestión de Usuarios', 'grupo' => 'Herramientas', 'acciones' => ['ver', 'crear', 'editar', 'borrar']],
         ['key' => 'gestion-servicios', 'titulo' => 'Gestión Servicios', 'grupo' => 'Herramientas', 'acciones' => ['ver', 'crear', 'editar', 'borrar']],
         ['key' => 'gestion-quirofano-qx', 'titulo' => 'Gestión Quirófanos QX', 'grupo' => 'Herramientas', 'acciones' => ['ver', 'crear', 'editar', 'borrar']],
@@ -129,6 +134,7 @@ class Permiso extends Model
         'radicar-solicitud-seguimiento-espe-programa',
         'radicar-solicitud-subir-paquete',
         'gestion-usuarios-importar-censo',
+        'gestion-usuarios-conteo-roles',
     ];
 
     /**

@@ -66,9 +66,26 @@ class UserManagementController extends Controller
             ->paginate($perPage, self::COLUMNAS_LISTADO)
             ->withQueryString();
 
+        // Filtro "Usuarios por rol": cuántos usuarios hay por rol. Solo se
+        // calcula si el rol tiene asignada la opción en el Gestor de Permisos
+        // (el Super Admin siempre). Respeta la invisibilidad del Super Admin.
+        $conteoRoles = null;
+        if ($this->puedeVerVista($request->user(), 'gestion-usuarios-conteo-roles')) {
+            $conteoRoles = User::query()
+                ->when(! $viewerIsSuperAdmin, fn ($query) => $query->where('rol', '!=', User::SUPER_ADMIN))
+                ->selectRaw('rol, COUNT(*) as total')
+                ->groupBy('rol')
+                ->orderByDesc('total')
+                ->get()
+                ->map(fn ($fila) => ['rol' => $fila->rol ?: 'paciente', 'total' => (int) $fila->total])
+                ->values();
+        }
+
         return Inertia::render('tools/gestion-usuarios', [
             'users' => $users,
             'filters' => ['search' => $search, 'rol' => $rol, 'perPage' => $perPage],
+            // Conteo de usuarios por rol (null cuando el rol no tiene la opción).
+            'conteoRoles' => $conteoRoles,
             // Roles del filtro: todos los existentes (no solo los asignables),
             // para poder consultar a cualquier usuario visible.
             'rolesFiltro' => Role::query()
@@ -267,6 +284,24 @@ class UserManagementController extends Controller
     private function normalizarEspacios(string $texto): string
     {
         return trim((string) preg_replace('/\s+/u', ' ', $texto));
+    }
+
+    /**
+     * ¿El rol del usuario puede ver la opción (sub-vista) indicada? El Super
+     * Admin siempre; el resto, solo con la fila guardada y "ver" en true.
+     */
+    private function puedeVerVista(?User $user, string $vista): bool
+    {
+        if ($user?->isSuperAdmin() ?? false) {
+            return true;
+        }
+
+        $role = Role::where('Nombre', $user?->rol)->first();
+
+        return $role !== null
+            && (bool) Permiso::where('role_id', $role->id)
+                ->where('vista', $vista)
+                ->value('ver');
     }
 
     /**

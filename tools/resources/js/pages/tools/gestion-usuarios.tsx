@@ -89,6 +89,8 @@ interface PageProps {
     rolesFiltro: TipoDocOption[];
     epsList: TipoDocOption[];
     especialidadesList: EspecialidadOption[];
+    // Conteo de usuarios por rol; null si el rol no tiene la opción asignada.
+    conteoRoles: { rol: string; total: number }[] | null;
 }
 
 const breadcrumbs: BreadcrumbItem[] = [
@@ -164,6 +166,7 @@ export default function GestionUsuarios({
     rolesFiltro,
     epsList,
     especialidadesList,
+    conteoRoles,
 }: PageProps) {
     const { flash, auth } = usePage<SharedData>().props;
     const acciones = usePermisosVista('gestion-usuarios');
