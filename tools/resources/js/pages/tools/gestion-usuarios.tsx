@@ -474,6 +474,54 @@ export default function GestionUsuarios({
                     </div>
                 )}
 
+                {/* Filtro Usuarios por rol: cuántos hay por rol y filtra el
+                    listado al tocar cada uno. Configurable en el Gestor de
+                    Permisos; sin asignar, solo lo ve el Super Admin. */}
+                {conteoRoles && conteoRoles.length > 0 && (
+                    <div className="rounded-xl border bg-card p-4 shadow-sm">
+                        <div className="mb-3 flex items-center gap-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+                            <Users className="size-4" />
+                            Usuarios por rol
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                            <button
+                                type="button"
+                                onClick={() => changeRol(TODOS_LOS_ROLES)}
+                                className={`flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors ${
+                                    !filters.rol
+                                        ? 'border-[#2d3e83] bg-[#2d3e83] text-white dark:border-white/40 dark:bg-white/15'
+                                        : 'bg-card text-foreground hover:bg-muted'
+                                }`}
+                            >
+                                Todos
+                                <span className="rounded-full bg-black/10 px-2 text-xs dark:bg-white/20">
+                                    {conteoRoles.reduce(
+                                        (suma, c) => suma + c.total,
+                                        0,
+                                    )}
+                                </span>
+                            </button>
+                            {conteoRoles.map((c) => (
+                                <button
+                                    key={c.rol}
+                                    type="button"
+                                    onClick={() => changeRol(c.rol)}
+                                    className={`flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors ${
+                                        filters.rol === c.rol
+                                            ? 'border-[#2d3e83] bg-[#2d3e83] text-white dark:border-white/40 dark:bg-white/15'
+                                            : 'bg-card text-foreground hover:bg-muted'
+                                    }`}
+                                >
+                                    {c.rol}
+                                    <span className="rounded-full bg-black/10 px-2 text-xs dark:bg-white/20">
+                                        {c.total}
+                                    </span>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
                 {/* Tarjeta de tabla */}
                 <div className="flex flex-1 flex-col overflow-hidden rounded-xl border bg-card shadow-sm">
                     <div className="flex flex-col gap-3 border-b p-4 lg:flex-row lg:items-center lg:justify-between">
