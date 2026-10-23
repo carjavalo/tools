@@ -20,7 +20,7 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { usePermisosVista } from '@/hooks/use-permisos-vista';
 import AppLayout from '@/layouts/app-layout';
-import { camposParaRol } from '@/lib/roles';
+import { camposParaRol, esRolPaciente, permiteSobreUsuario } from '@/lib/roles';
 import { dashboard } from '@/routes';
 import { type BreadcrumbItem, type SharedData } from '@/types';
 import { Head, router, useForm, usePage } from '@inertiajs/react';
@@ -1909,6 +1909,29 @@ export default function RadicarSolicitud({
     const [creando, setCreando] = useState(false);
     // Id del usuario en edición (null = modo creación de un nuevo usuario).
     const [editandoId, setEditandoId] = useState<number | null>(null);
+    // Rol que tenía el usuario al abrirlo en edición: decide si está protegido.
+    const [editandoRol, setEditandoRol] = useState<string | null>(null);
+    // Gestor de Permisos (menú de usuario): sin Cambiar cuenta / Cambiar
+    // contraseña, el rol solo puede hacerlo con pacientes. Este modal abre
+    // cualquier usuario por su documento, así que aplica la misma regla que
+    // Gestión de Usuarios.
+    const menuUsuario = auth?.menuUsuario;
+    const edicionUsuarioBloqueada =
+        editandoId !== null &&
+        !permiteSobreUsuario(menuUsuario, 'perfil', editandoRol);
+    const pideContrasenaUsuario =
+        camposUsuario.contrasena &&
+        (editandoId === null ||
+            permiteSobreUsuario(
+                menuUsuario,
+                'password',
+                editandoRol,
+                nuevoUsuario.rol,
+            ));
+    const rolesModalUsuario =
+        editandoId !== null && menuUsuario?.perfil === false
+            ? rolesList.filter((r) => esRolPaciente(r.Nombre))
+            : rolesList;
     // Historial / Búsqueda
     const [histQuery, setHistQuery] = useState('');
     const [caso, setCaso] = useState<CasoDetalle | null>(null);
@@ -2671,6 +2694,7 @@ export default function RadicarSolicitud({
 
                 if (d.found && d.usuario) {
                     setEditandoId(d.usuario.id);
+                    setEditandoRol(d.usuario.rol ?? null);
                     setNuevoUsuario({
                         name: d.usuario.name ?? '',
                         rol: d.usuario.rol ?? 'paciente',
@@ -2725,6 +2749,12 @@ export default function RadicarSolicitud({
                         errs[k] = Array.isArray(v) ? String(v[0]) : String(v);
                     });
                     setUserErrors(errs);
+                    return null;
+                }
+                if (r.status === 403) {
+                    // Sin "Cambiar cuenta" para ese usuario (Gestor de
+                    // Permisos): se dice en el modal en lugar de no hacer nada.
+                    setUserErrors({ general: await mensajeDeError(r) });
                     return null;
                 }
                 if (!r.ok) {
@@ -8754,7 +8784,7 @@ export default function RadicarSolicitud({
                                     <SelectValue placeholder="Seleccione" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    {rolesList.map((r) => (
+                                    {rolesModalUsuario.map((r) => (
                                         <SelectItem key={r.id} value={r.Nombre}>
                                             {r.Nombre}
                                         </SelectItem>
@@ -8921,7 +8951,7 @@ export default function RadicarSolicitud({
                             </>
                         )}
 
-                        {camposUsuario.contrasena && (
+                        {pideContrasenaUsuario && (
                             <div className="grid gap-4 sm:grid-cols-2">
                                 <div className="grid gap-2">
                                     <Label>
@@ -8960,6 +8990,13 @@ export default function RadicarSolicitud({
                             </div>
                         )}
 
+                        {(edicionUsuarioBloqueada || userErrors.general) && (
+                            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
+                                {userErrors.general ??
+                                    'Tu rol no tiene permitido cambiar la cuenta de este usuario (Gestor de Permisos): solo puedes editar pacientes.'}
+                            </p>
+                        )}
+
                         <DialogFooter>
                             <Button
                                 type="button"
@@ -8970,7 +9007,7 @@ export default function RadicarSolicitud({
                             </Button>
                             <Button
                                 type="submit"
-                                disabled={creando}
+                                disabled={creando || edicionUsuarioBloqueada}
                                 className="gap-2 text-white"
                                 style={{ backgroundColor: BRAND }}
                             >

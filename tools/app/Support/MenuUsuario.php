@@ -123,4 +123,35 @@ class MenuUsuario
     {
         return self::permitidasPara($user)[$opcion] ?? true;
     }
+
+    /**
+     * ¿El usuario puede hacer la acción de esta opción sobre OTRO usuario,
+     * desde Gestión de Usuarios o la edición de usuarios de Radicar Solicitud?
+     *
+     * Con la opción deshabilitada para su rol solo puede hacerla sobre
+     * pacientes: su propia cuenta, las de su mismo rol, las de otros roles y
+     * los médicos quedan protegidas. Así lo que se le niega en su perfil no se
+     * le abre por otra vista. Pasar a un paciente a otro rol también cuenta
+     * como protegido: dejaría de ser paciente.
+     *
+     * - perfil (Cambiar cuenta): editar cualquier dato del usuario.
+     * - password (Cambiar contraseña): asignarle una contraseña nueva.
+     * - eliminar-cuenta (Eliminar cuenta): borrarlo.
+     */
+    public static function permiteSobre(?User $actor, User $objetivo, string $opcion, ?string $rolNuevo = null): bool
+    {
+        if (self::permite($actor, $opcion)) {
+            return true;
+        }
+
+        return self::esPaciente($objetivo->rol) && ($rolNuevo === null || self::esPaciente($rolNuevo));
+    }
+
+    /** Un usuario sin rol se muestra y se trata como paciente. */
+    public static function esPaciente(?string $rol): bool
+    {
+        $rol = strtolower(trim((string) $rol));
+
+        return $rol === '' || $rol === 'paciente';
+    }
 }

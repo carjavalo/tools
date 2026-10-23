@@ -23,6 +23,7 @@ use App\Models\TipoDocumento;
 use App\Models\TrazabilidadCaso;
 use App\Models\User;
 use App\Support\Almacenamiento;
+use App\Support\MenuUsuario;
 use App\Support\Sede;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -788,6 +789,24 @@ class RadicarCasoController extends Controller
      */
     public function actualizarPaciente(Request $request, User $user): JsonResponse
     {
+        // Como en Gestión de Usuarios: para un no-Super-Admin un Super Admin
+        // no existe, y sin "Cambiar cuenta" / "Cambiar contraseña" en el
+        // Gestor de Permisos (menú de usuario) esas acciones solo valen sobre
+        // pacientes. Este modal abre cualquier usuario por su documento.
+        abort_if(! ($request->user()?->isSuperAdmin() ?? false) && $user->isSuperAdmin(), 404);
+        $rolNuevo = $request->filled('rol') ? (string) $request->input('rol') : null;
+        abort_unless(
+            MenuUsuario::permiteSobre($request->user(), $user, MenuUsuario::PERFIL, $rolNuevo),
+            403,
+            'Tu rol no tiene permitido cambiar la cuenta de este usuario: solo puedes editar pacientes.',
+        );
+        if ($request->filled('password')
+            && ! MenuUsuario::permiteSobre($request->user(), $user, MenuUsuario::PASSWORD, $rolNuevo)) {
+            throw ValidationException::withMessages([
+                'password' => 'Tu rol no tiene permitido cambiar contraseñas: solo puedes hacerlo con pacientes.',
+            ]);
+        }
+
         // El rol actual del usuario editado siempre es válido (permite guardar
         // sin cambiar el rol aunque no esté entre los asignables).
         $rolRules = ['required', 'string', 'exists:roles,Nombre'];

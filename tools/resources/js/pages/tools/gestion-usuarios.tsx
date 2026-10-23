@@ -20,7 +20,7 @@ import {
 } from '@/components/ui/select';
 import { usePermisosVista } from '@/hooks/use-permisos-vista';
 import AppLayout from '@/layouts/app-layout';
-import { camposParaRol } from '@/lib/roles';
+import { camposParaRol, esRolPaciente, permiteSobreUsuario } from '@/lib/roles';
 import { dashboard } from '@/routes';
 import { type BreadcrumbItem, type SharedData } from '@/types';
 import { Head, router, useForm, usePage } from '@inertiajs/react';
@@ -178,6 +178,16 @@ export default function GestionUsuarios({
     const didMount = useRef(false);
     const [formOpen, setFormOpen] = useState(false);
     const [editingId, setEditingId] = useState<number | null>(null);
+    // Rol que tenía el usuario al abrir la edición: decide si está protegido.
+    const [editingRol, setEditingRol] = useState<string | null>(null);
+    // Gestor de Permisos (menú de usuario): sin Cambiar cuenta / Cambiar
+    // contraseña / Eliminar cuenta, el rol solo puede hacerlo con pacientes.
+    const menuUsuario = auth.menuUsuario;
+    const puedeEditarUsuario = (u: ManagedUser) =>
+        acciones.editar && permiteSobreUsuario(menuUsuario, 'perfil', u.rol);
+    const puedeBorrarUsuario = (u: ManagedUser) =>
+        acciones.borrar &&
+        permiteSobreUsuario(menuUsuario, 'eliminar-cuenta', u.rol);
     const [viewUser, setViewUser] = useState<ManagedUser | null>(null);
     const [deleteTarget, setDeleteTarget] = useState<ManagedUser | null>(null);
     const [deleting, setDeleting] = useState(false);
@@ -352,6 +362,7 @@ export default function GestionUsuarios({
             password_confirmation: '',
         });
         setEditingId(u.id);
+        setEditingRol(u.rol);
         setFormOpen(true);
     };
 
@@ -384,6 +395,22 @@ export default function GestionUsuarios({
     const isEditing = editingId !== null;
     // Campos que se piden según el rol elegido en el formulario.
     const campos = camposParaRol(form.data.rol);
+    // Al editar sin "Cambiar contraseña" (o pasando a un paciente a otro rol)
+    // no se ofrece la contraseña; sin "Cambiar cuenta" solo se editan
+    // pacientes, así que el rol no puede cambiarse a otro que no lo sea.
+    const pideContrasena =
+        campos.contrasena &&
+        (!isEditing ||
+            permiteSobreUsuario(
+                menuUsuario,
+                'password',
+                editingRol,
+                form.data.rol,
+            ));
+    const rolesFormulario =
+        isEditing && menuUsuario?.perfil === false
+            ? rolesList.filter((r) => esRolPaciente(r.Nombre))
+            : rolesList;
 
     return (
         <AppLayout breadcrumbs={breadcrumbs}>
@@ -645,7 +672,7 @@ export default function GestionUsuarios({
                                                 >
                                                     <Eye className="size-4" />
                                                 </Button>
-                                                {acciones.editar && (
+                                                {puedeEditarUsuario(u) && (
                                                     <Button
                                                         variant="ghost"
                                                         size="icon"
@@ -658,7 +685,7 @@ export default function GestionUsuarios({
                                                         <Pencil className="size-4" />
                                                     </Button>
                                                 )}
-                                                {acciones.borrar && (
+                                                {puedeBorrarUsuario(u) && (
                                                     <Button
                                                         variant="ghost"
                                                         size="icon"
@@ -772,7 +799,7 @@ export default function GestionUsuarios({
                                     <SelectValue placeholder="Seleccione un rol" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    {rolesList.map((r) => (
+                                    {rolesFormulario.map((r) => (
                                         <SelectItem key={r.id} value={r.Nombre}>
                                             {r.Nombre}
                                         </SelectItem>
@@ -949,7 +976,7 @@ export default function GestionUsuarios({
                                 <InputError message={form.errors.Eps} />
                             </div>
                         )}
-                        {campos.contrasena && (
+                        {pideContrasena && (
                             <>
                                 <div className="grid gap-2">
                                     <Label htmlFor="password">
@@ -1112,7 +1139,7 @@ export default function GestionUsuarios({
                         >
                             Cerrar
                         </Button>
-                        {viewUser && acciones.editar && (
+                        {viewUser && puedeEditarUsuario(viewUser) && (
                             <Button
                                 onClick={() => {
                                     const u = viewUser;

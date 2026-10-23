@@ -33,6 +33,35 @@ export function esRolAdministrativo(rol: string | null | undefined): boolean {
     );
 }
 
+/** Un usuario sin rol se muestra y se trata como paciente. */
+export function esRolPaciente(rol: string | null | undefined): boolean {
+    const r = (rol ?? '').trim().toLowerCase();
+    return r === '' || r === ROL_PACIENTE;
+}
+
+/**
+ * ¿La opción del menú de usuario (Gestor de Permisos) permite la acción sobre
+ * otro usuario? Con la opción deshabilitada para el rol, solo sobre
+ * pacientes; pasar a un paciente a otro rol también cuenta como protegido.
+ * Es la misma regla que aplica el servidor (MenuUsuario::permiteSobre).
+ *
+ * - 'perfil' (Cambiar cuenta): editar cualquier dato del usuario.
+ * - 'password' (Cambiar contraseña): asignarle una contraseña nueva.
+ * - 'eliminar-cuenta' (Eliminar cuenta): borrarlo.
+ */
+export function permiteSobreUsuario(
+    menuUsuario: Record<string, boolean> | undefined,
+    opcion: 'perfil' | 'password' | 'eliminar-cuenta',
+    rolActual: string | null | undefined,
+    rolNuevo?: string | null,
+): boolean {
+    if (menuUsuario?.[opcion] !== false) return true;
+    return (
+        esRolPaciente(rolActual) &&
+        (rolNuevo === undefined || esRolPaciente(rolNuevo))
+    );
+}
+
 /** Campos que el formulario pide para un rol dado. */
 export interface CamposUsuario {
     correo: boolean;

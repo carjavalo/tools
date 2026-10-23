@@ -8,6 +8,7 @@ use App\Models\Permiso;
 use App\Models\Role;
 use App\Models\TipoDocumento;
 use App\Models\User;
+use App\Support\MenuUsuario;
 use Closure;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
@@ -17,6 +18,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Password;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -333,6 +335,20 @@ class UserManagementController extends Controller
         // Para un no-Super-Admin, un usuario Super Admin no existe: 404.
         abort_if(! $viewerIsSuperAdmin && $user->isSuperAdmin(), 404);
 
+        // Gestor de Permisos (menú de usuario): sin "Cambiar cuenta" o sin
+        // "Cambiar contraseña", esa acción solo vale sobre pacientes.
+        $rolNuevo = $request->filled('rol') ? (string) $request->input('rol') : null;
+        if (! MenuUsuario::permiteSobre($request->user(), $user, MenuUsuario::PERFIL, $rolNuevo)) {
+            return to_route('tools.gestion-usuarios')
+                ->with('error', 'Tu rol no tiene permitido cambiar la cuenta de este usuario: solo puedes editar pacientes.');
+        }
+        if ($request->filled('password')
+            && ! MenuUsuario::permiteSobre($request->user(), $user, MenuUsuario::PASSWORD, $rolNuevo)) {
+            throw ValidationException::withMessages([
+                'password' => 'Tu rol no tiene permitido cambiar contraseñas: solo puedes hacerlo con pacientes.',
+            ]);
+        }
+
         // El rol actual del usuario editado siempre es válido (permite guardar
         // sin cambiar el rol aunque no esté entre los asignables).
         $asignables = Permiso::rolesAsignablesPara($request->user());
@@ -370,6 +386,12 @@ class UserManagementController extends Controller
         if ($request->user()->id === $user->id) {
             return to_route('tools.gestion-usuarios')
                 ->with('error', 'No puedes eliminar tu propia cuenta.');
+        }
+
+        // Sin "Eliminar cuenta" en el Gestor de Permisos, solo pacientes.
+        if (! MenuUsuario::permiteSobre($request->user(), $user, MenuUsuario::ELIMINAR)) {
+            return to_route('tools.gestion-usuarios')
+                ->with('error', 'Tu rol no tiene permitido eliminar cuentas: solo puedes eliminar pacientes.');
         }
 
         $user->delete();
