@@ -45,6 +45,9 @@ class RadicarCaso extends Model
         // 'ambulatorio' u 'hospitalario': lo fija el servidor según la
         // pestaña desde la que se radica, nunca la petición directamente.
         'ambito',
+        // Consecutivo propio de los hospitalarios (1, 2, 3…); se muestra como
+        // «1H». Lo asigna el servidor solo al radicar desde Radicado Hospitalario.
+        'consec_hosp',
         'Codesp',
         'codsubesp',
         'codMed',

@@ -8,6 +8,7 @@ use App\Models\Permiso;
 use App\Models\Role;
 use App\Models\TipoDocumento;
 use App\Models\User;
+use App\Support\EmparejadorEps;
 use App\Support\MenuUsuario;
 use Closure;
 use Illuminate\Database\Eloquent\Builder;
@@ -138,8 +139,13 @@ class UserManagementController extends Controller
      *    nombre o sin documento.
      *  - Nombre: 1.ª palabra → Apellido1, 2.ª → apellido2, el resto → name.
      *  - rol paciente, email {documento}@notiene.com y contraseña = documento.
+     *  - Responsable → la EPS de la tabla eps que le corresponde aunque esté
+     *    escrita distinto (EmparejadorEps): la radicación busca la EPS por su
+     *    nombre exacto. Sin coincidencia se guarda el texto del archivo.
      *  - El paciente cuyo documento (o correo) ya está en users se ignora, así
-     *    que el censo se puede cargar a diario sin duplicar a nadie.
+     *    que el censo se puede cargar a diario sin duplicar a nadie. Solo se le
+     *    corrige la EPS cuando la que tiene no está en la tabla y el archivo
+     *    trae una que sí: así quedan vinculados los cargados antes.
      */
     public function importarCenso(Request $request): JsonResponse
     {
@@ -151,7 +157,15 @@ class UserManagementController extends Controller
             'filas.*.responsable' => ['nullable', 'string', 'max:1000'],
         ]);
 
-        $resumen = ['creados' => 0, 'existentes' => 0, 'omitidos' => 0];
+        $resumen = [
+            'creados' => 0,
+            'existentes' => 0,
+            'omitidos' => 0,
+            // Pacientes ya registrados a los que se les vinculó la EPS.
+            'epsCorregidas' => 0,
+            // Responsable sin EPS equivalente en la tabla.
+            'epsSinVincular' => 0,
+        ];
 
         // Resultado de cada fila, en el mismo orden del lote: con él el
         // navegador exporta a Excel cuáles se crearon, cuáles ya existían y
@@ -203,7 +217,8 @@ class UserManagementController extends Controller
             $existentes = User::query()
                 ->whereIn(DB::raw('TRIM(Numero_D)'), $documentos)
                 ->orWhereIn(DB::raw('LOWER(email)'), $correos)
-                ->get(['id', 'name', 'Apellido1', 'apellido2', 'rol', 'Numero_D', 'email']);
+                ->get(['id', 'name', 'Apellido1', 'apellido2', 'rol', 'Numero_D', 'email', 'Eps']);
+            $emparejador = new EmparejadorEps;
             $porDocumento = $existentes->keyBy(fn (User $u) => trim((string) $u->Numero_D));
             $porCorreo = $existentes->keyBy(fn (User $u) => mb_strtolower((string) $u->email));
 
@@ -230,9 +245,25 @@ class UserManagementController extends Controller
                     $motivo = 'Correo ya registrado';
                 }
 
+                $epsTabla = $emparejador->buscar($p['eps']);
+
                 if ($existente) {
                     $resumen['existentes']++;
-                    $resultados[$p['indice']] = ['estado' => 'existente', 'motivo' => $motivo, ...$registradoComo($existente)];
+                    $resultado = ['estado' => 'existente', 'motivo' => $motivo, ...$registradoComo($existente)];
+
+                    // Solo la EPS, solo de un paciente con ese documento y
+                    // solo si la que tiene no está en la tabla: nunca se pisa
+                    // una EPS ya vinculada ni se toca a otro tipo de usuario.
+                    if ($motivo === 'Documento ya registrado'
+                        && MenuUsuario::esPaciente($existente->rol)
+                        && $epsTabla !== null
+                        && ! $emparejador->esDeLaTabla($existente->Eps)) {
+                        $resultado['epsCorregida'] = ['anterior' => $existente->Eps, 'nueva' => $epsTabla];
+                        $existente->update(['Eps' => $epsTabla]);
+                        $resumen['epsCorregidas']++;
+                    }
+
+                    $resultados[$p['indice']] = $resultado;
 
                     continue;
                 }
@@ -245,15 +276,23 @@ class UserManagementController extends Controller
                     'apellido2' => $apellido2 !== null ? mb_substr($apellido2, 0, 50) : null,
                     'tipo_Docu' => $p['tipo'] !== '' ? mb_substr($p['tipo'], 0, 120) : null,
                     'Numero_D' => $documento,
-                    'Eps' => $p['eps'] !== '' ? mb_substr($p['eps'], 0, 120) : null,
+                    // La EPS de la tabla; sin equivalente, el texto del archivo.
+                    'Eps' => $epsTabla ?? ($p['eps'] !== '' ? mb_substr($p['eps'], 0, 120) : null),
                     'rol' => 'paciente',
                     'email' => $email,
                     'password' => Hash::make($documento, ['rounds' => $costo]),
                 ]);
                 $resumen['creados']++;
+                $sinVincular = $epsTabla === null && $p['eps'] !== '';
+                if ($sinVincular) {
+                    $resumen['epsSinVincular']++;
+                }
                 $resultados[$p['indice']] = [
                     'estado' => 'creado',
                     'usuario' => $usuario->only(['id', 'Apellido1', 'apellido2', 'name', 'tipo_Docu', 'Numero_D', 'Eps', 'email']),
+                    // Responsable tal como venía y si quedó vinculado a la tabla.
+                    'responsable' => $p['eps'],
+                    'epsVinculada' => ! $sinVincular,
                 ];
             }
         }

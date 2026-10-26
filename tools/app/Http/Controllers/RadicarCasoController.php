@@ -962,6 +962,12 @@ class RadicarCasoController extends Controller
     {
         $this->normalizarCopago($request);
 
+        // Radicado Hospitalario cambia algunas reglas respecto de Nueva
+        // Radicación: el servicio lo asigna el servidor (siempre CONTRATACION),
+        // y Fecha Autorización, Fecha Vencimiento Autorización y los
+        // procedimientos no son obligatorios en esa pestaña.
+        $esHospitalario = $request->input('pestana') === 'hospitalario';
+
         // Todos los campos diligenciables de la vista de Nueva Radicación son
         // obligatorios para cualquier rol. Subespecialidad, Motivo, Estado
         // Secundario y Fecha Recibido no se exigen porque no
@@ -969,14 +975,17 @@ class RadicarCasoController extends Controller
         $data = $request->validate([
             // Servicio que tramita la radicación: uno activo de la sede en la
             // que queda el caso. Uno de la otra sede o desactivado se rechaza,
-            // aunque llegue en la petición.
-            'codservicio' => [
-                'required',
-                'integer',
-                Rule::exists('serasignado', 'codigo')
-                    ->where('sede', Sede::activa() ?? Sede::CALI)
-                    ->where('estado', true),
-            ],
+            // aunque llegue en la petición. En Radicado Hospitalario no se
+            // valida: lo asigna el servidor (CONTRATACION).
+            'codservicio' => $esHospitalario
+                ? ['nullable']
+                : [
+                    'required',
+                    'integer',
+                    Rule::exists('serasignado', 'codigo')
+                        ->where('sede', Sede::activa() ?? Sede::CALI)
+                        ->where('estado', true),
+                ],
             'Codesp' => ['required', 'string', 'max:10'],
             'codMed' => ['required', 'string', 'max:20'],
             // El paciente debe existir: de él se llenan tipo de documento,
@@ -1006,8 +1015,13 @@ class RadicarCasoController extends Controller
             'codestsecundario' => ['nullable', 'string', 'max:5'],
             // Fecha Recibido tampoco está en la vista.
             'fecreci' => ['nullable', 'date', 'date_format:Y-m-d'],
-            'fecAutorizacion' => ['required', 'date', 'date_format:Y-m-d'],
-            'fechavenautorizacion' => ['required', 'date', 'date_format:Y-m-d'],
+            // En Radicado Hospitalario estas dos fechas no se piden.
+            'fecAutorizacion' => $esHospitalario
+                ? ['nullable', 'date', 'date_format:Y-m-d']
+                : ['required', 'date', 'date_format:Y-m-d'],
+            'fechavenautorizacion' => $esHospitalario
+                ? ['nullable', 'date', 'date_format:Y-m-d']
+                : ['required', 'date', 'date_format:Y-m-d'],
             // Subespecialidad y Motivo se excluyeron de la vista: quedan opcionales.
             'codsubesp' => ['nullable', 'string', 'max:10'],
             'estcod' => ['nullable', 'string', 'max:5'],
@@ -1016,10 +1030,16 @@ class RadicarCasoController extends Controller
             // acota al mismo tramo que las siguientes, para que la columna no
             // quede llena desde la radicación y sin espacio para los anexos.
             'ObservacionCCX' => ['required', 'string', 'max:10000'],
-            // Debe registrarse al menos un procedimiento (CUPS) con su autorización.
-            'procedimientos' => ['required', 'array', 'min:1'],
-            'procedimientos.*.cusv_id' => ['required', 'integer', 'exists:cups,id'],
-            'procedimientos.*.N_Autorizacion' => ['required', 'string', 'max:20'],
+            // Debe registrarse al menos un procedimiento (CUPS) con su
+            // autorización. En Radicado Hospitalario el bloque es opcional:
+            // puede ir vacío o con filas a medio diligenciar.
+            'procedimientos' => $esHospitalario ? ['nullable', 'array'] : ['required', 'array', 'min:1'],
+            'procedimientos.*.cusv_id' => $esHospitalario
+                ? ['nullable', 'integer', 'exists:cups,id']
+                : ['required', 'integer', 'exists:cups,id'],
+            'procedimientos.*.N_Autorizacion' => $esHospitalario
+                ? ['nullable', 'string', 'max:20']
+                : ['required', 'string', 'max:20'],
         ], [
             ...$this->mensajesPaquete(),
             'Ndocumento.exists' => 'El paciente no está registrado. Créelo con el botón + antes de radicar.',
@@ -1048,9 +1068,19 @@ class RadicarCasoController extends Controller
         // Ámbito según la pestaña desde la que se radica: Radicado
         // Hospitalario → hospitalario; Nueva Radicación → ambulatorio. El
         // middleware ya comprobó que el rol tiene permiso sobre esa pestaña.
-        $data['ambito'] = $request->input('pestana') === 'hospitalario'
+        $data['ambito'] = $esHospitalario
             ? RadicarCaso::HOSPITALARIO
             : RadicarCaso::AMBULATORIO;
+
+        // En Radicado Hospitalario el servicio asignado es siempre
+        // CONTRATACION: se toma el servicio de ese nombre en la sede activa si
+        // existe (nunca de la petición). Si la sede no lo tiene, queda sin
+        // servicio, como las radicaciones anteriores al campo.
+        if ($esHospitalario) {
+            $data['codservicio'] = Serasignado::where('estado', true)
+                ->whereRaw('UPPER(nombre) = ?', ['CONTRATACION'])
+                ->value('codigo');
+        }
 
         // Sin copago no se guarda ningún valor asociado.
         if (! $request->boolean('copago')) {
@@ -1071,7 +1101,18 @@ class RadicarCasoController extends Controller
         // El caso, sus procedimientos y su bitácora se guardan o fallan juntos:
         // una radicación sin su registro de creación quedaría fuera del informe.
         try {
-            $caso = DB::transaction(function () use ($data, $request) {
+            $caso = DB::transaction(function () use ($data, $request, $esHospitalario) {
+                // Consecutivo propio de los hospitalarios (1, 2, 3…), que la
+                // vista muestra como «1H». Se calcula dentro de la transacción
+                // para no repetir número si entran dos radicaciones a la vez;
+                // es global a las dos sedes, independiente del codrad.
+                if ($esHospitalario) {
+                    $data['consec_hosp'] = (int) RadicarCaso::withoutGlobalScope('sede')
+                        ->where('ambito', RadicarCaso::HOSPITALARIO)
+                        ->lockForUpdate()
+                        ->max('consec_hosp') + 1;
+                }
+
                 // La sede no viaja en la petición: el modelo pone la sede
                 // activa de la sesión, la de la opción por la que se ingresó.
                 $caso = RadicarCaso::create(Arr::except($data, ['procedimientos']));
@@ -1111,11 +1152,17 @@ class RadicarCasoController extends Controller
         // Ya existe el consecutivo: el PDF puede tomar su nombre definitivo.
         $this->completarNombrePaquete($caso);
 
+        // En las hospitalarias el número que ve el usuario es su consecutivo
+        // propio con la letra «H» (1H, 2H…); en las ambulatorias, el codrad.
+        $numeroCaso = $caso->ambito === RadicarCaso::HOSPITALARIO && $caso->consec_hosp
+            ? $caso->consec_hosp.'H'
+            : $caso->codrad;
+
         return to_route('tools.radicar-solicitud')
             ->with('success', 'Caso radicado correctamente en la '.Sede::nombre($caso->sede)
                 .', ámbito '.RadicarCaso::AMBITOS[$caso->ambito ?? RadicarCaso::AMBULATORIO]
-                .". Caso N° {$caso->codrad}.")
-            ->with('casoRadicado', $caso->codrad);
+                .". Caso N° {$numeroCaso}.")
+            ->with('casoRadicado', $numeroCaso);
     }
 
     /**

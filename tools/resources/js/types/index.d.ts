@@ -46,7 +46,7 @@ export interface SharedData {
         success?: string | null;
         error?: string | null;
         createdEspecialidad?: { id: number; Nombre: string } | null;
-        casoRadicado?: number | null;
+        casoRadicado?: number | string | null;
     };
     sidebarOpen: boolean;
     [key: string]: unknown;

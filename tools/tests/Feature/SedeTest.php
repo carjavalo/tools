@@ -502,6 +502,52 @@ test('Nueva Radicacion crea ambulatorias y Radicado Hospitalario crea hospitalar
     $this->assertDatabaseHas('RadicarCaso', ['Ndocumento' => '7303', 'ambito' => 'ambulatorio']);
 });
 
+test('Radicado Hospitalario numera con H y no exige servicio, fechas ni procedimientos', function () {
+    // La pestaña hospitalaria ya no pide Servicio Asignado, Fecha Autorización,
+    // Fecha Vencimiento Autorización ni el bloque de procedimientos.
+    $sinOpcionales = fn (string $doc) => collect(payloadRadicacion($doc, Sede::CALI))
+        ->except(['codservicio', 'fecAutorizacion', 'fechavenautorizacion', 'procedimientos'])
+        ->merge(['pestana' => 'hospitalario'])
+        ->all();
+
+    $this->actingAs(User::factory()->create())->withSession(['sede' => Sede::CALI])
+        ->post('/tools/radicar-solicitud', $sinOpcionales('7501'))
+        ->assertRedirect(route('tools.radicar-solicitud'))
+        ->assertSessionHas('success', fn (string $m) => str_contains($m, 'Caso N° 1H'));
+
+    $caso = RadicarCaso::withoutGlobalScope('sede')->where('Ndocumento', '7501')->firstOrFail();
+    expect($caso->ambito)->toBe('hospitalario')
+        ->and((int) $caso->consec_hosp)->toBe(1)
+        // No hay servicio CONTRATACION en esta sede: queda sin servicio.
+        ->and($caso->codservicio)->toBeNull()
+        ->and($caso->fecAutorizacion)->toBeNull()
+        ->and($caso->fechavenautorizacion)->toBeNull();
+
+    // El consecutivo hospitalario sigue: el segundo es 2H.
+    $this->actingAs(User::factory()->create())->withSession(['sede' => Sede::CALI])
+        ->post('/tools/radicar-solicitud', $sinOpcionales('7502'))
+        ->assertSessionHas('success', fn (string $m) => str_contains($m, 'Caso N° 2H'));
+
+    expect((int) RadicarCaso::withoutGlobalScope('sede')->where('Ndocumento', '7502')->value('consec_hosp'))->toBe(2);
+});
+
+test('Radicado Hospitalario asigna el servicio CONTRATACION cuando existe en la sede', function () {
+    $contratacion = Serasignado::withoutGlobalScope('sede')
+        ->forceCreate(['nombre' => 'CONTRATACION', 'estado' => true, 'sede' => Sede::CALI]);
+
+    $payload = collect(payloadRadicacion('7504', Sede::CALI))
+        ->except(['codservicio', 'fecAutorizacion', 'fechavenautorizacion', 'procedimientos'])
+        ->merge(['pestana' => 'hospitalario'])
+        ->all();
+
+    $this->actingAs(User::factory()->create())->withSession(['sede' => Sede::CALI])
+        ->post('/tools/radicar-solicitud', $payload)
+        ->assertRedirect(route('tools.radicar-solicitud'));
+
+    expect((int) RadicarCaso::withoutGlobalScope('sede')->where('Ndocumento', '7504')->value('codservicio'))
+        ->toBe((int) $contratacion->codigo);
+});
+
 test('en el historial las hospitalarias en Solicitud Cotizacion van de primeras y marcadas urgentes', function () {
     $admin = User::factory()->create();
     $solicitud = EstRadicado::create(['Nombre' => 'Solicitud Cotización', 'Estado' => true]);

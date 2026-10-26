@@ -182,3 +182,55 @@ test('el resultado del censo no revela a un Super Admin a quien no lo es', funct
         ->assertJsonPath('resultados.0.registrado', 'Usuario del sistema')
         ->assertJsonPath('resultados.0.rol', null);
 });
+
+test('el censo guarda la EPS de la tabla eps aunque el Responsable venga escrito distinto', function () {
+    $admin = User::factory()->create();
+    \App\Models\Eps::create(['Nombre' => 'EMSSANAR', 'Estado' => true]);
+    \App\Models\Eps::create(['Nombre' => 'COOSALUD', 'Estado' => true]);
+
+    $respuesta = $this->actingAs($admin)
+        ->postJson(URL_CENSO, ['filas' => [
+            filaCenso('PEREZ GOMEZ ANA', '5001', 'CC', 'EMSSANAR EPS SAS'),
+            filaCenso('RUIZ MORA LUIS', '5002', 'CC', 'COOSALUD ENTIDAD PROMOTORA DE'),
+            filaCenso('DIAZ SOTO EVA', '5003', 'CC', 'ADMINISTRADORA ADRES'),
+        ]])
+        ->assertOk()
+        ->assertJson(['creados' => 3, 'epsSinVincular' => 1]);
+
+    expect(User::where('Numero_D', '5001')->value('Eps'))->toBe('EMSSANAR')
+        ->and(User::where('Numero_D', '5002')->value('Eps'))->toBe('COOSALUD')
+        // Sin equivalente se conserva el texto del archivo.
+        ->and(User::where('Numero_D', '5003')->value('Eps'))->toBe('ADMINISTRADORA ADRES')
+        ->and($respuesta->json('resultados.0.epsVinculada'))->toBeTrue()
+        ->and($respuesta->json('resultados.0.responsable'))->toBe('EMSSANAR EPS SAS')
+        ->and($respuesta->json('resultados.2.epsVinculada'))->toBeFalse();
+});
+
+test('a los pacientes ya registrados solo se les vincula la EPS si la que tienen no está en la tabla', function () {
+    $admin = User::factory()->create();
+    \App\Models\Eps::create(['Nombre' => 'EMSSANAR', 'Estado' => true]);
+    \App\Models\Eps::create(['Nombre' => 'NUEVA EPS', 'Estado' => true]);
+
+    // Cargado antes con el texto del censo: queda vinculado.
+    $sinVincular = User::factory()->create(['rol' => 'paciente', 'Numero_D' => '6001', 'name' => 'Ana', 'Eps' => 'EMSSANAR EPS SAS']);
+    // Ya tiene una EPS de la tabla: no se toca aunque el censo diga otra.
+    $vinculado = User::factory()->create(['rol' => 'paciente', 'Numero_D' => '6002', 'name' => 'Luis', 'Eps' => 'NUEVA EPS']);
+    // No es paciente: no se toca.
+    $operador = User::factory()->create(['rol' => 'Operador', 'Numero_D' => '6003', 'Eps' => null]);
+
+    $respuesta = $this->actingAs($admin)
+        ->postJson(URL_CENSO, ['filas' => [
+            filaCenso('PEREZ GOMEZ ANA', '6001', 'CC', 'EMSSANAR EPS SAS'),
+            filaCenso('RUIZ MORA LUIS', '6002', 'CC', 'EMSSANAR EPS SAS'),
+            filaCenso('DIAZ SOTO EVA', '6003', 'CC', 'EMSSANAR EPS SAS'),
+        ]])
+        ->assertOk()
+        ->assertJson(['creados' => 0, 'existentes' => 3, 'epsCorregidas' => 1]);
+
+    expect($sinVincular->refresh()->Eps)->toBe('EMSSANAR')
+        ->and($sinVincular->name)->toBe('Ana')
+        ->and($vinculado->refresh()->Eps)->toBe('NUEVA EPS')
+        ->and($operador->refresh()->Eps)->toBeNull()
+        ->and($respuesta->json('resultados.0.epsCorregida'))->toBe(['anterior' => 'EMSSANAR EPS SAS', 'nueva' => 'EMSSANAR'])
+        ->and($respuesta->json('resultados.1'))->not->toHaveKey('epsCorregida');
+});

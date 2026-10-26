@@ -1873,7 +1873,7 @@ export default function RadicarSolicitud({
     const [paciente, setPaciente] = useState<PacienteInfo | null>(null);
     const [acuerdos, setAcuerdos] = useState<CupsOpt[]>([]);
     const [convenios, setConvenios] = useState<ConvenioOpt[]>([]);
-    const [casoCreado, setCasoCreado] = useState<number | null>(null);
+    const [casoCreado, setCasoCreado] = useState<number | string | null>(null);
     const [crearOpen, setCrearOpen] = useState(false);
     // Origen del modal: 'paciente' (botón + de Identificación) o 'medico'
     // (botón + de Médico). Define qué se hace con el usuario ya creado.
@@ -5077,44 +5077,63 @@ export default function RadicarSolicitud({
                                         Solo los activos de la sede por la
                                         que se ingresó (Gestión Servicios). */}
                                         <Field label="Servicio Asignado *">
-                                            <Select
-                                                value={form.data.codservicio}
-                                                onValueChange={(v) =>
-                                                    form.setData(
-                                                        'codservicio',
-                                                        v,
-                                                    )
-                                                }
-                                            >
-                                                <SelectTrigger>
-                                                    <SelectValue placeholder="Seleccione…" />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    {servicios.length === 0 && (
-                                                        <div className="px-2 py-1.5 text-xs text-muted-foreground">
-                                                            No hay servicios
-                                                            activos en esta
-                                                            sede. Créelos en
-                                                            Gestión Servicios.
-                                                        </div>
-                                                    )}
-                                                    {servicios.map((s) => (
-                                                        <SelectItem
-                                                            key={s.codigo}
-                                                            value={String(
-                                                                s.codigo,
-                                                            )}
-                                                        >
-                                                            {s.nombre}
-                                                        </SelectItem>
-                                                    ))}
-                                                </SelectContent>
-                                            </Select>
-                                            {form.errors.codservicio && (
-                                                <span className="text-xs text-red-600">
-                                                    {form.errors.codservicio}
-                                                </span>
+                                            {tab === 'hospitalario' ? (
+                                                // Radicado Hospitalario: el
+                                                // servicio es siempre
+                                                // CONTRATACION y no se edita.
+                                                <Input
+                                                    value="CONTRATACION"
+                                                    readOnly
+                                                    className="bg-muted/40"
+                                                />
+                                            ) : (
+                                                <Select
+                                                    value={
+                                                        form.data.codservicio
+                                                    }
+                                                    onValueChange={(v) =>
+                                                        form.setData(
+                                                            'codservicio',
+                                                            v,
+                                                        )
+                                                    }
+                                                >
+                                                    <SelectTrigger>
+                                                        <SelectValue placeholder="Seleccione…" />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        {servicios.length ===
+                                                            0 && (
+                                                            <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                                                                No hay servicios
+                                                                activos en esta
+                                                                sede. Créelos en
+                                                                Gestión
+                                                                Servicios.
+                                                            </div>
+                                                        )}
+                                                        {servicios.map((s) => (
+                                                            <SelectItem
+                                                                key={s.codigo}
+                                                                value={String(
+                                                                    s.codigo,
+                                                                )}
+                                                            >
+                                                                {s.nombre}
+                                                            </SelectItem>
+                                                        ))}
+                                                    </SelectContent>
+                                                </Select>
                                             )}
+                                            {tab !== 'hospitalario' &&
+                                                form.errors.codservicio && (
+                                                    <span className="text-xs text-red-600">
+                                                        {
+                                                            form.errors
+                                                                .codservicio
+                                                        }
+                                                    </span>
+                                                )}
                                         </Field>
                                     </div>
 
@@ -5231,109 +5250,127 @@ export default function RadicarSolicitud({
                                         diligencia en esta vista: la registra
                                         otro rol desde el seguimiento del caso.
                                     */}
-                                        <Field label="Fecha Autorización *">
-                                            <Input
-                                                type="date"
-                                                value={
-                                                    form.data.fecAutorizacion
-                                                }
-                                                onChange={(e) =>
-                                                    form.setData(
-                                                        'fecAutorizacion',
-                                                        e.target.value,
-                                                    )
-                                                }
-                                            />
-                                            {form.errors.fecAutorizacion && (
-                                                <span className="text-xs text-red-600">
-                                                    {
-                                                        form.errors
-                                                            .fecAutorizacion
-                                                    }
-                                                </span>
-                                            )}
-                                        </Field>
-                                        <Field label="Fecha Vencimiento Autorización *">
-                                            <Input
-                                                type="date"
-                                                value={
-                                                    form.data
-                                                        .fechavenautorizacion
-                                                }
-                                                onChange={(e) =>
-                                                    form.setData(
-                                                        'fechavenautorizacion',
-                                                        e.target.value,
-                                                    )
-                                                }
-                                            />
-                                            {form.errors
-                                                .fechavenautorizacion && (
-                                                <span className="text-xs text-red-600">
-                                                    {
-                                                        form.errors
-                                                            .fechavenautorizacion
-                                                    }
-                                                </span>
-                                            )}
-                                        </Field>
-
-                                        <Field label="Copago">
-                                            <div className="flex items-center gap-3">
-                                                <label className="flex h-9 cursor-pointer items-center gap-2 text-sm">
-                                                    <Checkbox
-                                                        checked={
-                                                            form.data.copago
-                                                        }
-                                                        onCheckedChange={(
-                                                            v,
-                                                        ) => {
-                                                            const marcado =
-                                                                v === true;
-                                                            form.setData(
-                                                                'copago',
-                                                                marcado,
-                                                            );
-                                                            // Al desmarcar no queda
-                                                            // un valor colgado.
-                                                            if (!marcado) {
-                                                                form.setData(
-                                                                    'valor_copago',
-                                                                    '',
-                                                                );
-                                                            }
-                                                        }}
-                                                    />
-                                                    <span className="text-foreground">
-                                                        Aplica
-                                                    </span>
-                                                </label>
-                                                {form.data.copago && (
+                                        {/* Fecha Autorización, Fecha
+                                        Vencimiento Autorización y Copago no se
+                                        diligencian en Radicado Hospitalario. */}
+                                        {tab !== 'hospitalario' && (
+                                            <>
+                                                <Field label="Fecha Autorización *">
                                                     <Input
-                                                        type="number"
-                                                        min="0"
-                                                        step="0.01"
+                                                        type="date"
                                                         value={
                                                             form.data
-                                                                .valor_copago
+                                                                .fecAutorizacion
                                                         }
                                                         onChange={(e) =>
                                                             form.setData(
-                                                                'valor_copago',
+                                                                'fecAutorizacion',
                                                                 e.target.value,
                                                             )
                                                         }
-                                                        placeholder="Valor"
-                                                        className="flex-1"
                                                     />
-                                                )}
-                                            </div>
-                                            {form.errors.valor_copago && (
-                                                <span className="text-xs text-red-600">
-                                                    {form.errors.valor_copago}
-                                                </span>
-                                            )}
-                                        </Field>
+                                                    {form.errors
+                                                        .fecAutorizacion && (
+                                                        <span className="text-xs text-red-600">
+                                                            {
+                                                                form.errors
+                                                                    .fecAutorizacion
+                                                            }
+                                                        </span>
+                                                    )}
+                                                </Field>
+                                                <Field label="Fecha Vencimiento Autorización *">
+                                                    <Input
+                                                        type="date"
+                                                        value={
+                                                            form.data
+                                                                .fechavenautorizacion
+                                                        }
+                                                        onChange={(e) =>
+                                                            form.setData(
+                                                                'fechavenautorizacion',
+                                                                e.target.value,
+                                                            )
+                                                        }
+                                                    />
+                                                    {form.errors
+                                                        .fechavenautorizacion && (
+                                                        <span className="text-xs text-red-600">
+                                                            {
+                                                                form.errors
+                                                                    .fechavenautorizacion
+                                                            }
+                                                        </span>
+                                                    )}
+                                                </Field>
+
+                                                <Field label="Copago">
+                                                    <div className="flex items-center gap-3">
+                                                        <label className="flex h-9 cursor-pointer items-center gap-2 text-sm">
+                                                            <Checkbox
+                                                                checked={
+                                                                    form.data
+                                                                        .copago
+                                                                }
+                                                                onCheckedChange={(
+                                                                    v,
+                                                                ) => {
+                                                                    const marcado =
+                                                                        v ===
+                                                                        true;
+                                                                    form.setData(
+                                                                        'copago',
+                                                                        marcado,
+                                                                    );
+                                                                    // Al desmarcar no queda
+                                                                    // un valor colgado.
+                                                                    if (
+                                                                        !marcado
+                                                                    ) {
+                                                                        form.setData(
+                                                                            'valor_copago',
+                                                                            '',
+                                                                        );
+                                                                    }
+                                                                }}
+                                                            />
+                                                            <span className="text-foreground">
+                                                                Aplica
+                                                            </span>
+                                                        </label>
+                                                        {form.data.copago && (
+                                                            <Input
+                                                                type="number"
+                                                                min="0"
+                                                                step="0.01"
+                                                                value={
+                                                                    form.data
+                                                                        .valor_copago
+                                                                }
+                                                                onChange={(e) =>
+                                                                    form.setData(
+                                                                        'valor_copago',
+                                                                        e.target
+                                                                            .value,
+                                                                    )
+                                                                }
+                                                                placeholder="Valor"
+                                                                className="flex-1"
+                                                            />
+                                                        )}
+                                                    </div>
+                                                    {form.errors
+                                                        .valor_copago && (
+                                                        <span className="text-xs text-red-600">
+                                                            {
+                                                                form.errors
+                                                                    .valor_copago
+                                                            }
+                                                        </span>
+                                                    )}
+                                                </Field>
+                                            </>
+                                        )}
 
                                         <Field
                                             label={`Paquete (PDF, máx. ${paqueteMaxMb} MB)`}
@@ -5388,6 +5425,9 @@ export default function RadicarSolicitud({
                                             tabla de CUPS.
                                             {paciente?.eps
                                                 ? ` EPS del paciente: ${paciente.eps}.`
+                                                : ''}
+                                            {tab === 'hospitalario'
+                                                ? ' En Radicado Hospitalario este bloque es opcional: puede dejarlo vacío o diligenciar solo algunas filas.'
                                                 : ''}
                                         </div>
                                         <div className="grid gap-3">
@@ -5482,7 +5522,12 @@ export default function RadicarSolicitud({
                                                                     maxLength={
                                                                         20
                                                                     }
-                                                                    placeholder="N° Autorización EPS *"
+                                                                    placeholder={
+                                                                        tab ===
+                                                                        'hospitalario'
+                                                                            ? 'N° Autorización EPS'
+                                                                            : 'N° Autorización EPS *'
+                                                                    }
                                                                     className="lg:w-48"
                                                                 />
                                                                 <Button

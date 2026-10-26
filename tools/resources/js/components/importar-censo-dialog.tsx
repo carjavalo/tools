@@ -57,12 +57,19 @@ type ResultadoFila =
               Eps: string | null;
               email: string;
           };
+          // Responsable tal como venía en el archivo y si se encontró su EPS
+          // en la tabla eps (si no, Eps guarda ese mismo texto).
+          responsable?: string;
+          epsVinculada?: boolean;
       }
     | {
           estado: 'existente';
           motivo: string;
           registrado?: string;
           rol?: string | null;
+          // El paciente ya existía con una EPS que no está en la tabla y se le
+          // vinculó la del archivo.
+          epsCorregida?: { anterior: string | null; nueva: string };
       }
     | { estado: 'omitido'; motivo: string };
 
@@ -71,6 +78,8 @@ type FilaResultado = FilaLeida & { resultado: ResultadoFila };
 interface Resumen {
     hojas: { nombre: string; filas: number }[];
     hojasFaltantes: string[];
+    // Arreglos hechos al leer el archivo (p. ej. un encabezado cambiado).
+    avisos: string[];
     repetidos: FilaRepetida[];
     resultados: FilaResultado[];
 }
@@ -109,6 +118,8 @@ async function leerCenso(archivo: File) {
     const repetidos: FilaRepetida[] = [];
     const hojas: Resumen['hojas'] = [];
     const hojasFaltantes: string[] = [];
+    // Arreglos que se hicieron al leer el archivo (encabezados cambiados).
+    const avisos: string[] = [];
     // Documento → hoja en la que salió por primera vez.
     const vistos = new Map<string, string>();
 
@@ -127,26 +138,42 @@ async function leerCenso(archivo: File) {
         );
 
         // El encabezado suele ser la primera fila; se busca en las primeras
-        // por si el archivo trae un título encima.
+        // por si el archivo trae un título encima. Se reconoce por Documento:
+        // el de Nombre a veces llega cambiado (p. ej. "Dia").
         const iEncabezado = datos
             .slice(0, 15)
-            .findIndex(
-                (r) =>
-                    r.some((c) => normalizar(c) === 'nombre') &&
-                    r.some((c) => normalizar(c) === 'documento'),
-            );
+            .findIndex((r) => r.some((c) => normalizar(c) === 'documento'));
         if (iEncabezado < 0) {
             throw new Error(
-                `La hoja "${nombreHoja}" no tiene las columnas Nombre y Documento.`,
+                `La hoja "${nombreHoja}" no tiene la columna Documento.`,
             );
         }
 
         const encabezado = datos[iEncabezado].map(normalizar);
         const col = (titulo: string) => encabezado.indexOf(titulo);
-        const iNombre = col('nombre');
         const iIdent = col('identificacion');
         const iDoc = col('documento');
         const iResp = col('responsable');
+        let iNombre = col('nombre');
+        if (iNombre < 0) {
+            iNombre = columnaDeNombres(
+                encabezado,
+                datos.slice(iEncabezado + 1),
+            );
+            if (iNombre < 0) {
+                throw new Error(
+                    `La hoja "${nombreHoja}" no tiene la columna Nombre (ni otra con nombres de pacientes). Encabezados: ${datos[
+                        iEncabezado
+                    ]
+                        .filter((c) => celda(c) !== '')
+                        .map(celda)
+                        .join(', ')}.`,
+                );
+            }
+            avisos.push(
+                `En la hoja "${nombreHoja}" la columna de nombres tenía el encabezado "${celda(datos[iEncabezado][iNombre]) || '(vacío)'}" en lugar de "Nombre"; se usó por su contenido.`,
+            );
+        }
 
         let n = 0;
         for (const r of datos.slice(iEncabezado + 1)) {
@@ -178,7 +205,57 @@ async function leerCenso(archivo: File) {
         hojas.push({ nombre: nombreHoja, filas: n });
     }
 
-    return { filas, repetidos, hojas, hojasFaltantes };
+    return { filas, repetidos, hojas, hojasFaltantes, avisos };
+}
+
+/** Columnas propias del censo: ninguna de ellas trae el nombre del paciente. */
+const COLUMNAS_CONOCIDAS = new Set([
+    'ingreso',
+    'identificacion',
+    'documento',
+    'habitacion actual',
+    'habitacion anterior',
+    'fecha ing',
+    'fecha egreso',
+    'servicio actual',
+    'servicio anterior',
+    'dias estancia',
+    'responsable',
+    'fecha actual',
+    'bitacora',
+    'fecha futura gestion',
+    'piso',
+    'cambio de servicio',
+    'usuario actual',
+    'autorizaciones',
+]);
+
+/**
+ * Columna de los nombres cuando su encabezado no dice "Nombre" (ha llegado
+ * como "Dia"): la primera, de izquierda a derecha, que no es otra columna
+ * conocida del censo y cuyas celdas parecen nombres de persona —solo letras,
+ * dos palabras o más—. -1 si ninguna lo parece.
+ */
+function columnaDeNombres(encabezado: string[], filas: unknown[][]): number {
+    const muestra = filas.slice(0, 50);
+    const pareceNombre = (v: unknown) =>
+        typeof v === 'string' &&
+        /^[\p{L}' .-]+$/u.test(v.trim()) &&
+        v.trim().split(/\s+/).length >= 2;
+    const columnas = Math.max(
+        encabezado.length,
+        ...muestra.map((r) => r.length),
+    );
+
+    for (let j = 0; j < columnas; j++) {
+        if (COLUMNAS_CONOCIDAS.has(encabezado[j] ?? '')) continue;
+        const llenas = muestra.filter((r) => celda(r[j]) !== '');
+        if (llenas.length === 0) continue;
+        const nombres = llenas.filter((r) => pareceNombre(r[j])).length;
+        if (nombres / llenas.length >= 0.8) return j;
+    }
+
+    return -1;
 }
 
 /** Columnas comunes: la fila tal como venía en el censo. */
@@ -204,7 +281,12 @@ function filasCreados(r: Resumen) {
                       Nombres: f.resultado.usuario.name,
                       'Tipo documento': f.resultado.usuario.tipo_Docu ?? '',
                       Documento: f.resultado.usuario.Numero_D,
+                      'Responsable (censo)': f.datos.responsable,
+                      // La EPS que quedó guardada: la de la tabla eps o, si
+                      // no hubo coincidencia, el texto del archivo.
                       EPS: f.resultado.usuario.Eps ?? '',
+                      'EPS vinculada a la tabla':
+                          f.resultado.epsVinculada === false ? 'No' : 'Sí',
                       Correo: f.resultado.usuario.email,
                   },
               ]
@@ -221,6 +303,37 @@ function filasExistentes(r: Resumen) {
                       Motivo: f.resultado.motivo,
                       'Registrado como': f.resultado.registrado ?? '',
                       'Rol registrado': f.resultado.rol ?? '',
+                      'EPS corregida': f.resultado.epsCorregida?.nueva ?? '',
+                  },
+              ]
+            : [],
+    );
+}
+
+/** Pacientes creados cuyo Responsable no tiene EPS equivalente en la tabla. */
+function filasEpsSinVincular(r: Resumen) {
+    return r.resultados.flatMap((f) =>
+        f.resultado.estado === 'creado' && f.resultado.epsVinculada === false
+            ? [
+                  {
+                      ...columnasCenso(f),
+                      'EPS guardada (texto del archivo)':
+                          f.resultado.usuario.Eps ?? '',
+                  },
+              ]
+            : [],
+    );
+}
+
+/** Pacientes que ya existían y a los que se les vinculó la EPS de la tabla. */
+function filasEpsCorregidas(r: Resumen) {
+    return r.resultados.flatMap((f) =>
+        f.resultado.estado === 'existente' && f.resultado.epsCorregida
+            ? [
+                  {
+                      ...columnasCenso(f),
+                      'EPS anterior': f.resultado.epsCorregida.anterior ?? '',
+                      'EPS nueva (tabla)': f.resultado.epsCorregida.nueva,
                   },
               ]
             : [],
@@ -266,6 +379,18 @@ const GRUPOS = [
         titulo: 'Sin datos válidos o HUV EVARISTO',
         hoja: 'Omitidos',
         filas: filasOmitidos,
+    },
+    {
+        clave: 'eps-sin-vincular',
+        titulo: 'Creados con EPS sin equivalente en la tabla',
+        hoja: 'EPS sin vincular',
+        filas: filasEpsSinVincular,
+    },
+    {
+        clave: 'eps-corregidas',
+        titulo: 'EPS vinculada a pacientes que ya existían',
+        hoja: 'EPS corregidas',
+        filas: filasEpsCorregidas,
     },
 ] as const;
 
@@ -342,6 +467,7 @@ export default function ImportarCensoDialog({
             const acumulado: Resumen = {
                 hojas: censo.hojas,
                 hojasFaltantes: censo.hojasFaltantes,
+                avisos: censo.avisos,
                 repetidos: censo.repetidos,
                 resultados: [],
             };
@@ -434,7 +560,10 @@ export default function ImportarCensoDialog({
                         Carga como pacientes a las personas de las hojas
                         Hospitalización, Urgencias, Extensión y Egresados. Los
                         que ya están registrados (mismo número de documento) se
-                        omiten.
+                        omiten. El Responsable se vincula a la EPS de la tabla
+                        aunque esté escrito distinto (tildes, puntuación, EPS,
+                        SAS…); a los pacientes ya registrados solo se les
+                        corrige la EPS si la que tienen no está en la tabla.
                     </DialogDescription>
                 </DialogHeader>
 
@@ -529,6 +658,19 @@ export default function ImportarCensoDialog({
                                     );
                                 })}
                             </ul>
+                            {resumen.avisos.length > 0 && (
+                                <ul className="grid gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
+                                    {resumen.avisos.map((a) => (
+                                        <li
+                                            key={a}
+                                            className="flex items-start gap-1.5"
+                                        >
+                                            <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
+                                            {a}
+                                        </li>
+                                    ))}
+                                </ul>
+                            )}
                             <div className="flex flex-wrap items-center justify-between gap-2 border-t border-black/10 pt-2 dark:border-white/15">
                                 <p className="text-xs opacity-80">
                                     Hojas leídas:{' '}
