@@ -5147,7 +5147,15 @@ export default function RadicarSolicitud({
                                                 className="bg-muted/40"
                                             />
                                         </Field>
-                                        <Field label="Convenio *">
+                                        {/* En Radicado Hospitalario el convenio
+                                            no es obligatorio. */}
+                                        <Field
+                                            label={
+                                                tab === 'hospitalario'
+                                                    ? 'Convenio'
+                                                    : 'Convenio *'
+                                            }
+                                        >
                                             <Select
                                                 value={form.data.convenio}
                                                 onValueChange={(v) =>
@@ -5596,7 +5604,15 @@ export default function RadicarSolicitud({
 
                                     {/* Observaciones */}
                                     <div className="grid gap-4">
-                                        <Field label="OB TFX *">
+                                        {/* En Radicado Hospitalario OB TFX no
+                                            es obligatorio. */}
+                                        <Field
+                                            label={
+                                                tab === 'hospitalario'
+                                                    ? 'OB TFX'
+                                                    : 'OB TFX *'
+                                            }
+                                        >
                                             <Input
                                                 value={form.data.ObservacionTFX}
                                                 onChange={(e) =>
@@ -9842,7 +9858,12 @@ export default function RadicarSolicitud({
                             ofrece también para poder conservarlo. */}
                         <div className="grid gap-4 sm:col-span-2 sm:grid-cols-[1fr_12rem]">
                             <div className="grid min-w-0 gap-2">
-                                <Label>Convenio *</Label>
+                                {/* Opcional en una radicación hospitalaria. */}
+                                <Label>
+                                    {caso?.ambito === 'hospitalario'
+                                        ? 'Convenio'
+                                        : 'Convenio *'}
+                                </Label>
                                 <Select
                                     value={modif.convenio}
                                     onValueChange={(v) =>

@@ -964,8 +964,8 @@ class RadicarCasoController extends Controller
 
         // Radicado Hospitalario cambia algunas reglas respecto de Nueva
         // Radicación: el servicio lo asigna el servidor (siempre CONTRATACION),
-        // y Fecha Autorización, Fecha Vencimiento Autorización y los
-        // procedimientos no son obligatorios en esa pestaña.
+        // y Fecha Autorización, Fecha Vencimiento Autorización, Convenio, OB
+        // TFX y los procedimientos no son obligatorios en esa pestaña.
         $esHospitalario = $request->input('pestana') === 'hospitalario';
 
         // Todos los campos diligenciables de la vista de Nueva Radicación son
@@ -991,7 +991,14 @@ class RadicarCasoController extends Controller
             // El paciente debe existir: de él se llenan tipo de documento,
             // nombre, teléfonos y EPS de la vista.
             'Ndocumento' => ['required', 'string', 'max:20', Rule::exists('users', 'Numero_D')],
-            'convenio' => ['required', 'string', 'max:25', Rule::exists('convenio', 'nit_Convenio')],
+            // En Radicado Hospitalario el convenio es opcional; si se escoge,
+            // debe existir igual que en Nueva Radicación.
+            'convenio' => [
+                $esHospitalario ? 'nullable' : 'required',
+                'string',
+                'max:25',
+                Rule::exists('convenio', 'nit_Convenio'),
+            ],
             // Copago: el valor solo se exige (y solo se guarda) si está marcado.
             'copago' => ['boolean'],
             'valor_copago' => [
@@ -1025,7 +1032,8 @@ class RadicarCasoController extends Controller
             // Subespecialidad y Motivo se excluyeron de la vista: quedan opcionales.
             'codsubesp' => ['nullable', 'string', 'max:10'],
             'estcod' => ['nullable', 'string', 'max:5'],
-            'ObservacionTFX' => ['required', 'string', 'max:65535'],
+            // En Radicado Hospitalario OB TFX es opcional.
+            'ObservacionTFX' => [$esHospitalario ? 'nullable' : 'required', 'string', 'max:65535'],
             // Observaciones CCX solo se anexa: esta es la primera entrada y se
             // acota al mismo tramo que las siguientes, para que la columna no
             // quede llena desde la radicación y sin espacio para los anexos.
@@ -1202,10 +1210,17 @@ class RadicarCasoController extends Controller
             // radicaciones anteriores al campo la completen. Mismas reglas que
             // al radicar (store()).
             'Codesp' => ['required', 'string', 'max:10'],
-            // Si no llega, el caso conserva el convenio que tenía.
+            // Si no llega, el caso conserva el convenio que tenía. En una
+            // radicación hospitalaria es opcional, como al radicarla.
             'convenio' => $conveniosValidos === []
                 ? ['sometimes', 'nullable', 'string', 'max:25', Rule::in([$caso->convenio])]
-                : ['sometimes', 'required', 'string', 'max:25', Rule::in($conveniosValidos)],
+                : [
+                    'sometimes',
+                    $caso->ambito === RadicarCaso::HOSPITALARIO ? 'nullable' : 'required',
+                    'string',
+                    'max:25',
+                    Rule::in($conveniosValidos),
+                ],
             'codMed' => ['required', 'string', 'max:20'],
             'estRad' => ['required', 'string', 'max:5'],
             // Copago: el valor solo se exige (y solo se guarda) si está marcado.

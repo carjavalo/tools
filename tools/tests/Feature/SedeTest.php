@@ -599,3 +599,33 @@ test('ver programados trae el ambito de cada radicacion', function () {
 
     expect(collect($rows)->firstWhere('codrad', $hosp->codrad)['ambito'])->toBe('hospitalario');
 });
+
+test('Radicado Hospitalario no exige Convenio ni OB TFX; Nueva Radicacion si', function () {
+    $sinConvenioNiTfx = fn (string $doc, string $pestana) => collect(payloadRadicacion($doc, Sede::CALI))
+        ->except(['convenio', 'ObservacionTFX'])
+        ->merge(['pestana' => $pestana])
+        ->all();
+    $admin = User::factory()->create();
+
+    $this->actingAs($admin)->withSession(['sede' => Sede::CALI])
+        ->post('/tools/radicar-solicitud', $sinConvenioNiTfx('7601', 'hospitalario'))
+        ->assertSessionHasNoErrors()
+        ->assertRedirect(route('tools.radicar-solicitud'));
+
+    $caso = RadicarCaso::withoutGlobalScope('sede')->where('Ndocumento', '7601')->firstOrFail();
+    expect($caso->ambito)->toBe('hospitalario')
+        ->and($caso->convenio)->toBeNull()
+        ->and((string) $caso->ObservacionTFX)->toBe('');
+
+    // Si se escoge un convenio, debe existir igual que en Nueva Radicación.
+    $this->actingAs($admin)->withSession(['sede' => Sede::CALI])
+        ->from('/tools/radicar-solicitud')
+        ->post('/tools/radicar-solicitud', [...$sinConvenioNiTfx('7602', 'hospitalario'), 'convenio' => 'NO-EXISTE'])
+        ->assertSessionHasErrors(['convenio']);
+
+    // En Nueva Radicación siguen siendo obligatorios.
+    $this->actingAs($admin)->withSession(['sede' => Sede::CALI])
+        ->from('/tools/radicar-solicitud')
+        ->post('/tools/radicar-solicitud', $sinConvenioNiTfx('7603', 'nueva'))
+        ->assertSessionHasErrors(['convenio', 'ObservacionTFX']);
+});
