@@ -1986,6 +1986,69 @@ class RadicarCasoController extends Controller
     }
 
     /**
+     * Botón "Rad sin Paquetes" del Historial: radicaciones ambulatorias de la
+     * sede activa que no tienen el PDF del paquete adjunto, de la más reciente
+     * a la más antigua. Va completa, sin tope: la grilla se exporta a Excel.
+     *
+     * Quién radicó sale del evento de creación de la trazabilidad. Las
+     * radicaciones anteriores a la bitácora no lo tienen, y lo hecho por un
+     * Super Admin no se muestra a otros roles: en ambos casos va '—'.
+     */
+    public function sinPaquete(Request $request): JsonResponse
+    {
+        $this->ampliarLimites();
+        $viewerIsSuperAdmin = $request->user()?->isSuperAdmin() ?? false;
+
+        $query = RadicarCaso::query()
+            ->where('ambito', RadicarCaso::AMBULATORIO)
+            ->where(fn ($q) => $q->whereNull('paquete')->orWhere('paquete', ''))
+            ->orderByDesc('codrad')
+            ->select(['codrad', 'Ndocumento', 'Codesp', 'created_at']);
+
+        $especialidades = Especialidad::pluck('Nombre', 'espcodser');
+
+        $filas = [];
+        foreach ($query->lazy(1000)->chunk(1000) as $lote) {
+            $casos = $lote->collect();
+
+            $pacientes = User::whereIn('Numero_D', $casos->pluck('Ndocumento')->filter()->unique())
+                ->get(['Numero_D', 'name', 'Apellido1', 'apellido2', 'tipo_Docu', 'Eps', 'Telefono1', 'telefono2'])
+                ->keyBy('Numero_D');
+
+            $radicadores = TrazabilidadCaso::query()
+                ->with('user:id,name,Apellido1,apellido2,rol')
+                ->whereIn('codrad', $casos->pluck('codrad'))
+                ->where('evento', 'creacion')
+                ->orderBy('id')
+                ->get(['id', 'codrad', 'user_id'])
+                ->unique('codrad')
+                ->keyBy('codrad');
+
+            foreach ($casos as $caso) {
+                $p = $pacientes->get($caso->Ndocumento);
+                $autor = $radicadores->get($caso->codrad)?->user;
+                $autorVisible = $autor && ($viewerIsSuperAdmin || $autor->rol !== User::SUPER_ADMIN);
+
+                $filas[] = [
+                    'codrad' => $caso->codrad,
+                    'paciente' => $this->nombreUsuario($p) ?? '—',
+                    'tipoDocumento' => $p?->tipo_Docu ?: '—',
+                    'documento' => $caso->Ndocumento ?? '—',
+                    'eps' => $p?->Eps ?: '—',
+                    'telefonos' => $p
+                        ? (trim(implode(' / ', array_filter([$p->Telefono1, $p->telefono2]))) ?: '—')
+                        : '—',
+                    'especialidad' => $caso->Codesp ? ($especialidades[$caso->Codesp] ?? $caso->Codesp) : '—',
+                    'fechaRadicacion' => optional($caso->created_at)->format('Y-m-d H:i'),
+                    'radicadoPor' => $autorVisible ? ($this->nombreUsuario($autor) ?? '—') : '—',
+                ];
+            }
+        }
+
+        return response()->json(['rows' => $filas]);
+    }
+
+    /**
      * ¿La petición es para exportar a Excel (?exportar=1)? Exportar no lleva
      * los topes de filas de las grillas, así que se le da el tiempo y la
      * memoria que necesite un volumen grande.

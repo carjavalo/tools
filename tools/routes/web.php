@@ -89,6 +89,7 @@ Route::prefix('tools')->name('tools.')->group(function () {
         Route::get('radicar-solicitud/consulta',[App\Http\Controllers\RadicarCasoController::class, 'consulta'])->name('radicar-solicitud.consulta');
         Route::get('radicar-solicitud/consulta-general', [App\Http\Controllers\RadicarCasoController::class, 'consultaGeneral'])->name('radicar-solicitud.consulta-general');
         Route::get('radicar-solicitud/programados', [App\Http\Controllers\RadicarCasoController::class, 'programados'])->name('radicar-solicitud.programados');
+        Route::get('radicar-solicitud/sin-paquete', [App\Http\Controllers\RadicarCasoController::class, 'sinPaquete'])->name('radicar-solicitud.sin-paquete');
         // Botones de cada fila de la grilla "Ver programados". Van bajo
         // /programacion/{id} —y no bajo /{caso}— porque editan la programación
         // de cirugía, no la radicación: así el middleware los distingue y los

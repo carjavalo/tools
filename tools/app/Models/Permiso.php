@@ -38,6 +38,10 @@ class Permiso extends Model
         // por Fecha Vencimiento Autorización. Apagada hasta asignarla al rol.
         ['key' => 'radicar-solicitud-consulta-general', 'titulo' => 'Pestaña Consulta General', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver']],
         ['key' => 'radicar-solicitud-modificar', 'titulo' => 'Botón Modificar Radicado (Historial)', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver']],
+        // Botón "Rad sin Paquetes" del Historial: grilla, exportable a Excel,
+        // de las radicaciones ambulatorias que no tienen el PDF del paquete.
+        // Viene apagado: solo el Super Admin lo tiene hasta asignarlo al rol.
+        ['key' => 'radicar-solicitud-sin-paquete', 'titulo' => 'Botón Rad sin Paquetes (Historial)', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver']],
         ['key' => 'radicar-solicitud-cotizaciones', 'titulo' => 'Formulario Cotizaciones de Conceptos No Convenidos (Historial)', 'grupo' => 'Radicar Solicitud — Pestañas', 'acciones' => ['ver']],
         // Versión reducida del formulario Aplicar Modificaciones: solo Estado
         // Actual, Fecha Recibido Serv y Observaciones CCX. Es para los perfiles
@@ -133,6 +137,7 @@ class Permiso extends Model
         'radicar-solicitud-seguimiento-endo',
         'radicar-solicitud-seguimiento-espe-programa',
         'radicar-solicitud-subir-paquete',
+        'radicar-solicitud-sin-paquete',
         'gestion-usuarios-importar-censo',
         'gestion-usuarios-conteo-roles',
     ];

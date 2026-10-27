@@ -45,6 +45,7 @@ import {
     LoaderCircle,
     Lock,
     MapPin,
+    PackageX,
     Pencil,
     Plus,
     Save,
@@ -160,6 +161,23 @@ interface ProgramadoRow {
     paqueteUrl: string | null;
     cotizaciones: { id: number; tercero: string; url: string }[];
     observaciones: string;
+}
+
+/** Fila del modal "Rad sin Paquetes": radicación ambulatoria sin PDF. */
+interface SinPaqueteRow {
+    codrad: number;
+    paciente: string;
+    tipoDocumento: string;
+    documento: string;
+    eps: string;
+    telefonos: string;
+    especialidad: string;
+    // 'AAAA-MM-DD HH:mm'.
+    fechaRadicacion: string | null;
+    radicadoPor: string;
+    // El servidor solo manda casos sin paquete (null); se llena al subirlo
+    // desde la grilla, para verlo sin recargar.
+    paqueteUrl: string | null;
 }
 
 interface SubEspecialidadFiltroOpt {
@@ -988,6 +1006,34 @@ const valorOrdenProgramado = (
             return textoOrden(r[col]);
     }
 };
+
+/** Columnas de la grilla "Rad sin Paquetes", con su título. */
+const COLS_SIN_PAQUETE = [
+    ['codrad', 'N° Caso'],
+    ['paciente', 'Paciente'],
+    ['tipoDocumento', 'Tipo Doc.'],
+    ['documento', 'Identificación'],
+    ['eps', 'EPS'],
+    ['telefonos', 'Teléfono'],
+    ['especialidad', 'Especialidad'],
+    ['fechaRadicacion', 'Fecha Radicación'],
+    ['radicadoPor', 'Radicado por'],
+    ['paquete', 'Paquete'],
+] as const;
+
+type ColSinPaquete = (typeof COLS_SIN_PAQUETE)[number][0];
+
+const valorOrdenSinPaquete = (
+    r: SinPaqueteRow,
+    col: ColSinPaquete,
+): ValorOrden =>
+    col === 'codrad'
+        ? r.codrad
+        : col === 'paquete'
+          ? r.paqueteUrl
+              ? 1
+              : null
+          : textoOrden(r[col]);
 
 /**
  * Columnas de la grilla de INFORMES / CONSULTAS, en el orden en que se
@@ -1991,6 +2037,22 @@ export default function RadicarSolicitud({
     // diálogo y una sola vez: cada consulta que falle por lo mismo levanta el
     // mismo aviso en lugar de inventar un mensaje sobre los datos.
     const [sesionExpirada, setSesionExpirada] = useState(false);
+    // Modal "Rad sin Paquetes": radicaciones ambulatorias sin el PDF del
+    // paquete, exportables a Excel.
+    const [sinPaqueteOpen, setSinPaqueteOpen] = useState(false);
+    const [sinPaqueteRows, setSinPaqueteRows] = useState<SinPaqueteRow[]>([]);
+    const [sinPaqueteLoading, setSinPaqueteLoading] = useState(false);
+    const [sinPaqueteError, setSinPaqueteError] = useState<string | null>(null);
+    const [sinPaqueteFiltro, setSinPaqueteFiltro] = useState('');
+    const [sinPaqueteDesde, setSinPaqueteDesde] = useState('');
+    const [sinPaqueteHasta, setSinPaqueteHasta] = useState('');
+    const [sinPaqueteOrden, setSinPaqueteOrden] =
+        useState<Orden<ColSinPaquete>>(null);
+    // Caso cuyo paquete se está subiendo desde la grilla (uno a la vez).
+    const [sinPaqueteSubiendo, setSinPaqueteSubiendo] = useState<number | null>(
+        null,
+    );
+    const [sinPaqueteOk, setSinPaqueteOk] = useState<string | null>(null);
     // Modal "Ver Programados": grilla con todas las radicaciones que están en
     // Estado QX = Programados, con sus datos de programación de cirugía.
     const [programadosOpen, setProgramadosOpen] = useState(false);
@@ -3353,6 +3415,196 @@ export default function RadicarSolicitud({
         XLSX.writeFile(libro, `radicaciones-programadas-${hoy}.xlsx`);
     };
 
+    // ----- Rad sin Paquetes (botón del Historial) -----
+
+    const abrirSinPaquete = () => {
+        setSinPaqueteOpen(true);
+        setSinPaqueteRows([]);
+        setSinPaqueteError(null);
+        setSinPaqueteFiltro('');
+        setSinPaqueteDesde('');
+        setSinPaqueteHasta('');
+        setSinPaqueteOrden(null);
+        setSinPaqueteOk(null);
+        setSinPaqueteLoading(true);
+        fetch('/tools/radicar-solicitud/sin-paquete', {
+            headers: { Accept: 'application/json' },
+        })
+            .then(async (r) => {
+                if (!r.ok) {
+                    setSinPaqueteError(await mensajeDeError(r));
+                    return null;
+                }
+                return r.json();
+            })
+            .then((d) => {
+                if (d === null) return;
+                if (Array.isArray(d.rows)) {
+                    setSinPaqueteRows(
+                        (d.rows as SinPaqueteRow[]).map((r) => ({
+                            ...r,
+                            paqueteUrl: null,
+                        })),
+                    );
+                } else {
+                    setSinPaqueteError(
+                        'No fue posible cargar las radicaciones sin paquete.',
+                    );
+                }
+            })
+            .catch(() =>
+                setSinPaqueteError(
+                    'Ocurrió un error al cargar las radicaciones sin paquete.',
+                ),
+            )
+            .finally(() => setSinPaqueteLoading(false));
+    };
+
+    // Filtro de texto y período por la fecha de radicación.
+    const sinPaqueteFiltrados = useMemo(() => {
+        const q = sinPaqueteFiltro.trim().toLowerCase();
+        if (q === '' && sinPaqueteDesde === '' && sinPaqueteHasta === '') {
+            return sinPaqueteRows;
+        }
+        return sinPaqueteRows.filter((r) => {
+            const dia = r.fechaRadicacion?.slice(0, 10);
+            if (sinPaqueteDesde !== '' && (!dia || dia < sinPaqueteDesde)) {
+                return false;
+            }
+            if (sinPaqueteHasta !== '' && (!dia || dia > sinPaqueteHasta)) {
+                return false;
+            }
+            return (
+                q === '' ||
+                [
+                    String(r.codrad),
+                    r.paciente,
+                    r.documento,
+                    r.eps,
+                    r.telefonos,
+                    r.especialidad,
+                    r.radicadoPor,
+                ].some((v) => v.toLowerCase().includes(q))
+            );
+        });
+    }, [sinPaqueteRows, sinPaqueteFiltro, sinPaqueteDesde, sinPaqueteHasta]);
+
+    const sinPaqueteOrdenados = useMemo(
+        () =>
+            ordenarFilas(
+                sinPaqueteFiltrados,
+                sinPaqueteOrden,
+                valorOrdenSinPaquete,
+            ),
+        [sinPaqueteFiltrados, sinPaqueteOrden],
+    );
+
+    const hayFiltroSinPaquete =
+        sinPaqueteFiltro.trim() !== '' ||
+        sinPaqueteDesde !== '' ||
+        sinPaqueteHasta !== '';
+
+    // Sube el PDF del paquete de una fila por el mismo endpoint de "Subir
+    // paquete". La fila se queda en la grilla, ya con su PDF, hasta que se
+    // vuelva a abrir el modal.
+    const subirPaqueteSinPaquete = async (
+        row: SinPaqueteRow,
+        archivo: File,
+    ) => {
+        setSinPaqueteError(null);
+        setSinPaqueteOk(null);
+
+        if (
+            archivo.type !== 'application/pdf' &&
+            !archivo.name.toLowerCase().endsWith('.pdf')
+        ) {
+            setSinPaqueteError('El paquete debe ser un archivo PDF.');
+            return;
+        }
+        if (archivo.size > paqueteMaxMb * 1024 * 1024) {
+            const pesa = (archivo.size / (1024 * 1024)).toFixed(1);
+            setSinPaqueteError(
+                `El PDF pesa ${pesa} MB y el máximo permitido es ${paqueteMaxMb} MB.`,
+            );
+            return;
+        }
+
+        setSinPaqueteSubiendo(row.codrad);
+        try {
+            const fd = new FormData();
+            fd.append('paquete', archivo);
+            const r = await fetch(
+                `/tools/radicar-solicitud/${row.codrad}/paquete`,
+                {
+                    method: 'POST',
+                    headers: {
+                        Accept: 'application/json',
+                        'X-XSRF-TOKEN': getXsrfToken(),
+                    },
+                    body: fd,
+                },
+            );
+            if (r.status === 422) {
+                const d = await r.json();
+                const primero = Object.values(
+                    (d.errors ?? {}) as Record<string, string[]>,
+                )[0]?.[0];
+                setSinPaqueteError(primero ?? 'Revisa el PDF del paquete.');
+                return;
+            }
+            if (!r.ok) {
+                setSinPaqueteError(await mensajeDeError(r));
+                return;
+            }
+            const d = await r.json();
+            if (d && d.ok) {
+                setSinPaqueteRows((rows) =>
+                    rows.map((x) =>
+                        x.codrad === row.codrad
+                            ? { ...x, paqueteUrl: d.caso?.paqueteUrl ?? null }
+                            : x,
+                    ),
+                );
+                // Si el caso está abierto en el Historial, que se vea el PDF.
+                if (caso?.codrad === row.codrad) setCaso(d.caso);
+                setSinPaqueteOk(`Paquete del caso #${row.codrad} guardado.`);
+            }
+        } catch {
+            setSinPaqueteError('No fue posible subir el paquete.');
+        } finally {
+            setSinPaqueteSubiendo(null);
+        }
+    };
+
+    // Descarga en Excel lo que muestra la grilla (ya filtrado y ordenado).
+    const exportarSinPaqueteExcel = async () => {
+        if (sinPaqueteOrdenados.length === 0) return;
+
+        const XLSX = await import('xlsx');
+
+        const filas = sinPaqueteOrdenados.map((r) =>
+            Object.fromEntries(
+                COLS_SIN_PAQUETE.map(([col, titulo]) => [
+                    titulo,
+                    col === 'paquete'
+                        ? r.paqueteUrl
+                            ? 'Sí'
+                            : 'No'
+                        : (r[col] ?? ''),
+                ]),
+            ),
+        );
+
+        const hoja = XLSX.utils.json_to_sheet(filas);
+        hoja['!cols'] = anchosExcel(filas, 45);
+
+        const libro = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(libro, hoja, 'Sin paquete');
+
+        const hoy = new Date().toISOString().slice(0, 10);
+        XLSX.writeFile(libro, `radicaciones-sin-paquete-${hoy}.xlsx`);
+    };
+
     // ----- Modificar radicado (botón del Historial) -----
 
     const abrirModificarRadicado = () => {
@@ -4390,6 +4642,11 @@ export default function RadicarSolicitud({
     const puedeModificarRadicado =
         esSuperAdmin ||
         (modificarCfg ? modificarCfg.ver : accionesRadicar.editar);
+
+    // Botón "Rad sin Paquetes": hay que asignarlo expresamente al rol.
+    const puedeVerSinPaquete =
+        esSuperAdmin ||
+        permisosUsuario['radicar-solicitud-sin-paquete']?.ver === true;
 
     // Formulario "Aplicar Modificaciones al Caso" (Historial): se rige por su
     // propia sub-vista del Gestor de Permisos (visible salvo que se apague).
@@ -6236,6 +6493,18 @@ export default function RadicarSolicitud({
                                         >
                                             <Trash2 className="size-4" />
                                             Borrar caso
+                                        </Button>
+                                    )}
+                                    {puedeVerSinPaquete && (
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            onClick={abrirSinPaquete}
+                                            title="Radicaciones ambulatorias que no tienen paquete adjunto"
+                                            className="gap-2 text-[#2d3e83] dark:text-white"
+                                        >
+                                            <PackageX className="size-4" />
+                                            Rad sin Paquetes
                                         </Button>
                                     )}
                                 </div>
@@ -9130,6 +9399,239 @@ export default function RadicarSolicitud({
 
             {/* Modal "Ver Programados": grilla de radicaciones programadas para
                 cirugía (Estado QX = Programados). */}
+            {/* Rad sin Paquetes: radicaciones ambulatorias sin PDF adjunto. */}
+            <Dialog open={sinPaqueteOpen} onOpenChange={setSinPaqueteOpen}>
+                <DialogContent className="max-h-[90vh] overflow-hidden sm:max-w-6xl">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <PackageX className="size-5 text-[#2d3e83] dark:text-white" />
+                            Radicaciones sin paquete
+                        </DialogTitle>
+                        <DialogDescription>
+                            Radicaciones de ámbito Ambulatorio que no tienen el
+                            PDF del paquete adjunto, de la más reciente a la más
+                            antigua. Desde la columna Paquete se puede subir el
+                            PDF de cada una.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="flex flex-col gap-2 lg:flex-row lg:items-end">
+                        <div className="relative flex-1">
+                            <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+                            <Input
+                                value={sinPaqueteFiltro}
+                                onChange={(e) =>
+                                    setSinPaqueteFiltro(e.target.value)
+                                }
+                                placeholder="Filtrar por N° caso, documento, paciente, EPS, especialidad o usuario…"
+                                className="pl-9"
+                            />
+                        </div>
+                        <Field
+                            label="Fecha Inicial Radicación"
+                            className="lg:w-48"
+                        >
+                            <Input
+                                type="date"
+                                value={sinPaqueteDesde}
+                                max={sinPaqueteHasta || undefined}
+                                onChange={(e) =>
+                                    setSinPaqueteDesde(e.target.value)
+                                }
+                            />
+                        </Field>
+                        <Field
+                            label="Fecha Final Radicación"
+                            className="lg:w-48"
+                        >
+                            <Input
+                                type="date"
+                                value={sinPaqueteHasta}
+                                min={sinPaqueteDesde || undefined}
+                                onChange={(e) =>
+                                    setSinPaqueteHasta(e.target.value)
+                                }
+                            />
+                        </Field>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            onClick={exportarSinPaqueteExcel}
+                            disabled={sinPaqueteOrdenados.length === 0}
+                            title="Descargar en Excel lo que muestra la grilla"
+                            className="gap-2 text-green-700 disabled:opacity-40 dark:text-green-400"
+                        >
+                            <FileSpreadsheet className="size-4" />
+                            Exportar a Excel
+                        </Button>
+                    </div>
+
+                    {sinPaqueteError && (
+                        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
+                            {sinPaqueteError}
+                        </div>
+                    )}
+
+                    {sinPaqueteOk && (
+                        <div className="rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700 dark:border-green-900 dark:bg-green-950 dark:text-green-300">
+                            {sinPaqueteOk}
+                        </div>
+                    )}
+
+                    <div className="max-h-[60vh] overflow-auto rounded-lg border">
+                        <table className="w-full min-w-[1000px] text-sm">
+                            <thead className="sticky top-0 z-10 bg-muted/80 backdrop-blur">
+                                <tr className="text-left text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
+                                    {COLS_SIN_PAQUETE.map(([col, titulo]) => (
+                                        <ThOrdenable
+                                            key={col}
+                                            col={col}
+                                            orden={sinPaqueteOrden}
+                                            onOrdenar={(c) =>
+                                                setSinPaqueteOrden((o) =>
+                                                    siguienteOrden(o, c),
+                                                )
+                                            }
+                                        >
+                                            {titulo}
+                                        </ThOrdenable>
+                                    ))}
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y">
+                                {sinPaqueteLoading && (
+                                    <tr>
+                                        <td
+                                            colSpan={COLS_SIN_PAQUETE.length}
+                                            className="px-3 py-8 text-center text-muted-foreground"
+                                        >
+                                            <LoaderCircle className="mx-auto size-5 animate-spin" />
+                                        </td>
+                                    </tr>
+                                )}
+                                {!sinPaqueteLoading &&
+                                    sinPaqueteOrdenados.length === 0 && (
+                                        <tr>
+                                            <td
+                                                colSpan={
+                                                    COLS_SIN_PAQUETE.length
+                                                }
+                                                className="px-3 py-8 text-center text-muted-foreground"
+                                            >
+                                                {sinPaqueteRows.length === 0
+                                                    ? 'No hay radicaciones ambulatorias sin paquete.'
+                                                    : 'Ningún registro coincide con el filtro.'}
+                                            </td>
+                                        </tr>
+                                    )}
+                                {!sinPaqueteLoading &&
+                                    sinPaqueteOrdenados.map((r) => (
+                                        <tr
+                                            key={r.codrad}
+                                            className="hover:bg-muted/40"
+                                        >
+                                            <td className="px-3 py-2 font-semibold whitespace-nowrap text-[#2d3e83] dark:text-white">
+                                                #{r.codrad}
+                                            </td>
+                                            <td className="px-3 py-2">
+                                                {r.paciente}
+                                            </td>
+                                            <td className="px-3 py-2 whitespace-nowrap">
+                                                {r.tipoDocumento}
+                                            </td>
+                                            <td className="px-3 py-2 whitespace-nowrap">
+                                                {r.documento}
+                                            </td>
+                                            <td className="px-3 py-2">
+                                                {r.eps}
+                                            </td>
+                                            <td className="px-3 py-2 whitespace-nowrap">
+                                                {r.telefonos}
+                                            </td>
+                                            <td className="px-3 py-2">
+                                                {r.especialidad}
+                                            </td>
+                                            <td className="px-3 py-2 whitespace-nowrap">
+                                                {r.fechaRadicacion ?? '—'}
+                                            </td>
+                                            <td className="px-3 py-2">
+                                                {r.radicadoPor}
+                                            </td>
+                                            <td className="px-3 py-2 whitespace-nowrap">
+                                                {r.paqueteUrl ? (
+                                                    <a
+                                                        href={r.paqueteUrl}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        title="Ver el PDF del paquete"
+                                                        className="inline-flex items-center gap-1 font-medium text-green-700 hover:underline dark:text-green-400"
+                                                    >
+                                                        <CheckCircle2 className="size-4" />
+                                                        Ver PDF
+                                                    </a>
+                                                ) : sinPaqueteSubiendo ===
+                                                  r.codrad ? (
+                                                    <span className="inline-flex items-center gap-1 text-muted-foreground">
+                                                        <LoaderCircle className="size-4 animate-spin" />
+                                                        Subiendo…
+                                                    </span>
+                                                ) : (
+                                                    <label
+                                                        title="Subir el PDF del paquete"
+                                                        className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-medium text-[#2d3e83] transition-colors dark:text-white ${sinPaqueteSubiendo !== null ? 'pointer-events-none opacity-40' : 'cursor-pointer hover:bg-muted'}`}
+                                                    >
+                                                        <Upload className="size-3.5" />
+                                                        Subir PDF
+                                                        <input
+                                                            type="file"
+                                                            accept="application/pdf,.pdf"
+                                                            className="sr-only"
+                                                            disabled={
+                                                                sinPaqueteSubiendo !==
+                                                                null
+                                                            }
+                                                            onChange={(e) => {
+                                                                const f =
+                                                                    e.target
+                                                                        .files?.[0];
+                                                                e.target.value =
+                                                                    '';
+                                                                if (f)
+                                                                    subirPaqueteSinPaquete(
+                                                                        r,
+                                                                        f,
+                                                                    );
+                                                            }}
+                                                        />
+                                                    </label>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    ))}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <DialogFooter>
+                        <span className="mr-auto self-center text-xs text-muted-foreground">
+                            {sinPaqueteFiltrados.length}
+                            {hayFiltroSinPaquete
+                                ? ` de ${sinPaqueteRows.length}`
+                                : ''}{' '}
+                            radicaci
+                            {sinPaqueteFiltrados.length === 1 ? 'ón' : 'ones'}
+                        </span>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => setSinPaqueteOpen(false)}
+                        >
+                            Cerrar
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
             <Dialog open={programadosOpen} onOpenChange={setProgramadosOpen}>
                 <DialogContent className="max-h-[90vh] overflow-hidden sm:max-w-6xl">
                     <DialogHeader>

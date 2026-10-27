@@ -4,6 +4,7 @@ namespace App\Http\Middleware;
 
 use App\Models\Permiso;
 use App\Models\ProgramacionCaso;
+use App\Models\RadicarCaso;
 use App\Models\Role;
 use App\Models\User;
 use Closure;
@@ -91,13 +92,30 @@ class CheckPermisoVista
             }
 
             // Botón "Subir paquete" (Aplicar Modificaciones): se rige solo por
-            // su sub-vista y hay que asignarla expresamente al rol.
+            // su sub-vista y hay que asignarla expresamente al rol. La grilla
+            // "Rad sin Paquetes" usa el mismo endpoint, pero su permiso solo
+            // vale para la primera subida: un caso ambulatorio sin paquete,
+            // sin reemplazar ni anexar a uno existente.
             if ($sub !== null && ctype_digit($sub) && $sub4 === 'paquete' && $request->isMethod('POST')) {
-                $permisoPaquete = Permiso::where('role_id', $role->id)
-                    ->where('vista', 'radicar-solicitud-subir-paquete')
-                    ->first();
+                $permitido = $this->asignada($role->id, 'radicar-solicitud-subir-paquete')
+                    || ($this->asignada($role->id, 'radicar-solicitud-sin-paquete')
+                        && $request->input('modo') !== 'anexar'
+                        && RadicarCaso::whereKey($sub)
+                            ->where('ambito', RadicarCaso::AMBULATORIO)
+                            ->where(fn ($q) => $q->whereNull('paquete')->orWhere('paquete', ''))
+                            ->exists());
 
-                if (! $permisoPaquete || ! $permisoPaquete->ver) {
+                if (! $permitido) {
+                    return $this->denegar($request, 'ver');
+                }
+
+                return $next($request);
+            }
+
+            // Botón "Rad sin Paquetes" (Historial): se rige solo por su
+            // sub-vista y hay que asignarla expresamente al rol.
+            if ($sub === 'sin-paquete') {
+                if (! $this->asignada($role->id, 'radicar-solicitud-sin-paquete')) {
                     return $this->denegar($request, 'ver');
                 }
 
@@ -297,6 +315,18 @@ class CheckPermisoVista
         $permiso = Permiso::where('role_id', $roleId)->where('vista', $boton)->first();
 
         return $permiso && $permiso->ver && $permiso->{$accion};
+    }
+
+    /**
+     * ¿La sub-vista está asignada al rol con "ver"? Para las que se asignan
+     * expresamente: sin fila guardada, no.
+     */
+    private function asignada(int $roleId, string $vista): bool
+    {
+        return Permiso::where('role_id', $roleId)
+            ->where('vista', $vista)
+            ->where('ver', true)
+            ->exists();
     }
 
     /**
