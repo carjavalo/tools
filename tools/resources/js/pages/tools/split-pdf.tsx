@@ -596,7 +596,7 @@ export default function SplitPDF() {
                                                     <FolderOutput className="h-5 w-5" />
                                                     <span>Archivos Generados</span>
                                                 </div>
-                                                <Badge variant="outline">{splitResults.length} archivos</Badge>
+                                                <Badge variant="outline">{splitResults.length} {splitResults.length === 1 ? 'archivo' : 'archivos'}</Badge>
                                             </CardTitle>
                                             <CardDescription>
                                                 Revisa cada archivo, descarta los que no necesites y descarga el resto
