@@ -1,4 +1,3 @@
-import AppLogoIcon from '@/components/app-logo-icon';
 import { home } from '@/routes';
 import { Link } from '@inertiajs/react';
 import { type PropsWithChildren } from 'react';
@@ -31,9 +30,12 @@ export default function AuthSimpleLayout({
                             href={home()}
                             className="flex flex-col items-center gap-2 font-medium"
                         >
-                            <div className="mb-1 flex h-9 w-9 items-center justify-center rounded-md">
-                                <AppLogoIcon className="size-9 fill-current text-[var(--foreground)] dark:text-white" />
-                            </div>
+                            {/* En modo oscuro el azul institucional se pierde sobre la tarjeta: se pinta en blanco. */}
+                            <img
+                                src="/images/logo.png"
+                                alt="Hospital Universitario del Valle"
+                                className="h-28 w-auto object-contain dark:brightness-0 dark:invert"
+                            />
                             <span className="sr-only">{title}</span>
                         </Link>
 
