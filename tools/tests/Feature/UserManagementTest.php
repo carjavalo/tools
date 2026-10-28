@@ -208,6 +208,26 @@ test('search filters the user listing', function () {
         );
 });
 
+test('search finds a user by full name across name and surnames', function () {
+    $admin = User::factory()->create(['name' => 'Admin', 'Apellido1' => 'Sistema', 'apellido2' => null]);
+    User::factory()->create(['name' => 'MARIA CAMILA', 'Apellido1' => 'PEREZ', 'apellido2' => 'GOMEZ', 'Numero_D' => '1116234']);
+    User::factory()->create(['name' => 'MARIA', 'Apellido1' => 'LOPEZ', 'apellido2' => null, 'Numero_D' => '2220001']);
+
+    foreach (['MARIA CAMILA PEREZ', 'maria  perez', 'Camila Gomez', 'PEREZ 1116234'] as $texto) {
+        $this->actingAs($admin)
+            ->get('/tools/gestion-usuarios?search='.urlencode($texto))
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('users.total', 1)
+                ->where('users.data.0.Numero_D', '1116234')
+            );
+    }
+
+    // Una sola palabra sigue trayendo a todos los que la contienen.
+    $this->actingAs($admin)
+        ->get('/tools/gestion-usuarios?search=Maria')
+        ->assertInertia(fn (Assert $page) => $page->where('users.total', 2));
+});
+
 test('a non super admin does not see super admin users in the listing', function () {
     $operador = User::factory()->create(['rol' => 'Operador']);
     User::factory()->create(['rol' => 'Super Admin', 'name' => 'Root']);

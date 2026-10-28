@@ -355,14 +355,20 @@ class UserManagementController extends Controller
         return User::query()
             ->when(! $viewerIsSuperAdmin, fn ($query) => $query->where('rol', '!=', User::SUPER_ADMIN))
             ->when($rol !== '', fn ($query) => $query->where('rol', $rol))
+            // Se busca palabra por palabra: nombre y apellidos están en campos
+            // distintos, así que "MARIA CAMILA PEREZ" completo no coincide con
+            // ninguno. Cada palabra debe aparecer en alguno de los campos.
             ->when($search !== '', function ($query) use ($search) {
-                $query->where(function ($sub) use ($search) {
-                    $sub->where('name', 'like', "%{$search}%")
-                        ->orWhere('Apellido1', 'like', "%{$search}%")
-                        ->orWhere('apellido2', 'like', "%{$search}%")
-                        ->orWhere('email', 'like', "%{$search}%")
-                        ->orWhere('Numero_D', 'like', "%{$search}%");
-                });
+                foreach (preg_split('/\s+/u', $search, -1, PREG_SPLIT_NO_EMPTY) as $palabra) {
+                    $like = '%'.addcslashes($palabra, '\\%_').'%';
+                    $query->where(function ($sub) use ($like) {
+                        $sub->where('name', 'like', $like)
+                            ->orWhere('Apellido1', 'like', $like)
+                            ->orWhere('apellido2', 'like', $like)
+                            ->orWhere('email', 'like', $like)
+                            ->orWhere('Numero_D', 'like', $like);
+                    });
+                }
             })
             ->orderByDesc('created_at');
     }
