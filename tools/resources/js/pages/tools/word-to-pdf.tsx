@@ -7,6 +7,7 @@ import ToolCard from '@/components/ToolCard';
 import FileUploadZone from '@/components/FileUploadZone';
 import ProgressBar from '@/components/ProgressBar';
 import axios from 'axios';
+import { conversionErrorMessage, hasExtension } from '@/lib/conversion';
 import { driver } from 'driver.js';
 import 'driver.js/dist/driver.css';
 
@@ -37,7 +38,7 @@ export default function WordToPDF() {
                     element: '[data-tour="left-column"]',
                     popover: {
                         title: 'Paso 1: Seleccionar Word',
-                        description: 'Arrastra tu documento Word (.doc o .docx) aquí o haz clic para seleccionarlo. Tamaño máximo: 25MB.',
+                        description: 'Arrastra tu documento Word (.doc o .docx) aquí o haz clic para seleccionarlo. Tamaño máximo: 10MB.',
                         side: 'right',
                         align: 'start'
                     }
@@ -61,12 +62,7 @@ export default function WordToPDF() {
         if (!file) return;
 
         // Validate file type
-        const validTypes = [
-            'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
-            'application/msword' // .doc
-        ];
-        
-        if (!validTypes.includes(file.type)) {
+        if (!hasExtension(file, ['doc', 'docx'])) {
             setError('Por favor selecciona un archivo Word válido (.docx o .doc).');
             return;
         }
@@ -131,30 +127,10 @@ export default function WordToPDF() {
             setProgress({ current: 3, total: 3, message: '¡PDF descargado exitosamente!' });
             setIsConverted(true);
 
-        } catch (err: any) {
+        } catch (err) {
             console.error('Error converting to PDF:', err);
-            
-            let errorMessage = 'Error al convertir el documento.';
-            
-            if (err.response) {
-                // Server responded with error
-                if (err.response.data instanceof Blob) {
-                    // Try to read error from blob
-                    const text = await err.response.data.text();
-                    try {
-                        const json = JSON.parse(text);
-                        errorMessage = json.error || json.message || errorMessage;
-                    } catch {
-                        errorMessage = text || errorMessage;
-                    }
-                } else {
-                    errorMessage = err.response.data?.error || err.response.data?.message || errorMessage;
-                }
-            } else if (err.request) {
-                errorMessage = 'No se pudo conectar con el servidor. Verifica tu conexión.';
-            }
-            
-            setError(errorMessage);
+            // Antes, si el servidor devolvía una página de error se mostraba su HTML.
+            setError(await conversionErrorMessage(err, 'Error al convertir el documento.'));
             setProgress({ current: 0, total: 0, message: '' });
         } finally {
             setIsProcessing(false);

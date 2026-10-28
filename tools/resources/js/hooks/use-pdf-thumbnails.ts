@@ -37,6 +37,24 @@ async function renderPageToDataUrl(pdf: PDFDocumentProxy, pageNumber: number, ta
 }
 
 /**
+ * Miniatura de la primera página, para listas de archivos. Devuelve null si
+ * el PDF no se puede leer (dañado, protegido...).
+ */
+export async function renderFirstPageThumbnail(file: File, width = 120): Promise<string | null> {
+    ensureWorker();
+    const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(await file.arrayBuffer()) });
+    try {
+        const pdf = await loadingTask.promise;
+        return await renderPageToDataUrl(pdf, 1, width);
+    } catch (err) {
+        console.error('Error generando la miniatura:', err);
+        return null;
+    } finally {
+        loadingTask.destroy();
+    }
+}
+
+/**
  * Genera miniaturas de cada página de un PDF en el navegador.
  * `thumbnails[i]` es null mientras la página i + 1 no se ha pintado.
  */
@@ -103,4 +121,53 @@ export function usePdfThumbnails(file: File | null, thumbnailWidth = 200) {
     }, []);
 
     return { thumbnails, isRendering, error, renderPage };
+}
+
+/**
+ * Abre un PDF con pdf.js para pintar páginas sueltas a demanda, sin generar
+ * las miniaturas de todo el documento.
+ */
+export function usePdfRenderer(file: File | null) {
+    const [pageCount, setPageCount] = useState(0);
+    const [error, setError] = useState<string | null>(null);
+    const pdfRef = useRef<PDFDocumentProxy | null>(null);
+
+    useEffect(() => {
+        setPageCount(0);
+        setError(null);
+        if (!file) return;
+
+        let cancelled = false;
+        let loadingTask: PDFDocumentLoadingTask | null = null;
+
+        (async () => {
+            try {
+                ensureWorker();
+                loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(await file.arrayBuffer()) });
+                const pdf = await loadingTask.promise;
+                if (cancelled) return;
+                pdfRef.current = pdf;
+                setPageCount(pdf.numPages);
+            } catch (err) {
+                if (!cancelled) {
+                    console.error('Error abriendo el PDF:', err);
+                    setError('No se pudo generar la vista previa de este PDF.');
+                }
+            }
+        })();
+
+        return () => {
+            cancelled = true;
+            pdfRef.current = null;
+            loadingTask?.destroy();
+        };
+    }, [file]);
+
+    const renderPage = useCallback(async (pageNumber: number, width: number): Promise<string | null> => {
+        const pdf = pdfRef.current;
+        if (!pdf || pageNumber < 1 || pageNumber > pdf.numPages) return null;
+        return renderPageToDataUrl(pdf, pageNumber, width);
+    }, []);
+
+    return { pageCount, error, renderPage };
 }
