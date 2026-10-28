@@ -35,4 +35,28 @@ return [
         ],
     ],
 
+    // Conversión de Excel y PowerPoint a PDF: se prueban en este orden y se
+    // salta el que no tenga clave. Los nombres de las variables se conservan
+    // de la versión anterior para no tocar el .env de producción.
+    'cloudconvert' => [
+        'key' => env('CLOUDCONVERT_API_KEY'),
+    ],
+
+    'convertapi' => [
+        'token' => env('CONVERTAPI_SECRET'),
+    ],
+
+    'pdfco' => [
+        'key' => env('PDFCO_API_KEY'),
+    ],
+
+    // Resumir Documento. El plan gratuito de Groq admite unos 8.000 tokens por
+    // minuto (entrada + respuesta): ~16.000 caracteres por resumen. Con un plan
+    // de pago puede subirse GROQ_SUMMARY_MAX_CHARS (el modelo admite ~400.000).
+    'groq' => [
+        'key' => env('GROQ_API_KEY'),
+        'model' => env('GROQ_MODEL', 'openai/gpt-oss-120b'),
+        'summary_max_chars' => (int) env('GROQ_SUMMARY_MAX_CHARS', 16000),
+    ],
+
 ];

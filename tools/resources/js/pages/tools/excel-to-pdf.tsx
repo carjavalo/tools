@@ -1,11 +1,12 @@
 import { useState, useRef } from 'react';
 import { Head } from '@inertiajs/react';
 import { Button } from '@/components/ui/button';
-import { Upload, FileText, Loader2, Download, FileDown, CheckCircle, AlertCircle, HelpCircle } from 'lucide-react';
+import { Upload, FileText, Loader2, FileDown, CheckCircle, AlertCircle, HelpCircle, ShieldAlert } from 'lucide-react';
 import ToolPageHeader from '@/components/ToolPageHeader';
 import ToolCard from '@/components/ToolCard';
 import FileUploadZone from '@/components/FileUploadZone';
 import axios from 'axios';
+import { conversionErrorMessage, hasExtension } from '@/lib/conversion';
 import { driver } from 'driver.js';
 import 'driver.js/dist/driver.css';
 
@@ -53,12 +54,7 @@ export default function ExcelToPDF() {
         if (!file) return;
 
         // Validate file type
-        const validTypes = [
-            'application/vnd.ms-excel', // .xls
-            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' // .xlsx
-        ];
-        
-        if (!validTypes.includes(file.type)) {
+        if (!hasExtension(file, ['xls', 'xlsx'])) {
             setError('Por favor selecciona un archivo Excel válido (.xls o .xlsx).');
             return;
         }
@@ -90,7 +86,7 @@ export default function ExcelToPDF() {
                     'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
                 },
                 responseType: 'blob',
-                timeout: 120000 // 2 minutes timeout
+                timeout: 180000 // el servidor prueba hasta tres servicios de conversión
             });
 
             // Create blob URL and trigger download
@@ -106,20 +102,9 @@ export default function ExcelToPDF() {
 
             setIsConverted(true);
 
-        } catch (err: any) {
+        } catch (err) {
             console.error('Error converting to PDF:', err);
-            
-            let errorMessage = 'Error al convertir el documento.';
-            
-            if (err.response?.status === 404) {
-                errorMessage = 'La conversión de Excel a PDF requiere configuración adicional en el servidor. Contacta al administrador del sistema.';
-            } else if (err.response?.status === 500) {
-                errorMessage = 'Error en el servidor al procesar el archivo. Verifica que el archivo no esté corrupto.';
-            } else if (err.code === 'ECONNABORTED') {
-                errorMessage = 'La conversión está tardando demasiado. Intenta con un archivo más pequeño.';
-            }
-            
-            setError(errorMessage);
+            setError(await conversionErrorMessage(err, 'Error en el servidor al procesar el archivo. Verifica que el archivo no esté corrupto.'));
         } finally {
             setIsProcessing(false);
         }
@@ -167,6 +152,21 @@ export default function ExcelToPDF() {
 
                             {/* Left Column: File Upload & Messages */}
                             <div className="space-y-6" data-tour="left-column">
+                                {/* Privacy notice: la conversión la hace un servicio externo */}
+                                <div
+                                    role="note"
+                                    className="flex items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 p-3 sm:p-4 dark:border-amber-700/60 dark:bg-amber-900/20"
+                                >
+                                    <ShieldAlert className="mt-0.5 h-5 w-5 flex-shrink-0 text-amber-700 dark:text-amber-400" />
+                                    <div className="space-y-1 text-sm text-amber-900 dark:text-amber-100">
+                                        <p className="font-semibold">No conviertas archivos con datos de pacientes</p>
+                                        <p>
+                                            La conversión la hace un servicio externo (CloudConvert u otro similar): el archivo sale del hospital.
+                                            No uses esta herramienta con datos personales, de salud o información confidencial.
+                                        </p>
+                                    </div>
+                                </div>
+
                                 {!excelFile && (
                                 <ToolCard title="Seleccionar Excel">
                                     <FileUploadZone

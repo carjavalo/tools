@@ -3,11 +3,12 @@ import { Head } from '@inertiajs/react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { FileText, Download, Upload, Loader2, Zap, HelpCircle } from 'lucide-react';
+import { Download, Upload, Loader2, Zap, HelpCircle, Info, ShieldCheck } from 'lucide-react';
 import { PDFDocument } from 'pdf-lib';
 import ToolPageHeader from '@/components/ToolPageHeader';
 import ToolCard from '@/components/ToolCard';
 import FileUploadZone from '@/components/FileUploadZone';
+import { recompressImages, removeMetadata, type ImageCompressionLevel, type ImageCompressionResult } from '@/lib/pdf-compression';
 import { driver } from 'driver.js';
 import 'driver.js/dist/driver.css';
 
@@ -17,13 +18,23 @@ interface CompressionOptions {
     optimizeImages: boolean;
 }
 
+// Cuánto se reducen las fotos y escaneos en cada nivel.
+const COMPRESSION_LEVELS: Record<CompressionOptions['quality'], ImageCompressionLevel & { hint: string }> = {
+    low: { maxDimension: 1200, quality: 0.5, hint: 'Ideal para enviar por correo o WhatsApp. Las fotos se ven algo menos nítidas.' },
+    medium: { maxDimension: 1600, quality: 0.65, hint: 'Buen equilibrio entre tamaño y calidad para la mayoría de documentos.' },
+    high: { maxDimension: 2200, quality: 0.8, hint: 'Las imágenes quedan casi intactas; el tamaño se reduce menos.' },
+};
+
 export default function PDFCompress() {
     const [file, setFile] = useState<File | null>(null);
     const [isProcessing, setIsProcessing] = useState(false);
+    const [progressMessage, setProgressMessage] = useState<string>('');
     const [compressedPdf, setCompressedPdf] = useState<Uint8Array | null>(null);
     const [originalSize, setOriginalSize] = useState<number>(0);
     const [compressedSize, setCompressedSize] = useState<number>(0);
     const [compressionRatio, setCompressionRatio] = useState<number>(0);
+    const [imageStats, setImageStats] = useState<ImageCompressionResult | null>(null);
+    const [notice, setNotice] = useState<string>('');
     const [options, setOptions] = useState<CompressionOptions>({
         quality: 'medium',
         removeMetadata: true,
@@ -54,7 +65,7 @@ export default function PDFCompress() {
                     element: '[data-tour="options"]',
                     popover: {
                         title: 'Paso 2: Configurar Compresión',
-                        description: 'Selecciona la calidad de compresión y opciones adicionales como remover metadatos u optimizar imágenes.',
+                        description: 'Elige el nivel de compresión: define cuánto se reducen las fotos y escaneos del PDF. El texto no se toca y sigue siendo seleccionable.',
                         side: 'left',
                         align: 'start'
                     }
@@ -82,16 +93,19 @@ export default function PDFCompress() {
     };
 
     const handleFileSelect = (selectedFile: File) => {
-        if (selectedFile.type !== 'application/pdf') {
+        // En Windows el tipo MIME a veces llega vacío: también vale la extensión.
+        if (selectedFile.type !== 'application/pdf' && !selectedFile.name.toLowerCase().endsWith('.pdf')) {
             alert('Por favor selecciona un archivo PDF válido.');
             return;
         }
-        
+
         setFile(selectedFile);
         setOriginalSize(selectedFile.size);
         setCompressedPdf(null);
         setCompressedSize(0);
         setCompressionRatio(0);
+        setImageStats(null);
+        setNotice('');
     };
 
     const handleDragOver = (e: React.DragEvent) => {
@@ -123,92 +137,56 @@ export default function PDFCompress() {
         if (!file) return;
 
         setIsProcessing(true);
+        setCompressedPdf(null);
+        setCompressedSize(0);
+        setCompressionRatio(0);
+        setImageStats(null);
+        setNotice('');
+
         try {
-            const arrayBuffer = await file.arrayBuffer();
-            const pdfDoc = await PDFDocument.load(arrayBuffer);
+            setProgressMessage('Leyendo el PDF...');
+            const pdfDoc = await PDFDocument.load(await file.arrayBuffer());
 
-            // Remove metadata if requested
             if (options.removeMetadata) {
-                pdfDoc.setTitle('');
-                pdfDoc.setAuthor('');
-                pdfDoc.setSubject('');
-                pdfDoc.setKeywords([]);
-                pdfDoc.setCreator('Evaristools - Hospital Universitario del Valle');
-                pdfDoc.setProducer('Evaristools PDF Compressor');
+                removeMetadata(pdfDoc);
             }
 
-            // Advanced compression techniques
-            const pages = pdfDoc.getPages();
-            
-            // Process each page for optimization
-            for (let i = 0; i < pages.length; i++) {
-                const page = pages[i];
-                
-                // Get page content and try to optimize
-                try {
-                    // This is a basic optimization - pdf-lib has limitations
-                    const mediaBox = page.getMediaBox();
-                    page.setMediaBox(mediaBox.x, mediaBox.y, mediaBox.width, mediaBox.height);
-                } catch (e) {
-                    // Continue if page optimization fails
-                    console.warn(`Could not optimize page ${i + 1}:`, e);
-                }
+            // Lo que más pesa en un PDF son las fotos y los escaneos.
+            let images: ImageCompressionResult = { total: 0, optimized: 0 };
+            if (options.optimizeImages) {
+                images = await recompressImages(pdfDoc, COMPRESSION_LEVELS[options.quality], (done, total) => {
+                    setProgressMessage(`Optimizando imágenes ${done}/${total}...`);
+                });
             }
+            setImageStats(images);
 
-            // Compression settings based on quality level
-            let compressionOptions: any = {
+            setProgressMessage('Guardando el PDF...');
+            const pdfBytes = await pdfDoc.save({
                 useObjectStreams: true,
                 addDefaultPage: false,
                 updateFieldAppearances: false
-            };
+            });
 
-            // Adjust compression based on quality setting
-            switch (options.quality) {
-                case 'low':
-                    compressionOptions.useObjectStreams = true;
-                    break;
-                case 'medium':
-                    compressionOptions.useObjectStreams = true;
-                    break;
-                case 'high':
-                    compressionOptions.useObjectStreams = false;
-                    break;
-            }
-
-            const pdfBytes = await pdfDoc.save(compressionOptions);
-
-            // If the "compressed" file is larger, use the original
             if (pdfBytes.length >= originalSize) {
-                // Fallback: Try basic compression without object streams
-                const fallbackBytes = await pdfDoc.save({
-                    useObjectStreams: false,
-                    addDefaultPage: false
-                });
-                
-                if (fallbackBytes.length < originalSize) {
-                    setCompressedPdf(fallbackBytes);
-                    setCompressedSize(fallbackBytes.length);
-                } else {
-                    // If still larger, inform user that compression isn't effective
-                    alert('Este PDF ya está optimizado. No se puede reducir más su tamaño sin pérdida significativa de calidad.');
-                    setCompressedPdf(null);
-                    setCompressedSize(0);
-                    setCompressionRatio(0);
-                    return;
-                }
-            } else {
-                setCompressedPdf(pdfBytes);
-                setCompressedSize(pdfBytes.length);
+                setNotice(images.total === 0
+                    ? 'Este PDF no tiene fotos ni escaneos que se puedan recomprimir y ya está optimizado: no se pudo reducir su tamaño.'
+                    : 'Este PDF ya está optimizado: no se pudo reducir su tamaño con este nivel. Prueba con un nivel de mayor compresión.');
+                return;
             }
-            
-            const ratio = ((originalSize - (compressedPdf?.length || pdfBytes.length)) / originalSize) * 100;
-            setCompressionRatio(Math.max(0, ratio));
+
+            setCompressedPdf(pdfBytes);
+            setCompressedSize(pdfBytes.length);
+            setCompressionRatio(((originalSize - pdfBytes.length) / originalSize) * 100);
 
         } catch (error) {
             console.error('Error comprimiendo PDF:', error);
-            alert('Error al comprimir el PDF. Por favor intenta con otro archivo.');
+            const encrypted = error instanceof Error && error.message.toLowerCase().includes('encrypted');
+            alert(encrypted
+                ? 'El PDF está protegido con contraseña. Quítale la protección e inténtalo de nuevo.'
+                : 'Error al comprimir el PDF. Por favor intenta con otro archivo.');
         } finally {
             setIsProcessing(false);
+            setProgressMessage('');
         }
     };
 
@@ -219,7 +197,7 @@ export default function PDFCompress() {
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
-        link.download = file.name.replace('.pdf', '_comprimido.pdf');
+        link.download = file.name.replace(/\.pdf$/i, '') + '_comprimido.pdf';
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
@@ -232,6 +210,8 @@ export default function PDFCompress() {
         setOriginalSize(0);
         setCompressedSize(0);
         setCompressionRatio(0);
+        setImageStats(null);
+        setNotice('');
         if (fileInputRef.current) {
             fileInputRef.current.value = '';
         }
@@ -307,6 +287,9 @@ export default function PDFCompress() {
                                                     <SelectItem value="high">Alta (Mejor calidad)</SelectItem>
                                                 </SelectContent>
                                             </Select>
+                                            <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">
+                                                {COMPRESSION_LEVELS[options.quality].hint}
+                                            </p>
                                         </div>
 
                                         <div className="flex items-center space-x-2">
@@ -332,8 +315,13 @@ export default function PDFCompress() {
                                                 }
                                                 className="rounded"
                                             />
-                                            <Label htmlFor="optimizeImages">Optimizar imágenes</Label>
+                                            <Label htmlFor="optimizeImages">Recomprimir fotos y escaneos</Label>
                                         </div>
+
+                                        <p className="flex items-start gap-2 text-xs text-slate-600 dark:text-slate-300">
+                                            <ShieldCheck className="mt-0.5 h-4 w-4 flex-shrink-0 text-green-600 dark:text-green-400" />
+                                            Todo se procesa en tu navegador: el PDF no se sube a ningún servidor.
+                                        </p>
                                     </div>
                                 </ToolCard>
 
@@ -348,7 +336,7 @@ export default function PDFCompress() {
                                             {isProcessing ? (
                                                 <>
                                                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                                    Comprimiendo...
+                                                    {progressMessage || 'Comprimiendo...'}
                                                 </>
                                             ) : (
                                                 <>
@@ -366,6 +354,13 @@ export default function PDFCompress() {
                                             ¿Cómo funciona? - Tour Interactivo
                                         </Button>
                                     </div>
+
+                                    {notice && (
+                                        <div className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700/60 dark:bg-amber-900/20 dark:text-amber-100">
+                                            <Info className="mt-0.5 h-4 w-4 flex-shrink-0" />
+                                            <p>{notice}</p>
+                                        </div>
+                                    )}
 
                                     {/* Results */}
                                     {compressedPdf && (
@@ -387,10 +382,16 @@ export default function PDFCompress() {
 
                                             <div className="bg-institutional/10 p-3 rounded-lg">
                                                 <p className="text-sm text-slate-600 dark:text-slate-300">Reducción de tamaño</p>
-                                                <p className="text-lg font-bold text-institutional">
+                                                <p className="text-lg font-bold text-institutional dark:text-[#8b9bd6]">
                                                     {compressionRatio.toFixed(1)}%
                                                 </p>
                                             </div>
+
+                                            {imageStats && imageStats.total > 0 && (
+                                                <p className="text-sm text-slate-600 dark:text-slate-300">
+                                                    Imágenes optimizadas: {imageStats.optimized} de {imageStats.total}
+                                                </p>
+                                            )}
 
                                             <Button
                                                 onClick={downloadCompressed}

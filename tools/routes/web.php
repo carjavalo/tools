@@ -255,9 +255,17 @@ Route::prefix('tools')->name('tools.')->group(function () {
     Route::post('word-to-pdf/convert', [App\Http\Controllers\WordToPDFController::class, 'convert'])->name('word-to-pdf.convert');
     Route::post('powerpoint-to-pdf/convert', [App\Http\Controllers\PowerPointToPDFController::class, 'convert'])->name('powerpoint-to-pdf.convert');
     Route::post('excel-to-pdf/convert', [App\Http\Controllers\ExcelToPDFController::class, 'convert'])->name('excel-to-pdf.convert');
-    Route::post('resume-document/generate', [App\Http\Controllers\ResumeDocumentController::class, 'generate'])->name('resume-document.generate');
-    Route::post('sign-pdf/sign', [App\Http\Controllers\SignPDFController::class, 'sign'])->name('sign-pdf.sign');
-    Route::post('protect-pdf/protect', [App\Http\Controllers\ProtectPDFController::class, 'protect'])->name('protect-pdf.protect');
+    // Ruta pública que consume el cupo de Groq: se limita por IP.
+    Route::post('resume-document/generate', [App\Http\Controllers\ResumeDocumentController::class, 'generate'])
+        ->middleware('throttle:6,1')
+        ->name('resume-document.generate');
+    // Proteger PDF cifra en el navegador; aquí solo llega la firma con certificado.
+    Route::post('sign-pdf/certificate', [App\Http\Controllers\SignPDFController::class, 'certificate'])
+        ->middleware('throttle:20,1')
+        ->name('sign-pdf.certificate');
+    Route::post('sign-pdf/sign', [App\Http\Controllers\SignPDFController::class, 'sign'])
+        ->middleware('throttle:20,1')
+        ->name('sign-pdf.sign');
     Route::post('ocr-extract/extract', [App\Http\Controllers\OCRController::class, 'extract'])->name('ocr-extract.extract');
 
     // CUPS endpoints

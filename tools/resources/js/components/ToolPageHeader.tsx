@@ -1,7 +1,7 @@
 import { Link } from '@inertiajs/react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { ArrowLeft, Building2 } from 'lucide-react';
+import { ArrowLeft } from 'lucide-react';
 
 interface ToolPageHeaderProps {
     title: string;
@@ -49,11 +49,12 @@ export default function ToolPageHeader({ title, description, icon: Icon, showPop
                         </div>
                     </div>
                     
-                    {/* Right badge - Hidden on mobile, visible on tablet+ */}
-                    <Badge variant="secondary" className="hidden sm:flex items-center gap-1 flex-shrink-0">
-                        <Building2 className="h-3 w-3" />
-                        <span>HUV</span>
-                    </Badge>
+                    {/* Hospital logo - Hidden on mobile, visible on tablet+ (white in dark mode) */}
+                    <img
+                        src="/images/logo.png"
+                        alt="Hospital Universitario del Valle"
+                        className="hidden sm:block h-14 w-auto flex-shrink-0 object-contain dark:brightness-0 dark:invert"
+                    />
                 </div>
             </div>
         </div>
