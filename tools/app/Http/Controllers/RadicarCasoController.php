@@ -934,6 +934,23 @@ class RadicarCasoController extends Controller
     }
 
     /**
+     * Convenios que ofrece el modal Modificar Radicado al escoger otra EPS
+     * para el paciente: los activos de esa EPS más el que ya tenía el caso.
+     * deLaEps dice cuáles son de la EPS, para que el modal no deje escogido
+     * por descuido el convenio de la EPS anterior.
+     */
+    public function conveniosModificar(Request $request, RadicarCaso $caso): JsonResponse
+    {
+        $request->validate(['eps' => ['nullable', 'string', 'max:255']]);
+        $eps = $request->query('eps');
+
+        return response()->json([
+            'convenios' => $this->conveniosParaModificar($caso, $eps),
+            'deLaEps' => $this->conveniosDeEps($eps)->pluck('nit_Convenio')->values(),
+        ]);
+    }
+
+    /**
      * CUPS (tipos de acuerdo) asociados a una EPS (por nombre) vía cuvs_eps.
      */
     private function acuerdosDeEps(?string $epsNombre)
@@ -1182,13 +1199,32 @@ class RadicarCasoController extends Controller
     {
         $this->normalizarCopago($request);
 
-        // Convenio: solo se acepta uno de los que ofrece el modal (los de la
-        // EPS del paciente o el que ya tenía el caso). Si no hay ninguno
-        // disponible no se exige, para no bloquear la edición del resto.
-        $epsPaciente = $caso->Ndocumento
-            ? User::where('Numero_D', $caso->Ndocumento)->value('Eps')
+        $paciente = $caso->Ndocumento
+            ? User::where('Numero_D', $caso->Ndocumento)->first()
             : null;
-        $conveniosValidos = $this->conveniosParaModificar($caso, $epsPaciente)
+        $epsAnterior = $paciente?->Eps;
+
+        // EPS: cuando el paciente se cambió de EPS se corrige desde aquí, y se
+        // guarda en el paciente (la radicación no la guarda: la toma de él).
+        // Vacía o sin paciente, se conserva la que tenía.
+        $request->validate([
+            'eps' => ['nullable', 'string', 'max:255', Rule::exists('eps', 'Nombre')],
+        ], [], ['eps' => 'EPS']);
+        $epsNueva = $paciente && $request->filled('eps') ? (string) $request->input('eps') : $epsAnterior;
+        $cambiaEps = $paciente && $epsNueva !== $epsAnterior;
+
+        // Cambiar la EPS es editar la cuenta del paciente: misma restricción
+        // del menú de usuario que en Gestión de Usuarios.
+        if ($cambiaEps && ! MenuUsuario::permiteSobre($request->user(), $paciente, MenuUsuario::PERFIL)) {
+            throw ValidationException::withMessages([
+                'eps' => 'Tu rol no tiene permitido cambiar la cuenta de este usuario: solo puedes editar pacientes.',
+            ]);
+        }
+
+        // Convenio: solo se acepta uno de los que ofrece el modal (los de la
+        // EPS escogida o el que ya tenía el caso). Si no hay ninguno
+        // disponible no se exige, para no bloquear la edición del resto.
+        $conveniosValidos = $this->conveniosParaModificar($caso, $epsNueva)
             ->pluck('nit_Convenio')
             ->all();
 
@@ -1296,10 +1332,22 @@ class RadicarCasoController extends Controller
         // El cambio y su registro en la bitácora van juntos: si algo falla, no
         // puede quedar un dato modificado sin rastro de quién lo modificó.
         try {
-            DB::transaction(function () use ($caso, $data, $request) {
+            DB::transaction(function () use ($caso, $data, $request, $paciente, $cambiaEps, $epsAnterior, $epsNueva) {
                 // Foto previa para poder registrar qué cambió exactamente.
                 $antes = $caso->getRawOriginal();
                 $procsAntes = $this->firmaProcedimientos($caso->codrad);
+
+                if ($cambiaEps) {
+                    $paciente->update(['Eps' => $epsNueva]);
+                    $this->registrarEvento(
+                        $caso->codrad,
+                        $request,
+                        'modificacion',
+                        'EPS del paciente',
+                        $epsAnterior ?: '—',
+                        $epsNueva,
+                    );
+                }
 
                 $caso->update(Arr::except($data, ['procedimientos']));
                 $this->registrarCambios($caso, $antes, $request, 'modificacion');

@@ -2120,6 +2120,8 @@ export default function RadicarSolicitud({
     const [modif, setModif] = useState({
         codservicio: '',
         Codesp: '',
+        // EPS del paciente: si se cambia, se guarda en el paciente.
+        eps: '',
         convenio: '',
         codMed: '',
         estRad: '',
@@ -2133,6 +2135,10 @@ export default function RadicarSolicitud({
         ObservacionTFX: '',
         procedimientos: [] as ProcRow[],
     });
+    // Convenios que ofrece el modal: los de la EPS escogida (más el que ya
+    // tenía el caso). Se vuelven a pedir al cambiar la EPS.
+    const [modifConvenios, setModifConvenios] = useState<ConvenioOpt[]>([]);
+    const [modifConveniosLoading, setModifConveniosLoading] = useState(false);
     const [borrando, setBorrando] = useState(false);
     const [histOk, setHistOk] = useState<string | null>(null);
     // Cotizaciones de conceptos no convenidos
@@ -3613,6 +3619,7 @@ export default function RadicarSolicitud({
             // Vacío en las radicaciones anteriores al campo: hay que escogerlo.
             codservicio: caso.codservicio ?? '',
             Codesp: caso.Codesp ?? '',
+            eps: caso.eps ?? '',
             convenio: caso.codConvenio ?? '',
             codMed: caso.codMed ?? '',
             estRad: caso.estRad ?? '',
@@ -3652,11 +3659,50 @@ export default function RadicarSolicitud({
             return copia;
         });
         setModifError(null);
+        setModifConvenios(caso.conveniosDisponibles ?? []);
         setModifOpen(true);
     };
 
     const setModifField = (campo: string, valor: string) =>
         setModif((prev) => ({ ...prev, [campo]: valor }));
+
+    // Otra EPS para el paciente: se traen sus convenios y, si el escogido no
+    // es de ella, se limpia para que se elija uno de la nueva.
+    const cambiarEpsModif = (eps: string) => {
+        if (!caso) return;
+        setModif((prev) => ({ ...prev, eps }));
+        setModifConveniosLoading(true);
+        fetch(
+            `/tools/radicar-solicitud/${caso.codrad}/convenios?eps=${encodeURIComponent(eps)}`,
+            { headers: { Accept: 'application/json' } },
+        )
+            .then(async (r) => {
+                if (!r.ok) {
+                    setModifError(await mensajeDeError(r));
+                    return null;
+                }
+                return r.json();
+            })
+            .then((d) => {
+                if (!d || !Array.isArray(d.convenios)) return;
+                const deLaEps: string[] = Array.isArray(d.deLaEps)
+                    ? d.deLaEps
+                    : [];
+                setModifConvenios(d.convenios as ConvenioOpt[]);
+                setModif((prev) => ({
+                    ...prev,
+                    convenio: deLaEps.includes(prev.convenio)
+                        ? prev.convenio
+                        : deLaEps.length === 1
+                          ? deLaEps[0]
+                          : '',
+                }));
+            })
+            .catch(() =>
+                setModifError('No fue posible cargar los convenios de la EPS.'),
+            )
+            .finally(() => setModifConveniosLoading(false));
+    };
 
     const setModifProc = (i: number, campo: keyof ProcRow, valor: string) =>
         setModif((prev) => ({
@@ -3693,6 +3739,7 @@ export default function RadicarSolicitud({
         fd.append('_method', 'PUT');
         fd.append('codservicio', modif.codservicio);
         fd.append('Codesp', modif.Codesp);
+        fd.append('eps', modif.eps);
         fd.append('convenio', modif.convenio);
         fd.append('codMed', modif.codMed);
         fd.append('estRad', modif.estRad);
@@ -10355,6 +10402,38 @@ export default function RadicarSolicitud({
                                 </p>
                             )}
                         </div>
+                        {/* EPS del paciente: si se cambió de EPS, se corrige
+                            aquí y se guarda en el paciente. Al cambiarla se
+                            cargan los convenios de la nueva EPS. */}
+                        <div className="grid gap-2 sm:col-span-2">
+                            <Label>EPS</Label>
+                            <Select
+                                value={modif.eps || undefined}
+                                onValueChange={cambiarEpsModif}
+                            >
+                                <SelectTrigger>
+                                    <SelectValue placeholder="Seleccione…" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {(modif.eps &&
+                                    !epsOpciones.includes(modif.eps)
+                                        ? [modif.eps, ...epsOpciones]
+                                        : epsOpciones
+                                    ).map((nombre) => (
+                                        <SelectItem key={nombre} value={nombre}>
+                                            {nombre}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                            {caso && modif.eps !== (caso.eps ?? '') && (
+                                <p className="text-xs text-amber-600 dark:text-amber-400">
+                                    La EPS del paciente cambiará de{' '}
+                                    {caso.eps || '—'} a {modif.eps} al guardar.
+                                    Revise el convenio.
+                                </p>
+                            )}
+                        </div>
                         {/* Convenio: los activos de la EPS del paciente. Si
                             el caso tiene uno que ya no está entre ellos, se
                             ofrece también para poder conservarlo. */}
@@ -10372,41 +10451,39 @@ export default function RadicarSolicitud({
                                         setModifField('convenio', v)
                                     }
                                     disabled={
-                                        (caso?.conveniosDisponibles ?? [])
-                                            .length === 0
+                                        modifConveniosLoading ||
+                                        modifConvenios.length === 0
                                     }
                                 >
                                     <SelectTrigger>
                                         <SelectValue
                                             placeholder={
-                                                (
-                                                    caso?.conveniosDisponibles ??
-                                                    []
-                                                ).length === 0
-                                                    ? 'La EPS no tiene convenios'
-                                                    : 'Seleccione…'
+                                                modifConveniosLoading
+                                                    ? 'Cargando convenios…'
+                                                    : modifConvenios.length ===
+                                                        0
+                                                      ? 'La EPS no tiene convenios'
+                                                      : 'Seleccione…'
                                             }
                                         />
                                     </SelectTrigger>
                                     <SelectContent>
-                                        {(caso?.conveniosDisponibles ?? []).map(
-                                            (c) => (
-                                                <SelectItem
-                                                    key={c.id}
-                                                    value={c.nit_Convenio}
-                                                >
-                                                    {[
-                                                        c.nombre,
-                                                        c.regimen,
-                                                        c.tarifa
-                                                            ? `Tarifa ${c.tarifa}`
-                                                            : '',
-                                                    ]
-                                                        .filter(Boolean)
-                                                        .join(' · ')}
-                                                </SelectItem>
-                                            ),
-                                        )}
+                                        {modifConvenios.map((c) => (
+                                            <SelectItem
+                                                key={c.id}
+                                                value={c.nit_Convenio}
+                                            >
+                                                {[
+                                                    c.nombre,
+                                                    c.regimen,
+                                                    c.tarifa
+                                                        ? `Tarifa ${c.tarifa}`
+                                                        : '',
+                                                ]
+                                                    .filter(Boolean)
+                                                    .join(' · ')}
+                                            </SelectItem>
+                                        ))}
                                     </SelectContent>
                                 </Select>
                             </div>

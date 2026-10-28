@@ -2741,6 +2741,69 @@ test('modificar radicado cambia el convenio por otro de la eps del paciente', fu
         ->toBe('Convenio CONV-B');
 });
 
+test('modificar radicado cambia la eps del paciente y acepta un convenio de la nueva eps', function () {
+    $admin = User::factory()->create();
+    $cups = Cups::create(['Nombre' => 'Proc', 'Estado' => true]);
+    Especialidad::create(['espcodser' => 'EC1', 'Nombre' => 'Cardiología', 'Estado' => true]);
+    Eps::create(['Nombre' => 'EPS VIEJA', 'nit_empresa' => 'NIT-VI', 'Estado' => true]);
+    Eps::create(['Nombre' => 'EPS NUEVA', 'nit_empresa' => 'NIT-NU', 'Estado' => true]);
+    foreach ([['CONV-V', 'NIT-VI'], ['CONV-N', 'NIT-NU']] as [$nit, $empresa]) {
+        Convenio::create([
+            'nit_Convenio' => $nit,
+            'nombre' => "Convenio {$nit}",
+            'regimen' => 'Contributivo',
+            'tarifa' => 'SOAT',
+            'nit_empresa' => $empresa,
+            'Estado' => true,
+        ]);
+    }
+    $paciente = User::factory()->create(['rol' => 'paciente', 'Numero_D' => '9991', 'Eps' => 'EPS VIEJA']);
+    $caso = RadicarCaso::create(['Ndocumento' => '9991', 'estRad' => '1', 'convenio' => 'CONV-V']);
+
+    $base = [
+        'codservicio' => servicioDePrueba(),
+        'Codesp' => 'EC1',
+        'codMed' => (string) $admin->id,
+        'estRad' => '1',
+        'fentregapro' => '2026-09-01',
+        'fecAutorizacion' => '2026-09-01',
+        'fechavenautorizacion' => '2026-12-01',
+        'procedimientos' => [['cusv_id' => $cups->id, 'N_Autorizacion' => 'A1']],
+    ];
+
+    // El modal pide los convenios de la EPS escogida: los suyos y el del caso.
+    $this->actingAs($admin)
+        ->getJson("/tools/radicar-solicitud/{$caso->codrad}/convenios?eps=".urlencode('EPS NUEVA'))
+        ->assertOk()
+        ->assertJsonPath('deLaEps', ['CONV-N'])
+        ->assertJsonCount(2, 'convenios');
+
+    // Con la EPS de siempre, el convenio de la nueva no se acepta.
+    $this->actingAs($admin)->putJson("/tools/radicar-solicitud/{$caso->codrad}", [...$base, 'convenio' => 'CONV-N'])
+        ->assertUnprocessable()->assertJsonValidationErrors(['convenio']);
+
+    // Una EPS que no existe tampoco.
+    $this->actingAs($admin)->putJson("/tools/radicar-solicitud/{$caso->codrad}", [...$base, 'eps' => 'NO EXISTE', 'convenio' => 'CONV-V'])
+        ->assertUnprocessable()->assertJsonValidationErrors(['eps']);
+
+    $this->actingAs($admin)->putJson("/tools/radicar-solicitud/{$caso->codrad}", [...$base, 'eps' => 'EPS NUEVA', 'convenio' => 'CONV-N'])
+        ->assertOk()
+        ->assertJsonPath('caso.eps', 'EPS NUEVA')
+        ->assertJsonPath('caso.codConvenio', 'CONV-N');
+
+    expect($paciente->refresh()->Eps)->toBe('EPS NUEVA')
+        ->and($caso->refresh()->convenio)->toBe('CONV-N');
+
+    $rastro = TrazabilidadCaso::where('codrad', $caso->codrad)->where('etiqueta', 'EPS del paciente')->first();
+    expect($rastro->anterior)->toBe('EPS VIEJA')
+        ->and($rastro->nuevo)->toBe('EPS NUEVA');
+
+    // Sin mandar la EPS, el paciente conserva la que tiene.
+    $this->actingAs($admin)->putJson("/tools/radicar-solicitud/{$caso->codrad}", [...$base, 'convenio' => 'CONV-N'])
+        ->assertOk();
+    expect($paciente->refresh()->Eps)->toBe('EPS NUEVA');
+});
+
 test('la consulta deja una sola fila por radicacion: su ultima modificacion', function () {
     $admin = User::factory()->create(['rol' => User::SUPER_ADMIN]);
     $otro = User::factory()->create();
