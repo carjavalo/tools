@@ -8,9 +8,17 @@ import { type PropsWithChildren } from 'react';
 export default function AppSidebarLayout({
     children,
     breadcrumbs = [],
-}: PropsWithChildren<{ breadcrumbs?: BreadcrumbItem[] }>) {
+    contraerMenu,
+}: PropsWithChildren<{
+    breadcrumbs?: BreadcrumbItem[];
+    contraerMenu?: string;
+}>) {
     return (
-        <AppShell variant="sidebar" style={{ backgroundColor: 'transparent' }}>
+        <AppShell
+            variant="sidebar"
+            style={{ backgroundColor: 'transparent' }}
+            contraerMenu={contraerMenu}
+        >
             <AppSidebar />
             <AppContent
                 variant="sidebar"

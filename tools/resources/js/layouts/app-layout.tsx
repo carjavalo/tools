@@ -5,6 +5,8 @@ import { type ReactNode } from 'react';
 interface AppLayoutProps {
     children: ReactNode;
     breadcrumbs?: BreadcrumbItem[];
+    // Vista que abre con el menú contraído (ver AppShell).
+    contraerMenu?: string;
 }
 
 export default ({ children, breadcrumbs, ...props }: AppLayoutProps) => (

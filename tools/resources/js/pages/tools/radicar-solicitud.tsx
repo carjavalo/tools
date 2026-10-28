@@ -4949,7 +4949,9 @@ export default function RadicarSolicitud({
     }, []);
 
     return (
-        <AppLayout breadcrumbs={breadcrumbs}>
+        // El menú arranca contraído para dar ancho a las grillas; el usuario
+        // puede expandirlo y se le recuerda.
+        <AppLayout breadcrumbs={breadcrumbs} contraerMenu="radicar-solicitud">
             <Head title="Radicar Solicitud" />
 
             <div className="flex h-full flex-1 flex-col gap-4 p-4 md:p-6">
