@@ -8,6 +8,7 @@ import {
     SidebarMenu,
     SidebarMenuButton,
     SidebarMenuItem,
+    SidebarRail,
 } from '@/components/ui/sidebar';
 import { dashboard } from '@/routes';
 import { type NavItem, type SharedData } from '@/types';
@@ -213,6 +214,9 @@ export function AppSidebar() {
             <SidebarFooter>
                 <NavUser />
             </SidebarFooter>
+
+            {/* Borde del menú: un clic lo expande o lo contrae. */}
+            <SidebarRail title="Expandir o contraer el menú" />
         </Sidebar>
     );
 }

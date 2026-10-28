@@ -12,10 +12,12 @@ import {
     SidebarMenuSub,
     SidebarMenuSubButton,
     SidebarMenuSubItem,
+    useSidebar,
 } from '@/components/ui/sidebar';
 import { type NavItem } from '@/types';
 import { Link, usePage } from '@inertiajs/react';
 import { ChevronRight } from 'lucide-react';
+import { useState } from 'react';
 
 function hrefToString(href: NavItem['href']): string {
     if (!href) return '';
@@ -24,10 +26,35 @@ function hrefToString(href: NavItem['href']): string {
 
 export function NavMain({ items = [] }: { items: NavItem[] }) {
     const page = usePage();
+    const { state, isMobile, setOpen } = useSidebar();
 
     const isActive = (href: NavItem['href']) => {
         const h = hrefToString(href);
         return h !== '' && h !== '#' ? page.url.startsWith(h) : false;
+    };
+
+    // Grupos desplegados. Arranca abierto el que contiene la vista actual.
+    const [abiertos, setAbiertos] = useState<Record<string, boolean>>(() =>
+        Object.fromEntries(
+            items
+                .filter((item) => item.items?.length)
+                .map((item) => [
+                    item.title,
+                    item.items!.some((sub) => isActive(sub.href)),
+                ]),
+        ),
+    );
+
+    // Con el menú contraído (solo íconos) los submenús no se ven: pulsar un
+    // grupo expande el menú y deja el grupo abierto, para que sus opciones
+    // queden a la vista.
+    const alternarGrupo = (titulo: string, abierto: boolean) => {
+        if (state === 'collapsed' && !isMobile) {
+            setOpen(true);
+            setAbiertos((prev) => ({ ...prev, [titulo]: true }));
+            return;
+        }
+        setAbiertos((prev) => ({ ...prev, [titulo]: abierto }));
     };
 
     return (
@@ -46,7 +73,10 @@ export function NavMain({ items = [] }: { items: NavItem[] }) {
                             <Collapsible
                                 key={item.title}
                                 asChild
-                                defaultOpen={childActive}
+                                open={abiertos[item.title] ?? childActive}
+                                onOpenChange={(v) =>
+                                    alternarGrupo(item.title, v)
+                                }
                                 className="group/collapsible"
                             >
                                 <SidebarMenuItem>
