@@ -36,9 +36,15 @@ export default function FileUploadZone({
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        if (e.target.files && e.target.files.length > 0) {
-            onFileSelect(e.target.files);
-        }
+        const files = e.target.files;
+        if (!files || files.length === 0) return;
+
+        // Copia estable de la lista: al vaciar el input, la original queda vacía.
+        const copy = new DataTransfer();
+        Array.from(files).forEach((file) => copy.items.add(file));
+        onFileSelect(copy.files);
+        // Sin esto, volver a elegir el mismo archivo no hacía nada.
+        e.target.value = '';
     };
 
     return (

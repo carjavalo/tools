@@ -1,190 +1,194 @@
-import { useState, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Head } from '@inertiajs/react';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Upload, Download, FileImage, Loader2, FileDown, Archive, HelpCircle } from 'lucide-react';
-import * as pdfjsLib from 'pdfjs-dist';
+import { Ban, CheckCheck, CheckCircle, Download, Eye, FileArchive, FileText, HelpCircle, Image as ImageIcon, Loader2, Upload } from 'lucide-react';
 import ToolPageHeader from '@/components/ToolPageHeader';
 import ToolCard from '@/components/ToolCard';
 import FileUploadZone from '@/components/FileUploadZone';
-import ProgressBar from '@/components/ProgressBar';
+import OptionButtons from '@/components/OptionButtons';
+import { usePdfThumbnails } from '@/hooks/use-pdf-thumbnails';
+import { downloadBlob, formatFileSize, isPdfFile, pdfBaseName } from '@/lib/pdf-pages';
 import { driver } from 'driver.js';
 import 'driver.js/dist/driver.css';
 
-// Configure PDF.js worker using unpkg CDN (compatible with Vite)
-// Using the same version as the installed pdfjs-dist package
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
+type ImageFormat = 'jpeg' | 'png';
 
-interface ImageData {
-    id: string;
-    pageNumber: number;
-    canvas: HTMLCanvasElement;
-    dataUrl: string;
-    filename: string;
+interface PageImage {
+    page: number;
+    blob: Blob;
+    name: string;
 }
 
-interface ConversionOptions {
-    format: 'png' | 'jpeg';
-    quality: number;
-    dpi: number;
-}
+const DPI_OPTIONS = [
+    { value: '72', label: '72 DPI (pantalla)' },
+    { value: '150', label: '150 DPI (normal)' },
+    { value: '300', label: '300 DPI (impresión)' },
+];
 
-interface Progress {
-    current: number;
-    total: number;
-    message: string;
-}
+const pageSequence = (total: number) => Array.from({ length: total }, (_, index) => index + 1);
 
 export default function PDFToImages() {
     const [pdfFile, setPdfFile] = useState<File | null>(null);
-    const [images, setImages] = useState<ImageData[]>([]);
-    const [options, setOptions] = useState<ConversionOptions>({
-        format: 'png',
-        quality: 0.9,
-        dpi: 150
-    });
+    const [selected, setSelected] = useState<Set<number>>(new Set());
+    const [format, setFormat] = useState<ImageFormat>('jpeg');
+    const [dpi, setDpi] = useState('150');
+    const [quality, setQuality] = useState('0.9');
     const [isProcessing, setIsProcessing] = useState(false);
-    const [progress, setProgress] = useState<Progress>({ current: 0, total: 0, message: '' });
+    const [progress, setProgress] = useState('');
+    const [results, setResults] = useState<PageImage[]>([]);
+    const [error, setError] = useState('');
     const [dragOver, setDragOver] = useState(false);
-    const fileInputRef = useRef<HTMLInputElement>(null);
+    const lastClickedRef = useRef<number | null>(null);
+
+    const { thumbnails, isRendering, error: thumbnailsError, exportPage } = usePdfThumbnails(pdfFile, 140);
+    const totalPages = thumbnails.length;
+    const renderedCount = thumbnails.filter(Boolean).length;
+    const extension = format === 'png' ? 'png' : 'jpg';
 
     const startTour = () => {
         const driverObj = driver({
             showProgress: true,
+            popoverClass: 'driverjs-theme',
+            prevBtnText: 'Anterior',
+            nextBtnText: 'Siguiente',
+            doneBtnText: 'Finalizar',
             steps: [
                 {
-                    element: '[data-tour="upload-zone"]',
+                    element: '[data-tour="upload"]',
                     popover: {
                         title: 'Paso 1: Subir PDF',
-                        description: 'Arrastra tu archivo PDF aquí o haz clic para seleccionarlo. El archivo se convertirá página por página.',
+                        description: 'Selecciona el PDF. Verás sus páginas abajo; todas quedan seleccionadas.',
                         side: 'right',
-                        align: 'start'
-                    }
+                        align: 'start',
+                    },
                 },
                 {
                     element: '[data-tour="options"]',
                     popover: {
-                        title: 'Paso 2: Configurar Opciones',
-                        description: 'Selecciona el formato (PNG o JPEG), la resolución DPI y la calidad de compresión para las imágenes resultantes.',
+                        title: 'Paso 2: Configurar',
+                        description: 'Elige JPG (más liviano) o PNG (sin pérdida) y la resolución. 300 DPI sirve para imprimir.',
                         side: 'left',
-                        align: 'start'
-                    }
+                        align: 'start',
+                    },
+                },
+                {
+                    element: '[data-tour="pages"]',
+                    popover: {
+                        title: 'Paso 3: Elegir Páginas',
+                        description: 'Haz clic en las páginas para incluirlas o quitarlas (Shift + clic para un rango).',
+                        side: 'top',
+                        align: 'start',
+                    },
                 },
                 {
                     element: '[data-tour="actions"]',
                     popover: {
-                        title: 'Paso 3: Convertir',
-                        description: 'Haz clic en "Convertir a Imágenes" para iniciar el proceso. Verás una vista previa de cada página convertida que podrás descargar.',
+                        title: 'Paso 4: Convertir',
+                        description: 'Haz clic en "Convertir a Imágenes". Varias páginas se descargan juntas en un ZIP.',
                         side: 'left',
-                        align: 'start'
-                    }
-                }
-            ]
+                        align: 'start',
+                    },
+                },
+            ],
         });
         driverObj.drive();
     };
 
-    const handleFileSelect = async (files: FileList) => {
+    const handleFileSelect = (files: FileList) => {
         const file = files[0];
-        if (!file || file.type !== 'application/pdf') {
-            alert('Por favor selecciona un archivo PDF válido.');
+        if (!file) return;
+
+        if (!isPdfFile(file)) {
+            setError('Por favor selecciona un archivo PDF válido.');
             return;
         }
 
+        if (file.size > 100 * 1024 * 1024) {
+            setError('El archivo es demasiado grande. Máximo 100MB permitido.');
+            return;
+        }
+
+        setError('');
+        setResults([]);
+        setSelected(new Set());
+        lastClickedRef.current = null;
         setPdfFile(file);
-        setImages([]);
-        await convertPDFToImages(file);
     };
 
-    const convertPDFToImages = async (file: File) => {
-        setIsProcessing(true);
-        setProgress({ current: 0, total: 0, message: 'Cargando PDF...' });
-        
-        try {
-            // Read PDF file
-            const arrayBuffer = await file.arrayBuffer();
-            const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-            const numPages = pdf.numPages;
-            
-            setProgress({ current: 0, total: numPages, message: 'Convirtiendo páginas...' });
-            
-            const newImages: ImageData[] = [];
-            const scale = options.dpi / 72; // Convert DPI to scale factor
+    // Al terminar de leer el PDF, todas las páginas quedan seleccionadas.
+    useEffect(() => {
+        setSelected(new Set(pageSequence(totalPages)));
+        lastClickedRef.current = null;
+    }, [totalPages]);
 
-            for (let pageNum = 1; pageNum <= numPages; pageNum++) {
-                setProgress({ current: pageNum - 1, total: numPages, message: `Convirtiendo página ${pageNum} de ${numPages}...` });
-                
-                const page = await pdf.getPage(pageNum);
-                const viewport = page.getViewport({ scale });
-                
-                // Create canvas
-                const canvas = document.createElement('canvas');
-                const context = canvas.getContext('2d')!;
-                canvas.height = viewport.height;
-                canvas.width = viewport.width;
-                
-                // Render page
-                await page.render({ canvasContext: context, viewport, canvas }).promise;
-                
-                // Convert to desired format
-                const quality = options.format === 'jpeg' ? options.quality : undefined;
-                const dataUrl = canvas.toDataURL(`image/${options.format}`, quality);
-                
-                const imageData: ImageData = {
-                    id: `page-${pageNum}`,
-                    pageNumber: pageNum,
-                    canvas,
-                    dataUrl,
-                    filename: `${file.name.replace('.pdf', '')}_page_${pageNum.toString().padStart(3, '0')}.${options.format}`
-                };
-                
-                newImages.push(imageData);
+    const togglePage = (page: number, extendRange: boolean) => {
+        const anchor = lastClickedRef.current;
+        lastClickedRef.current = page;
+        setResults([]);
+        setSelected((prev) => {
+            const next = new Set(prev);
+            const select = !prev.has(page);
+            const [from, to] = extendRange && anchor ? [Math.min(anchor, page), Math.max(anchor, page)] : [page, page];
+            for (let current = from; current <= to; current++) {
+                if (select) next.add(current);
+                else next.delete(current);
             }
-            
-            setImages(newImages);
-            setProgress({ current: numPages, total: numPages, message: `¡Conversión completada! ${numPages} imágenes generadas.` });
-            
-        } catch (error) {
-            console.error('Error converting PDF:', error);
-            alert('Error al convertir el PDF. Por favor intenta con otro archivo.');
+            return next;
+        });
+    };
+
+    const convert = async () => {
+        if (!pdfFile || selected.size === 0) return;
+
+        setIsProcessing(true);
+        setError('');
+        setResults([]);
+        const base = pdfBaseName(pdfFile);
+        const pages = [...selected].sort((a, b) => a - b);
+        const type = format === 'png' ? 'image/png' : 'image/jpeg';
+        const converted: PageImage[] = [];
+
+        try {
+            for (const [index, page] of pages.entries()) {
+                setProgress(`Convirtiendo página ${index + 1} de ${pages.length}...`);
+                const blob = await exportPage(page, parseInt(dpi, 10), type, parseFloat(quality));
+                converted.push({ page, blob, name: `${base}_pagina_${String(page).padStart(3, '0')}.${extension}` });
+            }
+            setResults(converted);
+
+            if (converted.length === 1) {
+                downloadBlob(converted[0].blob, converted[0].name);
+            } else {
+                setProgress('Armando el ZIP...');
+                await downloadZip(converted, `${base}_imagenes.zip`);
+            }
+        } catch (err) {
+            console.error('Error converting PDF to images:', err);
+            setError('No se pudieron convertir las páginas. Si el PDF es muy grande, prueba con una resolución menor.');
         } finally {
             setIsProcessing(false);
+            setProgress('');
         }
     };
 
-    const downloadSingleImage = (image: ImageData) => {
-        const link = document.createElement('a');
-        link.href = image.dataUrl;
-        link.download = image.filename;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+    // Un solo ZIP en vez de una descarga por página (el navegador bloquea las descargas múltiples).
+    const downloadZip = async (images: PageImage[], name: string) => {
+        const { default: JSZip } = await import('jszip');
+        const zip = new JSZip();
+        images.forEach((image) => zip.file(image.name, image.blob));
+        // Las imágenes ya vienen comprimidas: no vale la pena recomprimir.
+        downloadBlob(await zip.generateAsync({ type: 'blob', compression: 'STORE' }), name);
     };
 
-    const downloadAllImages = async () => {
-        if (images.length === 0) return;
-
-        setIsProcessing(true);
-        setProgress({ current: 0, total: images.length, message: 'Preparando descarga...' });
-
-        try {
-            // For multiple images, we'll trigger individual downloads
-            // In a real implementation, you might want to use JSZip to create a ZIP file
-            for (let i = 0; i < images.length; i++) {
-                setProgress({ current: i, total: images.length, message: `Descargando imagen ${i + 1} de ${images.length}...` });
-                downloadSingleImage(images[i]);
-                // Small delay to prevent browser blocking multiple downloads
-                await new Promise(resolve => setTimeout(resolve, 100));
-            }
-            
-            setProgress({ current: images.length, total: images.length, message: '¡Descarga completada!' });
-        } catch (error) {
-            console.error('Error downloading images:', error);
-            alert('Error al descargar las imágenes.');
-        } finally {
-            setIsProcessing(false);
-        }
+    const resetTool = () => {
+        setPdfFile(null);
+        setSelected(new Set());
+        setResults([]);
+        setError('');
+        lastClickedRef.current = null;
     };
 
     const handleDragOver = (e: React.DragEvent) => {
@@ -200,241 +204,206 @@ export default function PDFToImages() {
     const handleDrop = (e: React.DragEvent) => {
         e.preventDefault();
         setDragOver(false);
-        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-            handleFileSelect(e.dataTransfer.files);
-        }
+        if (e.dataTransfer.files.length > 0) handleFileSelect(e.dataTransfer.files);
     };
 
-    const resetTool = () => {
-        setPdfFile(null);
-        setImages([]);
-        setProgress({ current: 0, total: 0, message: '' });
-        if (fileInputRef.current) {
-            fileInputRef.current.value = '';
-        }
-    };
+    const totalSize = results.reduce((sum, item) => sum + item.blob.size, 0);
 
     return (
         <>
-            <Head title="PDF a Imágenes - Evaristools">
-                <meta name="description" content="Convierte páginas de PDF a imágenes JPG o PNG - Hospital Universitario del Valle" />
-            </Head>
+            <Head title="PDF a Imágenes - Evaristools" />
 
             <div className="min-h-screen bg-white dark:bg-[#1d1d1e]">
-                <ToolPageHeader
-                    title="PDF a Imágenes"
-                    description="Convierte cada página de tu PDF en imágenes individuales"
-                    icon={FileImage}
-                />
+                <ToolPageHeader title="PDF a Imágenes" description="Convierte las páginas de un PDF en imágenes JPG o PNG" icon={ImageIcon} />
 
-                {/* Main Content */}
                 <div className="container mx-auto px-4 py-8">
                     <div className="max-w-6xl mx-auto">
                         <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
-                            {/* Left Column: Upload, Progress & Results */}
-                            <div className="space-y-6">
-                                {/* Upload Section */}
-                                <ToolCard
-                                    title="Subir PDF"
-                                    description="Selecciona un archivo PDF para convertir sus páginas a imágenes."
-                                    icon={Upload}
-                                    data-tour="upload-zone"
-                                >
-                                    <FileUploadZone
-                                        onFileSelect={handleFileSelect}
-                                        acceptedTypes="application/pdf"
-                                        multiple={false}
-                                        dragOver={dragOver}
-                                        onDragOver={handleDragOver}
-                                        onDragEnter={handleDragOver}
-                                        onDragLeave={handleDragLeave}
-                                        onDrop={handleDrop}
-                                        title="Arrastra un archivo PDF aquí o haz clic para seleccionar"
-                                        subtitle="Solo archivos PDF"
-                                        buttonText="Seleccionar PDF"
-                                    />
-                                </ToolCard>
-
-                                {/* Progress */}
-                                {isProcessing && (
-                                    <ToolCard title="Progreso de Conversión">
-                                        <ProgressBar
-                                            progress={progress.total > 0 ? (progress.current / progress.total) * 100 : 0}
-                                            message={progress.message}
-                                            showPercentage={progress.total > 0}
+                            {/* Left Column: Upload & Messages */}
+                            <div className="space-y-6" data-tour="upload">
+                                {!pdfFile && (
+                                    <ToolCard title="Seleccionar PDF">
+                                        <FileUploadZone
+                                            onFileSelect={handleFileSelect}
+                                            acceptedTypes=".pdf,application/pdf"
+                                            dragOver={dragOver}
+                                            onDragOver={handleDragOver}
+                                            onDragEnter={handleDragOver}
+                                            onDragLeave={handleDragLeave}
+                                            onDrop={handleDrop}
+                                            title="Arrastra tu PDF aquí"
+                                            subtitle="o haz clic para seleccionar (máximo 100MB)"
                                         />
-                                        {progress.total > 0 && (
-                                            <p className="text-sm text-slate-500 dark:text-slate-400 text-center mt-2">
-                                                {progress.current}/{progress.total} páginas
-                                            </p>
-                                        )}
                                     </ToolCard>
                                 )}
 
-                                {/* Images Preview */}
-                                {images.length > 0 && (
-                                    <ToolCard
-                                        title={`Imágenes Generadas (${images.length})`}
-                                        description="Vista previa de las páginas convertidas"
-                                    >
-                                        <div className="space-y-4">
-                                            {/* Download All Button */}
-                                            <div className="flex justify-between items-center">
-                                                <p className="text-sm text-slate-600 dark:text-slate-300">
-                                                    {images.length} imagen{images.length !== 1 ? 'es' : ''} lista{images.length !== 1 ? 's' : ''} para descargar
-                                                </p>
-                                                <Button
-                                                    onClick={downloadAllImages}
-                                                    disabled={isProcessing}
-                                                    className="bg-institutional hover:bg-institutional/90"
-                                                    size="sm"
-                                                >
-                                                    {isProcessing ? (
-                                                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                                    ) : (
-                                                        <Archive className="mr-2 h-4 w-4" />
-                                                    )}
-                                                    Descargar Todas
-                                                </Button>
-                                            </div>
+                                {(error || thumbnailsError) && (
+                                    <ToolCard title="Error">
+                                        <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+                                            <p className="text-red-800 dark:text-red-200">
+                                                {error || 'No se pudo abrir este PDF. Si está protegido con contraseña, quítale la protección primero.'}
+                                            </p>
+                                        </div>
+                                    </ToolCard>
+                                )}
 
-                                            {/* Images Grid */}
-                                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 max-h-96 overflow-y-auto">
-                                                {images.map((image) => (
-                                                    <div
-                                                        key={image.id}
-                                                        className="border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden bg-white dark:bg-slate-800"
-                                                    >
-                                                        <div className="aspect-[3/4] relative">
-                                                            <img
-                                                                src={image.dataUrl}
-                                                                alt={`Página ${image.pageNumber}`}
-                                                                className="w-full h-full object-contain"
-                                                            />
-                                                        </div>
-                                                        <div className="p-2">
-                                                            <p className="text-xs text-slate-600 dark:text-slate-300 mb-2 truncate">
-                                                                Página {image.pageNumber}
-                                                            </p>
-                                                            <Button
-                                                                onClick={() => downloadSingleImage(image)}
-                                                                size="sm"
-                                                                className="w-full bg-institutional hover:bg-institutional/90"
-                                                            >
-                                                                <Download className="h-3 w-3 mr-1" />
-                                                                Descargar
-                                                            </Button>
-                                                        </div>
-                                                    </div>
-                                                ))}
+                                {pdfFile && (
+                                    <ToolCard title="Archivo Seleccionado">
+                                        <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-[#222322] rounded-lg">
+                                            <div className="flex min-w-0 items-center space-x-3">
+                                                <FileText className="h-8 w-8 flex-shrink-0 text-institutional" />
+                                                <div className="min-w-0">
+                                                    <p className="truncate font-medium text-slate-900 dark:text-white">{pdfFile.name}</p>
+                                                    <p className="text-sm text-slate-600 dark:text-slate-300">
+                                                        {totalPages > 0 ? `${totalPages} ${totalPages === 1 ? 'página' : 'páginas'} · ` : ''}
+                                                        {formatFileSize(pdfFile.size)}
+                                                    </p>
+                                                </div>
                                             </div>
+                                        </div>
+                                    </ToolCard>
+                                )}
+
+                                {results.length > 0 && (
+                                    <ToolCard title="¡Imágenes Listas!">
+                                        <div className="space-y-4">
+                                            <div className="flex items-center justify-center space-x-3 p-6 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
+                                                <CheckCircle className="h-8 w-8 flex-shrink-0 text-green-600" />
+                                                <div>
+                                                    <p className="font-medium text-green-800 dark:text-green-200">
+                                                        {results.length === 1 ? 'Se descargó 1 imagen.' : `Se descargaron ${results.length} imágenes en un ZIP.`}
+                                                    </p>
+                                                    <p className="text-sm text-green-600 dark:text-green-300">{formatFileSize(totalSize)} en total</p>
+                                                </div>
+                                            </div>
+                                            {results.length > 1 && (
+                                                <Button
+                                                    onClick={() => pdfFile && downloadZip(results, `${pdfBaseName(pdfFile)}_imagenes.zip`)}
+                                                    variant="outline"
+                                                    className="w-full"
+                                                >
+                                                    <FileArchive className="mr-2 h-4 w-4" />
+                                                    Descargar el ZIP de nuevo
+                                                </Button>
+                                            )}
+                                            <ul className="max-h-60 divide-y divide-slate-200 overflow-y-auto rounded-lg border border-slate-200 dark:divide-slate-700 dark:border-slate-700">
+                                                {results.map((item) => (
+                                                    <li key={item.page} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
+                                                        <span className="truncate text-slate-700 dark:text-slate-200">{item.name}</span>
+                                                        <span className="flex flex-shrink-0 items-center gap-2">
+                                                            <span className="text-xs text-slate-500">{formatFileSize(item.blob.size)}</span>
+                                                            <Button
+                                                                size="icon"
+                                                                variant="ghost"
+                                                                className="h-7 w-7"
+                                                                onClick={() => downloadBlob(item.blob, item.name)}
+                                                                aria-label={`Descargar ${item.name}`}
+                                                            >
+                                                                <Download className="h-4 w-4" />
+                                                            </Button>
+                                                        </span>
+                                                    </li>
+                                                ))}
+                                            </ul>
                                         </div>
                                     </ToolCard>
                                 )}
                             </div>
 
-                            {/* Right Column: Always visible Options, Actions & Instructions */}
+                            {/* Right Column: Options & Actions */}
                             <div className="space-y-6">
-                                {/* Conversion Options */}
-                                <ToolCard
-                                    title="Opciones de Conversión"
-                                    description="Configura el formato y calidad de las imágenes"
-                                    data-tour="options"
-                                >
-                                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                                <ToolCard title="Opciones de Conversión" data-tour="options">
+                                    <div className="space-y-5">
+                                        <div className="space-y-2">
+                                            <Label id="format-label">Formato</Label>
+                                            <OptionButtons
+                                                labelledBy="format-label"
+                                                value={format}
+                                                onChange={(value) => {
+                                                    setFormat(value);
+                                                    setResults([]);
+                                                }}
+                                                className="grid-cols-2"
+                                                options={[
+                                                    { value: 'jpeg', label: 'JPG (más liviano)' },
+                                                    { value: 'png', label: 'PNG (sin pérdida)' },
+                                                ]}
+                                            />
+                                        </div>
+                                        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                                             <div className="space-y-2">
-                                                <Label htmlFor="format">Formato</Label>
+                                                <Label htmlFor="dpi">Resolución</Label>
                                                 <Select
-                                                    value={options.format}
-                                                    onValueChange={(value: 'png' | 'jpeg') => 
-                                                        setOptions({ ...options, format: value })
-                                                    }
+                                                    value={dpi}
+                                                    onValueChange={(value) => {
+                                                        setDpi(value);
+                                                        setResults([]);
+                                                    }}
                                                 >
-                                                    <SelectTrigger>
+                                                    <SelectTrigger id="dpi">
                                                         <SelectValue />
                                                     </SelectTrigger>
                                                     <SelectContent>
-                                                        <SelectItem value="png">PNG (sin pérdida)</SelectItem>
-                                                        <SelectItem value="jpeg">JPEG (comprimido)</SelectItem>
+                                                        {DPI_OPTIONS.map((option) => (
+                                                            <SelectItem key={option.value} value={option.value}>
+                                                                {option.label}
+                                                            </SelectItem>
+                                                        ))}
                                                     </SelectContent>
                                                 </Select>
                                             </div>
-
-                                            <div className="space-y-2">
-                                                <Label htmlFor="dpi">Resolución (DPI)</Label>
-                                                <Select
-                                                    value={options.dpi.toString()}
-                                                    onValueChange={(value) => 
-                                                        setOptions({ ...options, dpi: parseInt(value) })
-                                                    }
-                                                >
-                                                    <SelectTrigger>
-                                                        <SelectValue />
-                                                    </SelectTrigger>
-                                                    <SelectContent>
-                                                        <SelectItem value="72">72 DPI (Web)</SelectItem>
-                                                        <SelectItem value="150">150 DPI (Normal)</SelectItem>
-                                                        <SelectItem value="300">300 DPI (Alta)</SelectItem>
-                                                        <SelectItem value="600">600 DPI (Máxima)</SelectItem>
-                                                    </SelectContent>
-                                                </Select>
-                                            </div>
-
-                                            {options.format === 'jpeg' && (
+                                            {format === 'jpeg' && (
                                                 <div className="space-y-2">
-                                                    <Label htmlFor="quality">Calidad JPEG</Label>
+                                                    <Label htmlFor="quality">Calidad JPG</Label>
                                                     <Select
-                                                        value={options.quality.toString()}
-                                                        onValueChange={(value) => 
-                                                            setOptions({ ...options, quality: parseFloat(value) })
-                                                        }
+                                                        value={quality}
+                                                        onValueChange={(value) => {
+                                                            setQuality(value);
+                                                            setResults([]);
+                                                        }}
                                                     >
-                                                        <SelectTrigger>
+                                                        <SelectTrigger id="quality">
                                                             <SelectValue />
                                                         </SelectTrigger>
                                                         <SelectContent>
-                                                            <SelectItem value="0.6">60% (Básica)</SelectItem>
-                                                            <SelectItem value="0.8">80% (Buena)</SelectItem>
-                                                            <SelectItem value="0.9">90% (Alta)</SelectItem>
-                                                            <SelectItem value="1.0">100% (Máxima)</SelectItem>
+                                                            <SelectItem value="0.7">70% (liviana)</SelectItem>
+                                                            <SelectItem value="0.8">80% (buena)</SelectItem>
+                                                            <SelectItem value="0.9">90% (alta)</SelectItem>
+                                                            <SelectItem value="1">100% (máxima)</SelectItem>
                                                         </SelectContent>
                                                     </Select>
                                                 </div>
                                             )}
                                         </div>
+                                    </div>
                                 </ToolCard>
 
-                                {/* Actions */}
                                 <ToolCard title="Acciones" data-tour="actions">
                                     <div className="space-y-3">
                                         <div className="flex flex-col sm:flex-row gap-3">
                                             <Button
-                                                onClick={() => pdfFile && convertPDFToImages(pdfFile)}
-                                                disabled={isProcessing || !pdfFile}
+                                                onClick={convert}
+                                                disabled={!pdfFile || selected.size === 0 || isProcessing || totalPages === 0}
                                                 className="flex-1 bg-institutional hover:bg-institutional/90"
-                                             >
+                                            >
                                                 {isProcessing ? (
                                                     <>
                                                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                                        Convirtiendo...
+                                                        {progress || 'Convirtiendo...'}
                                                     </>
                                                 ) : (
                                                     <>
-                                                        <FileImage className="mr-2 h-4 w-4" />
-                                                        Convertir a Imágenes
+                                                        <ImageIcon className="mr-2 h-4 w-4" />
+                                                        Convertir a Imágenes {selected.size > 0 && `(${selected.size})`}
                                                     </>
                                                 )}
                                             </Button>
-                                            <Button
-                                                onClick={resetTool}
-                                                variant="outline"
-                                                className="flex-1"
-                                                disabled={isProcessing}
-                                            >
+                                            <Button onClick={resetTool} variant="outline" className="flex-1" disabled={isProcessing || !pdfFile}>
                                                 <Upload className="mr-2 h-4 w-4" />
                                                 Seleccionar Otro PDF
                                             </Button>
                                         </div>
+                                        <p className="text-xs text-slate-600 dark:text-slate-400">Todo se procesa en tu navegador: el PDF no se sube a ningún servidor.</p>
                                         <Button
                                             onClick={startTour}
                                             variant="outline"
@@ -447,6 +416,74 @@ export default function PDFToImages() {
                                 </ToolCard>
                             </div>
                         </div>
+
+                        {pdfFile && totalPages > 0 && (
+                            <ToolCard
+                                title="Páginas"
+                                description="Haz clic para incluir o quitar páginas (Shift + clic para un rango)."
+                                icon={Eye}
+                                className="mt-8"
+                                data-tour="pages"
+                            >
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <Badge variant="outline">
+                                        {selected.size} de {totalPages} seleccionadas
+                                    </Badge>
+                                    <Button size="sm" variant="ghost" onClick={() => setSelected(new Set(pageSequence(totalPages)))}>
+                                        <CheckCheck className="mr-1 h-4 w-4" />
+                                        Todas
+                                    </Button>
+                                    <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())} disabled={selected.size === 0}>
+                                        <Ban className="mr-1 h-4 w-4" />
+                                        Ninguna
+                                    </Button>
+                                    {isRendering && (
+                                        <span className="flex items-center text-sm text-slate-600 dark:text-slate-300">
+                                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                            Generando vista previa... {renderedCount}/{totalPages}
+                                        </span>
+                                    )}
+                                </div>
+                                <div className="grid max-h-[70vh] grid-cols-3 gap-3 overflow-y-auto p-1 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8">
+                                    {pageSequence(totalPages).map((page) => {
+                                        const isSelected = selected.has(page);
+                                        const thumbnail = thumbnails[page - 1];
+                                        return (
+                                            <button
+                                                key={page}
+                                                type="button"
+                                                onClick={(e) => togglePage(page, e.shiftKey)}
+                                                aria-pressed={isSelected}
+                                                aria-label={`Página ${page}: ${isSelected ? 'incluida' : 'no incluida'}`}
+                                                className={`flex flex-col overflow-hidden rounded-lg border bg-white text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-institutional dark:bg-[#2a2a2b] ${
+                                                    isSelected
+                                                        ? 'border-transparent ring-2 ring-institutional dark:ring-[#8b9bd6]'
+                                                        : 'border-dashed border-slate-300 dark:border-slate-600'
+                                                }`}
+                                            >
+                                                <span className="relative flex aspect-[3/4] items-center justify-center bg-slate-100 p-1 dark:bg-[#1d1d1e]">
+                                                    {thumbnail ? (
+                                                        <img
+                                                            src={thumbnail}
+                                                            alt=""
+                                                            className={`max-h-full max-w-full object-contain ${isSelected ? '' : 'opacity-40 grayscale'}`}
+                                                        />
+                                                    ) : (
+                                                        <Loader2 className="h-5 w-5 animate-spin text-slate-400" />
+                                                    )}
+                                                    {isSelected && (
+                                                        <CheckCircle className="absolute top-1 right-1 h-4 w-4 rounded-full bg-white text-institutional dark:bg-[#1d1d1e] dark:text-[#8b9bd6]" />
+                                                    )}
+                                                </span>
+                                                <span className="border-t border-slate-200 px-2 py-1 text-center text-xs font-medium text-slate-700 dark:border-[#3f3f40] dark:text-slate-200">
+                                                    {page}
+                                                </span>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </ToolCard>
+                        )}
                     </div>
                 </div>
             </div>

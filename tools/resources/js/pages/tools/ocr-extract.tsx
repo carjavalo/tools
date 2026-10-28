@@ -1,39 +1,41 @@
-import { useState, useRef } from 'react';
+import { useState } from 'react';
 import { Head } from '@inertiajs/react';
-import axios from 'axios';
 import { Button } from '@/components/ui/button';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Badge } from '@/components/ui/badge';
-import { FileText, Upload, Download, Copy, Loader2, Eye, HelpCircle, ScanText, StickyNote, Check } from 'lucide-react';
-import { driver } from 'driver.js';
-import 'driver.js/dist/driver.css';
+import { Textarea } from '@/components/ui/textarea';
+import { Check, CheckCircle, Copy, Download, FileText, HelpCircle, Loader2, ScanText, ShieldAlert, Upload } from 'lucide-react';
 import ToolPageHeader from '@/components/ToolPageHeader';
 import ToolCard from '@/components/ToolCard';
 import FileUploadZone from '@/components/FileUploadZone';
-import ProgressBar from '@/components/ProgressBar';
+import OptionButtons from '@/components/OptionButtons';
+import { loadPdfDocument, renderPageToBlob } from '@/hooks/use-pdf-thumbnails';
+import { isHeicFile, loadImageFile } from '@/lib/image-tools';
+import { OCR_LANGUAGES, prepareImageForOcr, runOcr, type OcrLanguage } from '@/lib/ocr';
+import { downloadBlob, formatFileSize, isPdfFile } from '@/lib/pdf-pages';
+import { driver } from 'driver.js';
+import 'driver.js/dist/driver.css';
 
-interface OCROptions {
-    language: 'spa' | 'eng' | 'spa+eng';
-    outputFormat: 'text' | 'json';
+// Cada página consume una consulta de OCR.space.
+const MAX_PDF_PAGES = 20;
+const MAX_FILE_BYTES = 25 * 1024 * 1024;
+
+interface OcrPart {
+    label: string;
+    text: string;
+    error?: string;
 }
 
 export default function OCRExtract() {
     const [file, setFile] = useState<File | null>(null);
-    const [previewUrl, setPreviewUrl] = useState<string>('');
+    const [preview, setPreview] = useState<string | null>(null);
+    const [language, setLanguage] = useState<OcrLanguage>('spa');
     const [isProcessing, setIsProcessing] = useState(false);
-    const [progress, setProgress] = useState<number>(0);
-    const [extractedText, setExtractedText] = useState<string>('');
-    const [confidence, setConfidence] = useState<number>(0);
-    const [processingStep, setProcessingStep] = useState<string>('');
-    const [isCopied, setIsCopied] = useState(false);
-    const [options, setOptions] = useState<OCROptions>({
-        language: 'spa+eng',
-        outputFormat: 'text'
-    });
-    
-    const fileInputRef = useRef<HTMLInputElement>(null);
+    const [progress, setProgress] = useState('');
+    const [parts, setParts] = useState<OcrPart[]>([]);
+    const [text, setText] = useState('');
+    const [copied, setCopied] = useState(false);
+    const [error, setError] = useState('');
+    const [dragOver, setDragOver] = useState(false);
 
     const startTour = () => {
         const driverObj = driver({
@@ -46,84 +48,65 @@ export default function OCRExtract() {
                 {
                     element: '[data-tour="upload"]',
                     popover: {
-                        title: 'Paso 1: Subir Imagen',
-                        description: 'Selecciona una imagen (JPG, PNG, etc.) que contenga texto. El sistema usará OCR para extraer el texto automáticamente.',
+                        title: 'Paso 1: Subir Archivo',
+                        description: `Sube una imagen (JPG, PNG, WebP o foto HEIC del iPhone) o un PDF escaneado de hasta ${MAX_PDF_PAGES} páginas.`,
                         side: 'right',
-                        align: 'start'
-                    }
+                        align: 'start',
+                    },
                 },
                 {
                     element: '[data-tour="options"]',
                     popover: {
-                        title: 'Paso 2: Configurar OCR',
-                        description: 'Selecciona el idioma del texto en la imagen. El OCR funciona mejor con imágenes de alta calidad y texto claro.',
+                        title: 'Paso 2: Idioma',
+                        description: 'Elige el idioma del texto y haz clic en "Extraer Texto".',
                         side: 'left',
-                        align: 'start'
-                    }
+                        align: 'start',
+                    },
                 },
                 {
-                    element: '[data-tour="options"]',
+                    element: '[data-tour="result"]',
                     popover: {
-                        title: 'Paso 3: Extraer y Ver Resultados',
-                        description: 'Haz clic en "Extraer Texto" para procesar la imagen. El texto extraído aparecerá debajo y podrás copiarlo o descargarlo.',
-                        side: 'left',
-                        align: 'start'
-                    }
-                }
-            ]
+                        title: 'Paso 3: Revisar el Texto',
+                        description: 'Corrige lo que haga falta en el recuadro y cópialo o descárgalo como archivo de texto.',
+                        side: 'top',
+                        align: 'start',
+                    },
+                },
+            ],
         });
         driverObj.drive();
     };
-    const dropZoneRef = useRef<HTMLDivElement>(null);
-    const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-    const supportedFormats = ['image/jpeg', 'image/jpg', 'image/png', 'image/bmp', 'image/tiff'];
-    const imageFormats = ['image/jpeg', 'image/jpg', 'image/png', 'image/bmp', 'image/tiff'];
+    const handleFileSelect = async (files: FileList) => {
+        const selected = files[0];
+        if (!selected) return;
 
-    const handleFileSelect = (selectedFile: File) => {
-        // Check if it's a PDF
-        if (selectedFile.type === 'application/pdf') {
-            alert('⚠️ Los archivos PDF no son soportados directamente por el OCR.\n\n💡 Sugerencias:\n• Convierte las páginas del PDF a imágenes (JPG/PNG)\n• Usa herramientas como "PDF a Imágenes"\n• Toma capturas de pantalla de las páginas\n\nFormatos soportados: JPG, PNG, BMP, TIFF');
+        const pdf = isPdfFile(selected);
+        if (!pdf && !selected.type.startsWith('image/') && !(await isHeicFile(selected))) {
+            setError('Selecciona una imagen (JPG, PNG, WebP o HEIC) o un PDF.');
             return;
         }
-        
-        if (!imageFormats.includes(selectedFile.type)) {
-            alert('Por favor selecciona un archivo de imagen válido.\n\nFormatos soportados: JPG, PNG, BMP, TIFF');
+        if (selected.size > MAX_FILE_BYTES) {
+            setError('El archivo es demasiado grande. Máximo 25MB.');
             return;
         }
-        
-        setFile(selectedFile);
-        setExtractedText('');
-        setConfidence(0);
-        setProgress(0);
-        
-        // Create preview URL
-        const url = URL.createObjectURL(selectedFile);
-        setPreviewUrl(url);
-    };
 
-    const handleDragOver = (e: React.DragEvent) => {
-        e.preventDefault();
-        e.stopPropagation();
-    };
+        setError('');
+        setParts([]);
+        setText('');
+        if (preview) URL.revokeObjectURL(preview);
+        setPreview(null);
+        setFile(selected);
 
-    const handleDragEnter = (e: React.DragEvent) => {
-        e.preventDefault();
-        e.stopPropagation();
-    };
-
-    const handleDragLeave = (e: React.DragEvent) => {
-        e.preventDefault();
-        e.stopPropagation();
-    };
-
-    const handleDrop = (e: React.DragEvent) => {
-        e.preventDefault();
-        e.stopPropagation();
-        
-        const files = Array.from(e.dataTransfer.files);
-        if (files.length > 0) {
-            handleFileSelect(files[0]);
+        if (!pdf) {
+            try {
+                // Miniatura ya derecha, aunque sea HEIC o venga girada.
+                const image = await loadImageFile(selected, { maxDimension: 900, jpegQuality: 0.85 });
+                setPreview(image.url);
+            } catch (err) {
+                setFile(null);
+                setError(err instanceof Error ? err.message : 'No se pudo leer la imagen.');
+            }
         }
     };
 
@@ -131,322 +114,208 @@ export default function OCRExtract() {
         if (!file) return;
 
         setIsProcessing(true);
-        setProgress(0);
-        setExtractedText('');
-        setConfidence(0);
-        
-        let progressInterval: NodeJS.Timeout | null = null;
+        setError('');
+        setParts([]);
+        setText('');
+        const results: OcrPart[] = [];
 
         try {
-            setProcessingStep('Preparando archivo...');
-            setProgress(10);
-            
-            // Create FormData to send file to backend
-            const formData = new FormData();
-            formData.append('file', file);
-            formData.append('language', options.language);
-            
-            setProcessingStep('Extrayendo texto de la imagen... (esto puede tomar hasta 2 minutos)');
-            setProgress(30);
-            
-            // Simulate progress to show activity during long processing
-            progressInterval = setInterval(() => {
-                setProgress(prev => {
-                    if (prev < 85) {
-                        return prev + 1;
-                    }
-                    return prev;
+            if (isPdfFile(file)) {
+                setProgress('Abriendo el PDF...');
+                const pdf = await loadPdfDocument(file).catch(() => {
+                    throw new Error('No se pudo abrir el PDF. Si está protegido con contraseña, quítale la protección primero.');
                 });
-            }, 1000);
-            
-            // Send to backend
-            const response = await axios.post('/tools/ocr-extract/extract', formData, {
-                headers: {
-                    'Content-Type': 'multipart/form-data',
-                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
-                },
-                timeout: 120000, // 120 seconds timeout (2 minutes) - OCR processing can take time for large images
-                onUploadProgress: (progressEvent) => {
-                    if (progressEvent.total) {
-                        const uploadProgress = Math.round((progressEvent.loaded * 100) / progressEvent.total);
-                        if (uploadProgress < 100) {
-                            setProgress(10 + (uploadProgress * 0.2)); // Upload takes 10-30%
-                        }
+                try {
+                    if (pdf.numPages > MAX_PDF_PAGES) {
+                        throw new Error(`El PDF tiene ${pdf.numPages} páginas. El máximo es ${MAX_PDF_PAGES}: divídelo primero con "Dividir PDF".`);
                     }
+                    for (let page = 1; page <= pdf.numPages; page++) {
+                        setProgress(`Leyendo página ${page} de ${pdf.numPages}...`);
+                        const image = await prepareImageForOcr(await renderPageToBlob(pdf, page, 200, 'image/jpeg', 0.85));
+                        try {
+                            results.push({ label: `Página ${page}`, text: await runOcr(image, language) });
+                        } catch (err) {
+                            results.push({ label: `Página ${page}`, text: '', error: (err as Error).message });
+                        }
+                        setParts([...results]);
+                    }
+                } finally {
+                    pdf.destroy();
                 }
-            });
-            
-            if (progressInterval) {
-                clearInterval(progressInterval);
-            }
-            setProgress(90);
-            
-            if (response.data.success) {
-                setExtractedText(response.data.text);
-                setConfidence(response.data.confidence);
-                setProcessingStep('¡Texto extraído exitosamente!');
-                setProgress(100);
             } else {
-                throw new Error(response.data.error || 'Error al procesar');
+                setProgress('Preparando la imagen...');
+                const image = await prepareImageForOcr(file);
+                setProgress('Extrayendo texto...');
+                results.push({ label: file.name, text: await runOcr(image, language) });
             }
 
-        } catch (error: any) {
-            // Clear progress interval if it exists
-            if (progressInterval) {
-                clearInterval(progressInterval);
-            }
-            console.error('Error extrayendo texto:', error);
-            
-            let errorMessage = 'Error al extraer texto de la imagen. Por favor intenta con otra imagen.';
-            
-            if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
-                errorMessage = '⏱️ El procesamiento está tomando más tiempo del esperado.\n\n💡 Sugerencias:\n• Intenta con una imagen más pequeña\n• Asegúrate de que la imagen sea clara y de buena calidad\n• Verifica tu conexión a internet\n• Si el problema persiste, intenta de nuevo en unos momentos';
-            } else if (error.response?.data?.error) {
-                errorMessage = error.response.data.error;
-            } else if (error.message) {
-                errorMessage = error.message;
-            }
-            
-            alert(errorMessage);
-            setProcessingStep('Error en el procesamiento');
+            const failed = results.filter((part) => part.error);
+            if (failed.length === results.length) throw new Error(failed[0]?.error ?? 'No se pudo extraer el texto.');
+
+            const multiple = results.length > 1;
+            const combined = results
+                .map((part) => (multiple ? `--- ${part.label} ---\n${part.error ? `[No se pudo leer: ${part.error}]` : part.text}` : part.text))
+                .join('\n\n')
+                .trim();
+            setParts(results);
+            setText(combined);
+            if (!combined) setError('No se encontró texto en el archivo. Revisa que la imagen sea nítida y esté derecha.');
+        } catch (err) {
+            console.error('Error extracting text:', err);
+            setError(err instanceof Error ? err.message : 'No se pudo extraer el texto.');
         } finally {
             setIsProcessing(false);
-            if (progress !== 100) {
-                setProgress(0);
-            }
+            setProgress('');
+        }
+    };
+
+    const copyText = async () => {
+        try {
+            await navigator.clipboard.writeText(text);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+        } catch {
+            setCopied(false);
         }
     };
 
     const downloadText = () => {
-        if (!extractedText || !file) return;
-
-        const blob = new Blob([extractedText], { type: 'text/plain' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        const fileName = file.name.replace(/\.[^/.]+$/, '') + '_texto_extraido.txt';
-        link.download = fileName;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
-    };
-
-    const copyToClipboard = async () => {
-        if (!extractedText) return;
-
-        try {
-            await navigator.clipboard.writeText(extractedText);
-            setIsCopied(true);
-            setTimeout(() => setIsCopied(false), 2000);
-        } catch (error) {
-            console.error('Error copiando al portapapeles:', error);
-            // Fallback for older browsers
-            if (textareaRef.current) {
-                textareaRef.current.select();
-                document.execCommand('copy');
-                setIsCopied(true);
-                setTimeout(() => setIsCopied(false), 2000);
-            }
-        }
+        const base = file?.name.replace(/\.[^.]+$/, '') ?? 'texto';
+        downloadBlob(new Blob([text], { type: 'text/plain;charset=utf-8' }), `${base}_texto.txt`);
     };
 
     const reset = () => {
+        if (preview) URL.revokeObjectURL(preview);
+        setPreview(null);
         setFile(null);
-        setPreviewUrl('');
-        setExtractedText('');
-        setConfidence(0);
-        setProgress(0);
-        setProcessingStep('');
-        if (fileInputRef.current) {
-            fileInputRef.current.value = '';
-        }
-        if (previewUrl) {
-            URL.revokeObjectURL(previewUrl);
-        }
+        setParts([]);
+        setText('');
+        setError('');
     };
 
-    const getLanguageLabel = (lang: string) => {
-        switch (lang) {
-            case 'spa': return 'Español';
-            case 'eng': return 'Inglés';
-            case 'spa+eng': return 'Español + Inglés';
-            default: return lang;
-        }
+    const handleDragOver = (e: React.DragEvent) => {
+        e.preventDefault();
+        setDragOver(true);
     };
+
+    const handleDragLeave = (e: React.DragEvent) => {
+        e.preventDefault();
+        setDragOver(false);
+    };
+
+    const handleDrop = (e: React.DragEvent) => {
+        e.preventDefault();
+        setDragOver(false);
+        if (e.dataTransfer.files.length > 0) handleFileSelect(e.dataTransfer.files);
+    };
+
+    const failedParts = parts.filter((part) => part.error).length;
+    const words = text.trim() ? text.trim().split(/\s+/).length : 0;
 
     return (
         <>
             <Head title="OCR y Extracción de Texto - Evaristools">
-                <meta name="description" content="Extrae texto de imágenes y documentos PDF escaneados - Hospital Universitario del Valle" />
+                <meta name="description" content="Extrae texto de imágenes y PDF escaneados - Hospital Universitario del Valle" />
             </Head>
 
             <div className="min-h-screen bg-white dark:bg-[#1d1d1e]">
                 <ToolPageHeader
                     title="OCR y Extracción de Texto"
-                    description="Convierte imágenes en texto editable mediante OCR"
+                    description="Convierte imágenes y PDF escaneados en texto editable"
                     icon={ScanText}
                     showPopularBadge={true}
                 />
 
-                {/* Main Content */}
                 <div className="container mx-auto px-4 py-8">
                     <div className="max-w-6xl mx-auto">
                         <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
-                            {/* Upload and Preview Section */}
-                            <div className="space-y-6">
-                                <ToolCard
-                                    title="Subir Imagen"
-                                    data-tour="upload"
-                                    description="Selecciona una imagen para extraer el texto mediante OCR"
-                                    icon={Upload}
+                            {/* Left Column: Upload & Preview */}
+                            <div className="space-y-6" data-tour="upload">
+                                <div
+                                    role="note"
+                                    className="flex items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 p-3 sm:p-4 dark:border-amber-700/60 dark:bg-amber-900/20"
                                 >
-                                    <FileUploadZone
-                                        onFileSelect={(files) => handleFileSelect(files[0])}
-                                        acceptedTypes=".jpg,.jpeg,.png,.bmp,.tiff"
-                                        multiple={false}
-                                        hasFiles={!!file}
-                                        title="Arrastra tu archivo aquí"
-                                        subtitle="Soporta JPG, PNG, BMP, TIFF"
-                                        buttonText="Seleccionar Archivo"
-                                        fileInfo={file ? (
-                                            <div className="space-y-2">
-                                                <ScanText className="h-12 w-12 mx-auto text-institutional" />
-                                                <p className="font-medium text-slate-900 dark:text-white">
-                                                    {file.name}
-                                                </p>
-                                                <p className="text-sm text-slate-600 dark:text-slate-300">
-                                                    Listo para procesar
-                                                </p>
-                                            </div>
-                                        ) : undefined}
-                                    />
-                                </ToolCard>
+                                    <ShieldAlert className="mt-0.5 h-5 w-5 flex-shrink-0 text-amber-700 dark:text-amber-400" />
+                                    <div className="space-y-1 text-sm text-amber-900 dark:text-amber-100">
+                                        <p className="font-semibold">No uses documentos con datos de pacientes</p>
+                                        <p>El texto lo extrae un servicio externo (OCR.space): la imagen sale del hospital.</p>
+                                    </div>
+                                </div>
 
-                                {/* Preview Section */}
-                                {previewUrl && (
-                                    <ToolCard
-                                        title="Vista Previa"
-                                        icon={Eye}
-                                    >
-                                            <div className="border rounded-lg overflow-hidden">
-                                                {file?.type === 'application/pdf' ? (
-                                                    <div className="p-8 text-center bg-slate-50 dark:bg-[#222322]">
-                                                        <StickyNote className="h-16 w-16 mx-auto text-slate-400 mb-4" />
-                                                        <p className="text-slate-600 dark:text-slate-300">
-                                                            Archivo PDF listo para procesar
-                                                        </p>
-                                                    </div>
-                                                ) : (
-                                                    <img
-                                                        src={previewUrl}
-                                                        alt="Vista previa"
-                                                        className="w-full h-auto max-h-96 object-contain"
-                                                    />
-                                                )}
+                                {!file ? (
+                                    <ToolCard title="Seleccionar Archivo">
+                                        <FileUploadZone
+                                            onFileSelect={handleFileSelect}
+                                            acceptedTypes="image/jpeg,image/png,image/webp,image/gif,image/bmp,.heic,.heif,.pdf,application/pdf"
+                                            dragOver={dragOver}
+                                            onDragOver={handleDragOver}
+                                            onDragEnter={handleDragOver}
+                                            onDragLeave={handleDragLeave}
+                                            onDrop={handleDrop}
+                                            title="Arrastra una imagen o un PDF escaneado"
+                                            subtitle={`o haz clic para seleccionar (PDF de hasta ${MAX_PDF_PAGES} páginas)`}
+                                        />
+                                    </ToolCard>
+                                ) : (
+                                    <ToolCard title="Archivo Seleccionado">
+                                        <div className="flex items-center justify-between gap-3 p-4 bg-slate-50 dark:bg-[#222322] rounded-lg">
+                                            <div className="flex min-w-0 items-center space-x-3">
+                                                <FileText className="h-8 w-8 flex-shrink-0 text-institutional" />
+                                                <div className="min-w-0">
+                                                    <p className="truncate font-medium text-slate-900 dark:text-white">{file.name}</p>
+                                                    <p className="text-sm text-slate-600 dark:text-slate-300">{formatFileSize(file.size)}</p>
+                                                </div>
                                             </div>
+                                        </div>
+                                        {preview && (
+                                            <div className="flex justify-center rounded-lg bg-slate-100 p-3 dark:bg-[#1d1d1e]">
+                                                <img src={preview} alt="Vista previa" className="max-h-80 max-w-full object-contain shadow-sm" />
+                                            </div>
+                                        )}
+                                    </ToolCard>
+                                )}
+
+                                {error && (
+                                    <ToolCard title="Error">
+                                        <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+                                            <p className="text-red-800 dark:text-red-200">{error}</p>
+                                        </div>
                                     </ToolCard>
                                 )}
                             </div>
 
-                            {/* Options and Results Section */}
+                            {/* Right Column: Options & Actions */}
                             <div className="space-y-6">
-                                {/* Results Section */}
-                                {extractedText && (
-                                    <ToolCard
-                                        title="Texto Extraído"
-                                        description={`Idioma: ${getLanguageLabel(options.language)} - Confianza: ${confidence}%`}
-                                        icon={ScanText}
-                                    >
-                                            <textarea
-                                                ref={textareaRef}
-                                                value={extractedText}
-                                                onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setExtractedText(e.target.value)}
-                                                placeholder="El texto extraído aparecerá aquí..."
-                                                className="min-h-48 resize-vertical w-full p-3 border border-slate-300 dark:border-slate-600 rounded-md bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-institutional focus:border-transparent"
-                                                rows={12}
-                                            />
-
-                                            <div className="flex gap-2">
-                                                <Button
-                                                    onClick={copyToClipboard}
-                                                    variant="outline"
-                                                    className="flex-1"
-                                                    disabled={isCopied}
-                                                >
-                                                    {isCopied ? (
-                                                        <>
-                                                            <Check className="h-4 w-4 mr-2" />
-                                                            Copiado
-                                                        </>
-                                                    ) : (
-                                                        <>
-                                                            <Copy className="h-4 w-4 mr-2" />
-                                                            Copiar
-                                                        </>
-                                                    )}
-                                                </Button>
-                                                <Button
-                                                    onClick={downloadText}
-                                                    className="flex-1 bg-institutional hover:bg-institutional/90 text-white"
-                                                >
-                                                    <Download className="h-4 w-4 mr-2" />
-                                                    Descargar
-                                                </Button>
-                                            </div>
-                                        </ToolCard>
-                                )}
-                                <ToolCard
-                                    title="Opciones de OCR"
-                                    data-tour="options"
-                                    description="Configura el reconocimiento óptico de caracteres"
-                                    icon={ScanText}
-                                >
-                                        <div>
-                                            <Label htmlFor="language">Idioma de Reconocimiento</Label>
-                                            <Select
-                                                value={options.language}
-                                                onValueChange={(value: 'spa' | 'eng' | 'spa+eng') =>
-                                                    setOptions({ ...options, language: value })
-                                                }
-                                            >
-                                                <SelectTrigger>
-                                                    <SelectValue />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    <SelectItem value="spa+eng">Español + Inglés</SelectItem>
-                                                    <SelectItem value="spa">Solo Español</SelectItem>
-                                                    <SelectItem value="eng">Solo Inglés</SelectItem>
-                                                </SelectContent>
-                                            </Select>
-                                        </div>
-
-                                    <Button
-                                        onClick={extractText}
-                                        disabled={!file || isProcessing}
-                                        className="w-full bg-institutional hover:bg-institutional/90"
-                                    >
-                                        {isProcessing ? (
-                                            <>
-                                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                                {processingStep}
-                                            </>
-                                        ) : (
-                                            <>
-                                                <ScanText className="h-4 w-4 mr-2" />
-                                                Extraer Texto
-                                            </>
-                                        )}
-                                    </Button>
-
-                                    {/* Progress Bar */}
-                                    {isProcessing && (
-                                        <ProgressBar
-                                            progress={progress}
-                                            message="Progreso"
-                                            showPercentage={true}
+                                <ToolCard title="Opciones" data-tour="options">
+                                    <div className="space-y-2">
+                                        <Label id="language-label">Idioma del texto</Label>
+                                        <OptionButtons
+                                            labelledBy="language-label"
+                                            value={language}
+                                            onChange={setLanguage}
+                                            className="grid-cols-2"
+                                            options={OCR_LANGUAGES}
                                         />
-                                    )}
+                                    </div>
+                                    <div className="flex flex-col sm:flex-row gap-3">
+                                        <Button onClick={extractText} disabled={!file || isProcessing} className="flex-1 bg-institutional hover:bg-institutional/90">
+                                            {isProcessing ? (
+                                                <>
+                                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                                    {progress || 'Extrayendo...'}
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <ScanText className="mr-2 h-4 w-4" />
+                                                    Extraer Texto
+                                                </>
+                                            )}
+                                        </Button>
+                                        <Button onClick={reset} variant="outline" className="flex-1" disabled={isProcessing || !file}>
+                                            <Upload className="mr-2 h-4 w-4" />
+                                            Otro Archivo
+                                        </Button>
+                                    </div>
                                     <Button
                                         onClick={startTour}
                                         variant="outline"
@@ -456,6 +325,48 @@ export default function OCRExtract() {
                                         ¿Cómo funciona? - Tour Interactivo
                                     </Button>
                                 </ToolCard>
+
+                                {(text || isProcessing) && (
+                                    <ToolCard title="Texto Extraído" data-tour="result">
+                                        {text && (
+                                            <>
+                                                <div className="flex items-center gap-2 text-sm text-green-700 dark:text-green-300">
+                                                    <CheckCircle className="h-4 w-4" />
+                                                    {words} {words === 1 ? 'palabra' : 'palabras'}
+                                                    {failedParts > 0 && (
+                                                        <span className="text-amber-700 dark:text-amber-300">
+                                                            · {failedParts} {failedParts === 1 ? 'página no se pudo leer' : 'páginas no se pudieron leer'}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                <Textarea
+                                                    value={text}
+                                                    onChange={(e) => setText(e.target.value)}
+                                                    aria-label="Texto extraído (puedes corregirlo)"
+                                                    className="min-h-80 font-mono text-sm"
+                                                />
+                                                <p className="text-xs text-slate-600 dark:text-slate-400">
+                                                    Revisa el texto: el OCR puede confundir letras en imágenes borrosas o manuscritas.
+                                                </p>
+                                                <div className="flex flex-col sm:flex-row gap-3">
+                                                    <Button onClick={copyText} variant="outline" className="flex-1">
+                                                        {copied ? <Check className="mr-2 h-4 w-4 text-green-600" /> : <Copy className="mr-2 h-4 w-4" />}
+                                                        {copied ? 'Copiado' : 'Copiar'}
+                                                    </Button>
+                                                    <Button onClick={downloadText} variant="outline" className="flex-1">
+                                                        <Download className="mr-2 h-4 w-4" />
+                                                        Descargar .txt
+                                                    </Button>
+                                                </div>
+                                            </>
+                                        )}
+                                        {!text && isProcessing && parts.length > 0 && (
+                                            <p className="text-sm text-slate-600 dark:text-slate-300">
+                                                {parts.length} {parts.length === 1 ? 'página leída' : 'páginas leídas'}...
+                                            </p>
+                                        )}
+                                    </ToolCard>
+                                )}
                             </div>
                         </div>
                     </div>

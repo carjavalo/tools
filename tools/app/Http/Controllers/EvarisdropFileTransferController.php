@@ -4,12 +4,16 @@ namespace App\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Support\Almacenamiento;
+use App\Support\EvarisdropRooms;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
 
 class EvarisdropFileTransferController extends Controller
 {
+    // Los archivos que nadie descargó se borran pasado este tiempo.
+    private const FILE_TTL_MINUTES = 30;
+
     /**
      * Send transfer request to another device
      */
@@ -29,11 +33,22 @@ class EvarisdropFileTransferController extends Controller
             return response()->json(['error' => 'No estás conectado a una sala'], 401);
         }
 
+        // Solo se puede enviar a un equipo conectado a la misma sala: antes el
+        // archivo quedaba en el servidor para un destinatario inexistente.
+        if ($request->targetDeviceId === $deviceId || !EvarisdropRooms::has($roomCode, $request->targetDeviceId)) {
+            return response()->json(['error' => 'El otro equipo ya no está conectado a la sala.'], 422);
+        }
+
+        // Sin cron en el hosting: la limpieza se hace aquí, como mucho cada 5 minutos.
+        if (Cache::add('evarisdrop_cleanup', true, 300)) {
+            self::purgeOldFiles();
+        }
+
         // Store file temporarily
         $file = $request->file('file');
         $fileId = (string) Str::uuid();
         $fileName = $file->getClientOriginalName();
-        $filePath = "transfers/{$fileId}_{$fileName}";
+        $filePath = "transfers/{$fileId}_".Almacenamiento::componenteSeguro($fileName);
         
         Almacenamiento::subirDesdeRuta($file->getRealPath(), $filePath);
 
@@ -192,9 +207,11 @@ class EvarisdropFileTransferController extends Controller
      */
     public function getTransferStatus(Request $request, $transferId)
     {
+        $deviceId = $request->session()->get('device_id');
         $transfer = Cache::get("transfer_request_{$transferId}");
 
-        if (!$transfer) {
+        // Solo la consultan el que envía y el que recibe.
+        if (!$transfer || !in_array($deviceId, [$transfer['fromDeviceId'], $transfer['toDeviceId']], true)) {
             return response()->json(['error' => 'Transferencia no encontrada'], 404);
         }
 
@@ -210,41 +227,27 @@ class EvarisdropFileTransferController extends Controller
     }
 
     /**
-     * Clean up expired transfers
+     * Borra los archivos de transferencias más viejos que FILE_TTL_MINUTES.
+     * La solicitud en caché vence a los 30 minutos, pero el archivo quedaba
+     * en el servidor para siempre si nadie lo descargaba ni lo rechazaba.
      */
-    public function cleanupExpiredTransfers()
+    public static function purgeOldFiles(): int
     {
-        // This would typically be called by a scheduled job
-        // For now, it can be called manually or triggered periodically
-        
-        $keys = Cache::getRedis()->keys('laravel_cache:transfer_request_*');
-        $expiredCount = 0;
+        $disk = Almacenamiento::disco();
+        $limit = now()->subMinutes(self::FILE_TTL_MINUTES)->getTimestamp();
+        $deleted = 0;
 
-        foreach ($keys as $key) {
-            $transferId = str_replace('laravel_cache:transfer_request_', '', $key);
-            $transfer = Cache::get("transfer_request_{$transferId}");
-            
-            if ($transfer && isset($transfer['requestedAt'])) {
-                $requestedAt = \Carbon\Carbon::parse($transfer['requestedAt']);
-                
-                // Clean up transfers older than 1 hour
-                if ($requestedAt->diffInHours(now()) > 1) {
-                    // Delete file if exists
-                    if (isset($transfer['filePath'])) {
-                        Almacenamiento::eliminar($transfer['filePath']);
-                    }
-                    
-                    // Remove from cache
-                    Cache::forget("transfer_request_{$transferId}");
-                    $expiredCount++;
+        foreach ($disk->files('transfers') as $path) {
+            try {
+                if ($disk->lastModified($path) < $limit) {
+                    $disk->delete($path);
+                    $deleted++;
                 }
+            } catch (\Throwable $e) {
+                // Si otro proceso ya lo borró, no pasa nada.
             }
         }
 
-        return response()->json([
-            'success' => true,
-            'cleanedUp' => $expiredCount,
-            'message' => "Cleaned up {$expiredCount} expired transfers"
-        ]);
+        return $deleted;
     }
 }

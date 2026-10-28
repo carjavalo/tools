@@ -265,22 +265,11 @@ Route::prefix('tools')->name('tools.')->group(function () {
     Route::post('sign-pdf/sign', [App\Http\Controllers\SignPDFController::class, 'sign'])
         ->middleware('throttle:20,1')
         ->name('sign-pdf.sign');
-    Route::post('ocr-extract/extract', [App\Http\Controllers\OCRController::class, 'extract'])->name('ocr-extract.extract');
+    // Cada página o imagen es una petición a OCR.space: se limita por IP.
+    Route::post('ocr-extract/extract', [App\Http\Controllers\OCRController::class, 'extract'])
+        ->middleware('throttle:30,1')
+        ->name('ocr-extract.extract');
 
-    // CUPS endpoints
-    Route::post('cups/process-json-sos', [App\Http\Controllers\CupsController::class, 'processJsonSOS'])->name('cups.process-json-sos');
-    Route::get('cups/download-processed/{filename}', [App\Http\Controllers\CupsController::class, 'downloadProcessed'])->name('cups.download-processed');
-
-    // Evarisdrop endpoints
-    Route::post('evarisdrop/room/create', [App\Http\Controllers\EvarisdropRoomController::class, 'createRoom'])->name('evarisdrop.room.create');
-    Route::post('evarisdrop/room/join', [App\Http\Controllers\EvarisdropRoomController::class, 'joinRoom'])->name('evarisdrop.room.join');
-    Route::get('evarisdrop/room/{roomCode}/devices', [App\Http\Controllers\EvarisdropRoomController::class, 'getRoomDevices'])->name('evarisdrop.room.devices');
-    Route::post('evarisdrop/room/leave', [App\Http\Controllers\EvarisdropRoomController::class, 'leaveRoom'])->name('evarisdrop.room.leave');
-    Route::post('evarisdrop/transfer/request', [App\Http\Controllers\EvarisdropFileTransferController::class, 'requestTransfer'])->name('evarisdrop.transfer.request');
-    Route::get('evarisdrop/transfer/pending', [App\Http\Controllers\EvarisdropFileTransferController::class, 'getPendingRequests'])->name('evarisdrop.transfer.pending');
-    Route::post('evarisdrop/transfer/{transferId}/respond', [App\Http\Controllers\EvarisdropFileTransferController::class, 'respondToTransfer'])->name('evarisdrop.transfer.respond');
-    Route::get('evarisdrop/transfer/{transferId}/download', [App\Http\Controllers\EvarisdropFileTransferController::class, 'downloadFile'])->name('evarisdrop.transfer.download');
-    Route::get('evarisdrop/transfer/{transferId}/status', [App\Http\Controllers\EvarisdropFileTransferController::class, 'getTransferStatus'])->name('evarisdrop.transfer.status');
 });
 
 // API Routes for Tool Popularity System

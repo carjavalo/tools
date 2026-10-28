@@ -32,30 +32,20 @@ const MESSAGES = {
     }
 };
 
-// Funciones de sanitización robustas
-const sanitizeFileName = (filename: string): string => {
-    if (!filename) return 'archivo_seguro';
-    return 'archivo_' + Math.random().toString(36).substring(2, 15);
-};
+// Carpeta que se usa en modo "Archivos", donde no hay estructura de carpetas.
+const CARPETA_VIRTUAL = 'archivos_seleccionados';
 
-const sanitizeForLog = (input: string): string => {
-    if (!input) return 'entrada_vacia';
-    return 'log_' + Math.random().toString(36).substring(2, 10);
-};
+const escapeHtml = (text: string): string =>
+    text.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!);
 
-const sanitizePath = (path: string): string => {
-    if (!path) return 'ruta_segura';
-    return 'ruta_' + Math.random().toString(36).substring(2, 15);
-};
-
-const sanitizeForDisplay = (input: string): string => {
-    if (!input) return 'contenido_seguro';
-    return 'display_' + Math.random().toString(36).substring(2, 10);
-};
-
-const validateFileList = (files: FileList | null): File[] => {
-    if (!files || files.length === 0) return [];
-    return Array.from(files);
+/**
+ * Lista de archivos con problemas para el aviso final. Antes solo quedaban
+ * en la consola y el usuario no se enteraba de que faltaban o iban sin procesar.
+ */
+const problemsHtml = (intro: string, problems: string[]): string => {
+    const shown = problems.slice(0, 15).map((problem) => `<li>${escapeHtml(problem)}</li>`).join('');
+    const more = problems.length > 15 ? `<li>... y ${problems.length - 15} más</li>` : '';
+    return `<p>${escapeHtml(intro)}</p><ul style="text-align:left;margin-top:8px;padding-left:20px;list-style:disc;font-size:13px">${shown}${more}</ul>`;
 };
 
 // Función auxiliar para leer archivos
@@ -137,18 +127,19 @@ export default function CUPS() {
             }
             
             if (selectionMode === 'folder' && file.webkitRelativePath) {
-                // Modo carpeta: usar estructura existente
+                // Modo carpeta: cada subcarpeta (factura) es un grupo. Si se
+                // eligió directamente la carpeta de una factura, los archivos
+                // están en su raíz y el grupo es esa carpeta; antes cada archivo
+                // quedaba como una "carpeta" distinta.
                 const pathParts = file.webkitRelativePath.split('/');
-                if (pathParts.length >= 2) {
-                    const carpetaPrincipal = pathParts[1]; // nombre de la carpeta
-                    if (!carpetas[carpetaPrincipal]) {
-                        carpetas[carpetaPrincipal] = [];
-                    }
-                    carpetas[carpetaPrincipal].push(file);
+                const carpetaPrincipal = pathParts.length >= 3 ? pathParts[1] : pathParts[0];
+                if (!carpetas[carpetaPrincipal]) {
+                    carpetas[carpetaPrincipal] = [];
                 }
+                carpetas[carpetaPrincipal].push(file);
             } else {
                 // Modo archivos individuales: crear carpeta virtual
-                const carpetaVirtual = 'archivos_seleccionados';
+                const carpetaVirtual = CARPETA_VIRTUAL;
                 if (!carpetas[carpetaVirtual]) {
                     carpetas[carpetaVirtual] = [];
                 }
@@ -157,6 +148,18 @@ export default function CUPS() {
         });
         
         return carpetas;
+    };
+
+    /**
+     * Ruta del archivo dentro del ZIP con su nombre nuevo. Se cambia solo el
+     * último tramo de la ruta (antes se reemplazaba la primera coincidencia
+     * del nombre, que podía estar en el nombre de la carpeta). En modo
+     * "Archivos" no hay ruta relativa y se usa la carpeta virtual.
+     */
+    const rutaEnZip = (archivo: File, nombreCarpeta: string, nuevoNombre: string): string => {
+        const rutaRelativa = archivo.webkitRelativePath;
+        if (!rutaRelativa) return `${nombreCarpeta}/${nuevoNombre}`;
+        return `${rutaRelativa.substring(0, rutaRelativa.lastIndexOf('/') + 1)}${nuevoNombre}`;
     };
 
     const handleComprimirPDF = async () => {
@@ -300,39 +303,17 @@ export default function CUPS() {
                 "77-": "FCTG"
             };
             
-            // Función para renombrar elementos (exacta del script Python)
-            const renameElement = (name: string): string => {
-                let newName = name;
-                let modified = false;
-                
-                // Aplicar reglas de prefijos
-                for (const [prefix, newPrefix] of Object.entries(renameRules)) {
-                    if (name.startsWith(prefix)) {
-                        newName = name.replace(prefix, newPrefix); // Solo primera ocurrencia
-                        modified = true;
-                        break;
-                    }
-                }
-                
-                // Eliminar -001
-                const withoutSuffix = newName.replace("-001", "");
-                if (withoutSuffix !== newName) {
-                    modified = true;
-                }
-                
-                return withoutSuffix;
-            };
-            
             // Organizar archivos por carpeta
             const carpetas = organizeFilesByFolder(files, ['.json', '.xml']);
-            
+
             console.log(`Carpetas detectadas: ${Object.keys(carpetas).length}`);
-            
+
             // Crear ZIP final
             const zip = new JSZip();
             let carpetasCopiadas = 0;
             let archivosRenombrados = 0;
             let cuvModificados = 0;
+            const problemas: string[] = [];
             
             // Procesar todas las carpetas (mantener nombres originales de carpetas)
             for (const [nombreCarpeta, archivos] of Object.entries(carpetas)) {
@@ -363,6 +344,9 @@ export default function CUPS() {
                         if (archivo.name.startsWith("ResultadosMSPS_")) {
                             const extension = archivo.name.substring(archivo.name.lastIndexOf('.'));
                             nuevoNombreArchivo = `${nombreCarpeta}CUV${extension}`;
+                            if (nombreCarpeta === CARPETA_VIRTUAL) {
+                                problemas.push(`${archivo.name}: en modo "Archivos" no se conoce la carpeta de la factura y el CUV quedó como ${nuevoNombreArchivo}. Usa el modo "Carpeta".`);
+                            }
                         }
                         
                         // Contar archivos renombrados
@@ -372,9 +356,9 @@ export default function CUPS() {
                         }
                         
                         // Crear ruta manteniendo nombre original de carpeta
-                        const rutaRelativa = archivo.webkitRelativePath;
-                        const nuevaRuta = rutaRelativa.replace(archivo.name, nuevoNombreArchivo);
-                        
+                        // (en modo "Archivos" la ruta relativa llega vacía).
+                        const nuevaRuta = rutaEnZip(archivo, nombreCarpeta, nuevoNombreArchivo);
+
                         // Procesar archivos CUV.json (como process_json_files)
                         if (nuevoNombreArchivo.toLowerCase().endsWith('cuv.json')) {
                             try {
@@ -405,18 +389,20 @@ export default function CUPS() {
                             } catch (jsonError) {
                                 console.warn(`❌ Error al procesar ${archivo.name}:`, jsonError);
                                 zip.file(nuevaRuta, archivo);
+                                problemas.push(`${nombreCarpeta}/${archivo.name}: no es un JSON válido, se copió sin modificar`);
                             }
                         } else {
                             // Agregar archivo normal al ZIP
                             zip.file(nuevaRuta, archivo);
                         }
-                        
+
                     } catch (error) {
                         console.error(`❌ Error al procesar ${archivo.name}:`, error);
+                        problemas.push(`${nombreCarpeta}/${archivo.name}: no se pudo leer, no quedó en el ZIP`);
                     }
                 }
             }
-            
+
             if (carpetasCopiadas > 0) {
                 // Generar y descargar ZIP
                 const zipBlob = await zip.generateAsync({
@@ -426,6 +412,17 @@ export default function CUPS() {
                 });
                 const typedBlob = createTypedBlob(zipBlob, 'zip');
                 downloadSecurely(typedBlob, 'json_otras_eps_procesados.zip');
+
+                if (problemas.length > 0) {
+                    Swal.fire({
+                        icon: 'warning',
+                        title: MESSAGES.success.otrasEps,
+                        html: problemsHtml(`Se descargó el ZIP (${cuvModificados} CUV modificados), pero revisa estos archivos:`, problemas),
+                        confirmButtonText: 'Entendido',
+                        ...getSwalConfig('warning')
+                    });
+                    return;
+                }
                 
                 // Mostrar resumen como el script Python
                 console.log("🔹 Proceso de copiado y renombrado finalizado.");
@@ -523,7 +520,8 @@ export default function CUPS() {
             let carpetasCopiadas = 0;
             let archivosRenombrados = 0;
             let cuvModificados = 0;
-            
+            const problemas: string[] = [];
+
             // Procesar todas las carpetas (mantener nombres originales de carpetas)
             for (const [nombreCarpeta, archivos] of Object.entries(carpetas)) {
                 carpetasCopiadas++;
@@ -538,6 +536,9 @@ export default function CUPS() {
                         if (archivo.name.startsWith("ResultadosMSPS_")) {
                             const extension = archivo.name.substring(archivo.name.lastIndexOf('.'));
                             nuevoNombreArchivo = `${nombreCarpeta}CUV${extension}`;
+                            if (nombreCarpeta === CARPETA_VIRTUAL) {
+                                problemas.push(`${archivo.name}: en modo "Archivos" no se conoce la carpeta de la factura y el CUV quedó como ${nuevoNombreArchivo}. Usa el modo "Carpeta".`);
+                            }
                         }
                         
                         // Contar archivos renombrados
@@ -547,9 +548,8 @@ export default function CUPS() {
                         }
                         
                         // Crear ruta manteniendo nombre original de carpeta
-                        const rutaRelativa = archivo.webkitRelativePath || `${nombreCarpeta}/${archivo.name}`;
-                        const nuevaRuta = rutaRelativa.replace(archivo.name, nuevoNombreArchivo);
-                        
+                        const nuevaRuta = rutaEnZip(archivo, nombreCarpeta, nuevoNombreArchivo);
+
                         // Procesar archivos CUV.json
                         if (nuevoNombreArchivo.toLowerCase().endsWith('cuv.json')) {
                             try {
@@ -589,18 +589,20 @@ export default function CUPS() {
                             } catch (jsonError) {
                                 console.warn(`❌ Error al procesar ${archivo.name}:`, jsonError);
                                 zip.file(nuevaRuta, archivo);
+                                problemas.push(`${nombreCarpeta}/${archivo.name}: no es un JSON válido, se copió sin modificar`);
                             }
                         } else {
                             // Agregar archivo normal al ZIP
                             zip.file(nuevaRuta, archivo);
                         }
-                        
+
                     } catch (error) {
                         console.error(`❌ Error al procesar ${archivo.name}:`, error);
+                        problemas.push(`${nombreCarpeta}/${archivo.name}: no se pudo leer, no quedó en el ZIP`);
                     }
                 }
             }
-            
+
             if (carpetasCopiadas > 0) {
                 // Generar y descargar ZIP
                 const zipBlob = await zip.generateAsync({
@@ -610,6 +612,17 @@ export default function CUPS() {
                 });
                 const typedBlob = createTypedBlob(zipBlob, 'zip');
                 downloadSecurely(typedBlob, 'json_coosalud_procesados.zip');
+
+                if (problemas.length > 0) {
+                    Swal.fire({
+                        icon: 'warning',
+                        title: MESSAGES.success.coosalud,
+                        html: problemsHtml(`Se descargó el ZIP (${cuvModificados} CUV modificados), pero revisa estos archivos:`, problemas),
+                        confirmButtonText: 'Entendido',
+                        ...getSwalConfig('warning')
+                    });
+                    return;
+                }
                 
                 // Mostrar resumen como el script Python
                 console.log("🔹 Proceso de copiado y renombrado finalizado.");
@@ -678,37 +691,37 @@ export default function CUPS() {
             const carpetas = organizeFilesByFolder(files, ['.json']);
             const zip = new JSZip();
             let carpetasProcesadas = 0;
-            let archivosValidados = 0;
-            
+            const conErrores: string[] = [];
+            const problemas: string[] = [];
+
             for (const [nombreCarpeta, archivos] of Object.entries(carpetas)) {
                 carpetasProcesadas++;
-                
+
                 for (const archivo of archivos) {
+                    if (!archivo.name.toLowerCase().endsWith('.json')) continue;
+                    // El archivo va al ZIP aunque no se pueda leer: antes se perdía sin aviso.
+                    zip.file(rutaEnZip(archivo, nombreCarpeta, archivo.name), archivo);
                     try {
-                        if (archivo.name.toLowerCase().endsWith('.json')) {
-                            const contenidoTexto = await leerArchivo(archivo);
-                            const data = JSON.parse(contenidoTexto);
-                            
-                            // Validación S.O.S
-                            if (data.ResultadosValidacion && Array.isArray(data.ResultadosValidacion)) {
-                                const hasErrors = data.ResultadosValidacion.some(
-                                    (item: any) => item.Clase === 'ERROR' || item.Clase === 'RECHAZO'
-                                );
-                                
-                                if (hasErrors) {
-                                    archivosValidados++;
-                                }
+                        const contenidoTexto = await leerArchivo(archivo);
+                        const data = JSON.parse(contenidoTexto);
+
+                        // Validación S.O.S
+                        if (data.ResultadosValidacion && Array.isArray(data.ResultadosValidacion)) {
+                            const hasErrors = data.ResultadosValidacion.some(
+                                (item: any) => item.Clase === 'ERROR' || item.Clase === 'RECHAZO'
+                            );
+
+                            if (hasErrors) {
+                                conErrores.push(`${nombreCarpeta}/${archivo.name}: tiene ERROR o RECHAZO`);
                             }
-                            
-                            const rutaRelativa = archivo.webkitRelativePath || `${nombreCarpeta}/${archivo.name}`;
-                            zip.file(rutaRelativa, archivo);
                         }
                     } catch (error) {
                         console.error(`Error procesando ${archivo.name}:`, error);
+                        problemas.push(`${nombreCarpeta}/${archivo.name}: no es un JSON válido, no se pudo validar`);
                     }
                 }
             }
-            
+
             if (carpetasProcesadas > 0) {
                 const zipBlob = await zip.generateAsync({
                     type: 'blob',
@@ -717,13 +730,16 @@ export default function CUPS() {
                 });
                 const typedBlob = createTypedBlob(zipBlob, 'zip');
                 downloadSecurely(typedBlob, 'validacion_sos.zip');
-                
+
+                const hallazgos = [...conErrores, ...problemas];
                 Swal.fire({
-                    icon: 'success',
+                    icon: hallazgos.length > 0 ? 'warning' : 'success',
                     title: MESSAGES.success.sos,
-                    text: `${archivosValidados} archivos con errores detectados`,
+                    ...(hallazgos.length > 0
+                        ? { html: problemsHtml(`${conErrores.length} ${conErrores.length === 1 ? 'archivo con errores detectado' : 'archivos con errores detectados'}:`, hallazgos) }
+                        : { text: 'No se detectaron archivos con ERROR o RECHAZO' }),
                     confirmButtonText: 'Entendido',
-                    ...getSwalConfig('success')
+                    ...getSwalConfig(hallazgos.length > 0 ? 'warning' : 'success')
                 });
             } else {
                 Swal.fire({
@@ -784,7 +800,8 @@ export default function CUPS() {
             const carpetas = organizeFilesByFolder(files, ['.json']);
             const zip = new JSZip();
             let archivosConvertidos = 0;
-            
+            const problemas: string[] = [];
+
             // Función auxiliar para aplanar objetos anidados
             const flattenObject = (obj: any, prefix = ''): any => {
                 const flattened: any = {};
@@ -824,22 +841,31 @@ export default function CUPS() {
                             const excelBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
                             const excelBlob = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
                             
-                            const nombreExcel = archivo.name.replace('.json', '.xlsx');
+                            const nombreExcel = archivo.name.replace(/\.json$/i, '.xlsx');
                             const rutaExcel = `${nombreCarpeta}/${nombreExcel}`;
-                            
+
                             zip.file(rutaExcel, excelBlob);
                             archivosConvertidos++;
-                            
+
                             console.log(`✅ Convertido: ${archivo.name} → ${nombreExcel}`);
                         }
                     } catch (error) {
                         console.error(`Error convirtiendo ${archivo.name}:`, error);
                         const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
-                        console.error(`Detalles del error: ${errorMessage}`);
+                        // Excel no admite celdas de más de 32.767 caracteres (RIPS con muchos servicios).
+                        problemas.push(
+                            `${nombreCarpeta}/${archivo.name}: ${
+                                /32767|text length/i.test(errorMessage)
+                                    ? 'tiene datos demasiado largos para una celda de Excel'
+                                    : error instanceof SyntaxError
+                                      ? 'no es un JSON válido'
+                                      : 'no se pudo convertir'
+                            }`
+                        );
                     }
                 }
             }
-            
+
             if (archivosConvertidos > 0) {
                 const zipBlob = await zip.generateAsync({
                     type: 'blob',
@@ -848,13 +874,32 @@ export default function CUPS() {
                 });
                 const typedBlob = createTypedBlob(zipBlob, 'zip');
                 downloadSecurely(typedBlob, 'archivos_excel.zip');
-                
+
+                if (problemas.length > 0) {
+                    Swal.fire({
+                        icon: 'warning',
+                        title: MESSAGES.success.excel,
+                        html: problemsHtml(`${archivosConvertidos} archivos convertidos. Estos no se incluyeron en el ZIP:`, problemas),
+                        confirmButtonText: 'Entendido',
+                        ...getSwalConfig('warning')
+                    });
+                    return;
+                }
+
                 Swal.fire({
                     icon: 'success',
                     title: MESSAGES.success.excel,
                     text: `${archivosConvertidos} archivos convertidos a Excel`,
                     confirmButtonText: 'Entendido',
                     ...getSwalConfig('success')
+                });
+            } else if (problemas.length > 0) {
+                Swal.fire({
+                    icon: 'error',
+                    title: MESSAGES.error.processing,
+                    html: problemsHtml('No se pudo convertir ningún archivo:', problemas),
+                    confirmButtonText: 'Entendido',
+                    ...getSwalConfig('error')
                 });
             } else {
                 Swal.fire({

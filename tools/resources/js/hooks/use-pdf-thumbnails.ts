@@ -36,6 +36,50 @@ async function renderPageToDataUrl(pdf: PDFDocumentProxy, pageNumber: number, ta
     return dataUrl;
 }
 
+// Los navegadores no pintan canvas mucho más grandes que esto.
+const MAX_CANVAS_SIDE = 10000;
+
+/**
+ * Pinta una página a la resolución pedida (puntos por pulgada) y la devuelve
+ * como imagen. El canvas se libera enseguida para no acumular memoria.
+ */
+export async function renderPageToBlob(
+    pdf: PDFDocumentProxy,
+    pageNumber: number,
+    dpi: number,
+    type: 'image/png' | 'image/jpeg',
+    quality = 0.9,
+): Promise<Blob> {
+    const page = await pdf.getPage(pageNumber);
+    const base = page.getViewport({ scale: 1 });
+    const scale = Math.min(dpi / 72, MAX_CANVAS_SIDE / Math.max(base.width, base.height));
+    const viewport = page.getViewport({ scale });
+
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.floor(viewport.width);
+    canvas.height = Math.floor(viewport.height);
+    const context = canvas.getContext('2d')!;
+    context.fillStyle = '#ffffff';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+
+    try {
+        await page.render({ canvasContext: context, viewport, canvas }).promise;
+        const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, type, quality));
+        if (!blob) throw new Error('El navegador no pudo generar la imagen.');
+        return blob;
+    } finally {
+        page.cleanup();
+        canvas.width = 0;
+        canvas.height = 0;
+    }
+}
+
+/** Abre un PDF con pdf.js. Hay que llamar a `destroy()` al terminar. */
+export async function loadPdfDocument(file: Blob): Promise<PDFDocumentProxy> {
+    ensureWorker();
+    return pdfjsLib.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
+}
+
 /**
  * Miniatura de la primera página, para listas de archivos. Devuelve null si
  * el PDF no se puede leer (dañado, protegido...).
@@ -120,7 +164,14 @@ export function usePdfThumbnails(file: File | null, thumbnailWidth = 200) {
         return renderPageToDataUrl(pdf, pageNumber, width);
     }, []);
 
-    return { thumbnails, isRendering, error, renderPage };
+    // Para exportar páginas como imágenes a la resolución pedida.
+    const exportPage = useCallback(async (pageNumber: number, dpi: number, type: 'image/png' | 'image/jpeg', quality?: number) => {
+        const pdf = pdfRef.current;
+        if (!pdf) throw new Error('El PDF no está cargado.');
+        return renderPageToBlob(pdf, pageNumber, dpi, type, quality);
+    }, []);
+
+    return { thumbnails, isRendering, error, renderPage, exportPage };
 }
 
 /**

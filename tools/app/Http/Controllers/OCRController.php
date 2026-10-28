@@ -2,130 +2,109 @@
 
 namespace App\Http\Controllers;
 
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\Response;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
-use Codesmiths\LaravelOcrSpace\Facades\OcrSpace;
-use Codesmiths\LaravelOcrSpace\OcrSpaceOptions;
-use Codesmiths\LaravelOcrSpace\Enums\Language;
-use Codesmiths\LaravelOcrSpace\Enums\OcrSpaceEngine;
-use Exception;
+use Illuminate\Support\Facades\Validator;
 
+/**
+ * Extrae texto de una imagen con OCR.space. El navegador ya la reduce y la
+ * convierte a JPG (los PDF se envían página por página como imágenes), así
+ * que aquí solo llegan imágenes livianas.
+ */
 class OCRController extends Controller
 {
-    /**
-     * Extract text from image or PDF using OCR.space API
-     */
-    public function extract(Request $request)
+    private const LANGUAGES = ['spa', 'eng'];
+
+    public function extract(Request $request): JsonResponse
     {
-        // Increase max execution time for OCR processing (3 minutes)
-        // OCR.space API can take time with large/complex images
-        set_time_limit(180);
-        
-        try {
-            $request->validate([
-                'file' => 'required|file|mimes:jpg,jpeg,png,gif,bmp,pdf|max:10240', // Max 10MB
-                'language' => 'nullable|string|in:spa,eng,spa+eng',
-            ]);
+        $validator = Validator::make($request->all(), [
+            'file' => ['required', 'file', 'max:5120', 'extensions:jpg,jpeg,png'],
+            'language' => ['nullable', 'string', 'in:'.implode(',', self::LANGUAGES)],
+        ]);
 
-            $file = $request->file('file');
-            $languageCode = $request->input('language', 'spa');
-            
-            Log::info('OCR extraction started', [
-                'filename' => $file->getClientOriginalName(),
-                'language' => $languageCode,
-                'size' => $file->getSize()
-            ]);
-            
-            // Map language codes to OCR.space Language enum
-            $languageMap = [
-                'spa' => Language::Spanish,
-                'eng' => Language::English,
-                'spa+eng' => Language::Spanish, // Use Spanish as default for mixed
-            ];
-            
-            $language = $languageMap[$languageCode] ?? Language::Spanish;
-            
-            // Get file extension
-            $extension = $file->getClientOriginalExtension();
-            $mimeType = $file->getMimeType();
-            
-            // Configure OCR options
-            // Note: HTTP timeout is configured in config/ocr-space.php
-            $options = OcrSpaceOptions::make()
-                ->language($language)
-                ->detectOrientation(true)
-                ->scale(true)
-                ->fileType($mimeType)
-                ->OCREngine(OcrSpaceEngine::Engine2); // Engine 2 is better for non-English
-            
-            // Process the file using binary content
-            $binaryContent = file_get_contents($file->getRealPath());
-            $response = OcrSpace::parseBinaryImage($binaryContent, $options);
-            
-            // Check for errors
-            if ($response->hasError()) {
-                $errorMessage = $response->getErrorMessage();
-                Log::error('OCR extraction failed', ['error' => $errorMessage]);
-                
-                return response()->json([
-                    'success' => false,
-                    'error' => $errorMessage ?: 'Error al procesar la imagen'
-                ], 422);
-            }
-            
-            // Check if we have parsed results
-            if (!$response->hasParsedResults()) {
-                Log::error('OCR extraction returned no results');
-                
-                return response()->json([
-                    'success' => false,
-                    'error' => 'No se pudo extraer texto de la imagen'
-                ], 422);
-            }
-            
-            // Get all parsed text from all pages
-            $parsedResults = $response->getParsedResults();
-            $allText = '';
-            $pageCount = $parsedResults->count();
-            
-            foreach ($parsedResults as $result) {
-                $allText .= $result->getParsedText();
-            }
-            
-            // Calculate confidence (estimate since OCR.space doesn't always provide it)
-            $confidence = !empty($allText) ? 85 : 0;
-            
-            $processingTime = $response->getProcessingTimeInMilliseconds();
-            
-            Log::info('OCR extraction successful', [
-                'confidence' => $confidence,
-                'text_length' => strlen($allText),
-                'pages' => $pageCount,
-                'processing_time' => $processingTime
-            ]);
-            
-            return response()->json([
-                'success' => true,
-                'text' => $allText,
-                'confidence' => $confidence,
-                'processing_time' => $processingTime,
-                'pages' => $pageCount
-            ]);
-
-        } catch (\Illuminate\Validation\ValidationException $e) {
-            return response()->json([
-                'success' => false,
-                'error' => 'Archivo inválido. Solo se permiten imágenes (JPG, PNG, GIF, BMP) o PDFs de máximo 10MB.'
-            ], 422);
-            
-        } catch (Exception $e) {
-            Log::error('OCR extraction error: ' . $e->getMessage());
-            Log::error('Stack trace: ' . $e->getTraceAsString());
-            
-            return response()->json([
-                'success' => false,
-                'error' => 'Error al procesar el archivo. Por favor intenta de nuevo.'
-            ], 500);
+        if ($validator->fails()) {
+            return $this->error('Envía una imagen JPG o PNG de máximo 5MB.', 422);
         }
+
+        $key = config('ocr-space.api_key');
+        if (! $key) {
+            return $this->error('El servicio de OCR no está configurado en el servidor. Contacta al administrador del sistema.', 503);
+        }
+
+        set_time_limit(150);
+        $file = $request->file('file');
+
+        try {
+            $response = Http::asMultipart()
+                ->timeout((int) config('ocr-space.timeout', 120))
+                ->withHeaders(['apikey' => $key])
+                ->attach('file', (string) file_get_contents($file->getRealPath()), 'imagen.'.strtolower($file->getClientOriginalExtension()))
+                ->post(config('ocr-space.api_url'), [
+                    'language' => $request->input('language', 'spa'),
+                    // El motor 2 lee mejor el español y los textos con poco contraste.
+                    'OCREngine' => '2',
+                    'scale' => 'true',
+                    'detectOrientation' => 'true',
+                    'isOverlayRequired' => 'false',
+                ]);
+        } catch (ConnectionException $e) {
+            Log::warning('OCR.space no respondió: '.$e->getMessage());
+
+            return $this->error('El servicio de OCR no respondió a tiempo. Intenta de nuevo en unos minutos.', 504);
+        }
+
+        return $this->handleResponse($response);
+    }
+
+    private function handleResponse(Response $response): JsonResponse
+    {
+        $data = $response->json();
+
+        // Al agotar el cupo, OCR.space responde 403 con un texto plano.
+        if ($response->status() === 403 || $response->status() === 429) {
+            Log::warning('OCR.space rechazó la petición', ['status' => $response->status(), 'body' => substr($response->body(), 0, 200)]);
+
+            return $this->error('El servicio de OCR alcanzó su límite de uso. Intenta de nuevo más tarde.', 503);
+        }
+
+        if (! is_array($data)) {
+            Log::error('Respuesta inesperada de OCR.space', ['status' => $response->status(), 'body' => substr($response->body(), 0, 200)]);
+
+            return $this->error('El servicio de OCR devolvió un error. Intenta de nuevo.', 502);
+        }
+
+        if (! empty($data['IsErroredOnProcessing'])) {
+            $message = implode(' ', (array) ($data['ErrorMessage'] ?? []));
+            Log::warning('OCR.space no pudo procesar la imagen: '.$message);
+
+            if (stripos($message, 'file size') !== false) {
+                return $this->error('La imagen es demasiado pesada para el servicio de OCR.', 413);
+            }
+            if (stripos($message, 'timed out') !== false || stripos($message, 'timeout') !== false) {
+                return $this->error('La imagen tardó demasiado en procesarse. Intenta con una imagen más pequeña.', 504);
+            }
+
+            return $this->error('El servicio de OCR no pudo leer esta imagen.', 422);
+        }
+
+        $text = collect($data['ParsedResults'] ?? [])
+            ->pluck('ParsedText')
+            ->filter()
+            ->implode("\n");
+
+        return response()->json([
+            'success' => true,
+            'text' => trim(str_replace("\r\n", "\n", $text)),
+            'processing_time' => (int) ($data['ProcessingTimeInMilliseconds'] ?? 0),
+        ]);
+    }
+
+    private function error(string $message, int $status): JsonResponse
+    {
+        return response()->json(['success' => false, 'error' => $message], $status);
     }
 }

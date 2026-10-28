@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { conversionErrorMessage } from '@/lib/conversion';
 import { WifiHigh, Plus, LogIn, Settings, RefreshCw, Upload } from 'lucide-react';
 import ToolCard from '@/components/ToolCard';
 import { Button } from '@/components/ui/button';
@@ -66,9 +67,11 @@ export function EvarisdropDashboard({ appName, maxFileSize, networkName }: Evari
     }));
   }, []);
 
-  // Auto-create room when user info is ready
+  // Auto-create room when user info is ready (una sola vez: si falla, no se reintenta en bucle)
+  const autoCreateRef = useRef(false);
   useEffect(() => {
-    if (currentUser.username && !currentUser.isInRoom && !isLoading) {
+    if (currentUser.username && !currentUser.isInRoom && !isLoading && !autoCreateRef.current) {
+      autoCreateRef.current = true;
       console.log('🚀 Auto-creating room on page load for:', currentUser.username);
       handleCreateRoom();
     }
@@ -79,6 +82,8 @@ export function EvarisdropDashboard({ appName, maxFileSize, networkName }: Evari
     if (!currentUser.isInRoom || !currentUser.roomCode) return;
 
     const pollDevices = async () => {
+      // Sin consultar al servidor mientras la pestaña está oculta.
+      if (document.hidden) return;
       try {
         const response = await ApiService.getRoomDevices(currentUser.roomCode);
         const apiDevices = response.devices || [];
@@ -117,6 +122,7 @@ export function EvarisdropDashboard({ appName, maxFileSize, networkName }: Evari
     if (!currentUser.isInRoom) return;
 
     const pollRequests = async () => {
+      if (document.hidden) return;
       try {
         const response = await ApiService.getPendingRequests();
         const apiRequests = response.requests || [];
@@ -166,19 +172,6 @@ export function EvarisdropDashboard({ appName, maxFileSize, networkName }: Evari
     handleUsernameChange(newUsername);
   };
 
-  const generateSecureRoomCode = () => {
-    const chars = 'ABCDEFGHIJKLMNPQRSTUVWXYZ123456789'; // Excluding O, 0 for clarity
-    let result = '';
-    for (let i = 0; i < 4; i++) {
-      result += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    result += '-';
-    for (let i = 0; i < 4; i++) {
-      result += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    return result;
-  };
-
   const handleCreateRoom = async () => {
     if (isLoading) return;
     
@@ -213,19 +206,9 @@ export function EvarisdropDashboard({ appName, maxFileSize, networkName }: Evari
     } catch (error) {
       console.error('❌ Error creating room:', error);
       
-      // Fallback: Create local room code if API fails
-      const fallbackRoomCode = generateSecureRoomCode();
-      console.log('🔄 Using fallback room code:', fallbackRoomCode);
-      
-      setCurrentUser(prev => ({
-        ...prev,
-        id: `local-${Date.now()}`,
-        roomCode: fallbackRoomCode,
-        isInRoom: true
-      }));
-      setConnectionStatus(ConnectionStatus.CONNECTED);
-      
-      setError('Usando modo local. Otros dispositivos pueden unirse con el código mostrado.');
+      // Antes se inventaba un código "local" que nadie podía usar para unirse.
+      setConnectionStatus(ConnectionStatus.DISCONNECTED);
+      setError(await conversionErrorMessage(error, 'No se pudo crear la sala. Revisa tu conexión y vuelve a intentarlo.'));
     } finally {
       setIsLoading(false);
     }
@@ -262,7 +245,7 @@ export function EvarisdropDashboard({ appName, maxFileSize, networkName }: Evari
       
     } catch (error) {
       console.error('❌ Error joining room:', error);
-      setError('No se pudo unir a la sala. Verifica el código e intenta nuevamente.');
+      setError(await conversionErrorMessage(error, 'No se pudo unir a la sala. Verifica el código e intenta nuevamente.'));
       setConnectionStatus(ConnectionStatus.DISCONNECTED);
     } finally {
       setIsLoading(false);

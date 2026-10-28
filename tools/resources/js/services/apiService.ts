@@ -1,15 +1,16 @@
 import axios from 'axios';
-import type { Device, TransferRequest } from '../types/schema';
+import type { Device, TransferRequest } from '../types/evarisdrop/schema';
 
-// Configure axios for Laravel
-axios.defaults.baseURL = '/api';
-axios.defaults.headers.common['X-Requested-With'] = 'XMLHttpRequest';
-
-// Add CSRF token support
+// Instancia propia de Evarisdrop: antes se cambiaba la configuración global de
+// axios y, al navegar a otra herramienta, sus peticiones iban a /api/... (404).
 const token = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
-if (token) {
-    axios.defaults.headers.common['X-CSRF-TOKEN'] = token;
-}
+const api = axios.create({
+    baseURL: '/api',
+    headers: {
+        'X-Requested-With': 'XMLHttpRequest',
+        ...(token ? { 'X-CSRF-TOKEN': token } : {}),
+    },
+});
 
 export interface ApiDevice {
     id: string;
@@ -36,7 +37,7 @@ export class ApiService {
     // Room Management
     static async createRoom(deviceName: string, deviceType: string, userName: string) {
         try {
-            const response = await axios.post('/room/create', {
+            const response = await api.post('/room/create', {
                 deviceName,
                 deviceType,
                 userName
@@ -50,7 +51,7 @@ export class ApiService {
 
     static async joinRoom(roomCode: string, deviceName: string, deviceType: string, userName: string) {
         try {
-            const response = await axios.post('/room/join', {
+            const response = await api.post('/room/join', {
                 roomCode,
                 deviceName,
                 deviceType,
@@ -65,7 +66,7 @@ export class ApiService {
 
     static async leaveRoom() {
         try {
-            const response = await axios.post('/room/leave');
+            const response = await api.post('/room/leave');
             return response.data;
         } catch (error) {
             console.error('Error leaving room:', error);
@@ -75,7 +76,7 @@ export class ApiService {
 
     static async getRoomDevices(roomCode: string): Promise<{ devices: ApiDevice[], currentDeviceId: string, roomCode: string }> {
         try {
-            const response = await axios.get(`/room/${roomCode}/devices`);
+            const response = await api.get(`/room/${roomCode}/devices`);
             return response.data;
         } catch (error) {
             console.error('Error getting room devices:', error);
@@ -92,7 +93,7 @@ export class ApiService {
             formData.append('fileSize', file.size.toString());
             formData.append('file', file);
 
-            const response = await axios.post('/transfer/request', formData, {
+            const response = await api.post('/transfer/request', formData, {
                 headers: {
                     'Content-Type': 'multipart/form-data',
                 },
@@ -106,7 +107,7 @@ export class ApiService {
 
     static async getPendingRequests(): Promise<{ requests: ApiTransferRequest[] }> {
         try {
-            const response = await axios.get('/transfer/pending');
+            const response = await api.get('/transfer/pending');
             return response.data;
         } catch (error) {
             console.error('Error getting pending requests:', error);
@@ -116,7 +117,7 @@ export class ApiService {
 
     static async respondToTransfer(transferId: string, action: 'accept' | 'reject') {
         try {
-            const response = await axios.post(`/transfer/${transferId}/respond`, {
+            const response = await api.post(`/transfer/${transferId}/respond`, {
                 action
             });
             return response.data;
@@ -128,7 +129,7 @@ export class ApiService {
 
     static async getTransferStatus(transferId: string) {
         try {
-            const response = await axios.get(`/transfer/${transferId}/status`);
+            const response = await api.get(`/transfer/${transferId}/status`);
             return response.data;
         } catch (error) {
             console.error('Error getting transfer status:', error);
@@ -138,7 +139,7 @@ export class ApiService {
 
     static async downloadFile(transferId: string): Promise<Blob> {
         try {
-            const response = await axios.get(`/transfer/${transferId}/download`, {
+            const response = await api.get(`/transfer/${transferId}/download`, {
                 responseType: 'blob'
             });
             return response.data;
@@ -151,7 +152,7 @@ export class ApiService {
     // Utility
     static async healthCheck() {
         try {
-            const response = await axios.get('/health');
+            const response = await api.get('/health');
             return response.data;
         } catch (error) {
             console.error('Error checking API health:', error);

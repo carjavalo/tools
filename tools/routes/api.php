@@ -1,9 +1,9 @@
 <?php
 
-use Illuminate\Support\Facades\Route;
-use App\Http\Controllers\EvarisdropRoomController;
 use App\Http\Controllers\EvarisdropFileTransferController;
+use App\Http\Controllers\EvarisdropRoomController;
 use App\Http\Controllers\ToolPopularityController;
+use Illuminate\Support\Facades\Route;
 
 /*
 |--------------------------------------------------------------------------
@@ -16,8 +16,9 @@ use App\Http\Controllers\ToolPopularityController;
 |
 */
 
-// Evarisdrop API Routes - Using 'web' middleware to enable session support
-Route::middleware('web')->group(function () {
+// Evarisdrop API Routes - Using 'web' middleware to enable session support.
+// Son las únicas rutas de Evarisdrop: las copias que había en web.php se quitaron.
+Route::middleware(['web', 'throttle:evarisdrop'])->group(function () {
     // Room Management API Routes
     Route::prefix('room')->name('api.room.')->group(function () {
         Route::post('create', [EvarisdropRoomController::class, 'createRoom'])->name('create');
@@ -28,7 +29,9 @@ Route::middleware('web')->group(function () {
 
     // File Transfer API Routes
     Route::prefix('transfer')->name('api.transfer.')->group(function () {
-        Route::post('request', [EvarisdropFileTransferController::class, 'requestTransfer'])->name('request');
+        Route::post('request', [EvarisdropFileTransferController::class, 'requestTransfer'])
+            ->middleware('throttle:evarisdrop-envios')
+            ->name('request');
         Route::get('pending', [EvarisdropFileTransferController::class, 'getPendingRequests'])->name('pending');
         Route::post('{transferId}/respond', [EvarisdropFileTransferController::class, 'respondToTransfer'])->name('respond');
         Route::get('{transferId}/status', [EvarisdropFileTransferController::class, 'getTransferStatus'])->name('status');
@@ -48,6 +51,6 @@ Route::get('health', function () {
     return response()->json([
         'status' => 'ok',
         'timestamp' => now()->toISOString(),
-        'message' => 'Evaristools API is running'
+        'message' => 'Evaristools API is running',
     ]);
 })->name('api.health');

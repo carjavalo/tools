@@ -16,10 +16,71 @@ interface LoadImageOptions {
     trim?: boolean;
     // Lado mayor máximo en píxeles.
     maxDimension?: number;
+    // Si se indica (0–1), la imagen se vuelve a codificar como JPEG con esa calidad.
+    jpegQuality?: number;
 }
 
 const isPng = (bytes: Uint8Array) => bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47;
 const isJpg = (bytes: Uint8Array) => bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+
+// Fotos de iPhone: contenedor ISO-BMFF con una de estas marcas.
+const HEIC_BRANDS = ['heic', 'heix', 'hevc', 'hevx', 'heim', 'heis', 'mif1', 'msf1'];
+
+export function isHeicBytes(bytes: Uint8Array): boolean {
+    const text = (start: number) => String.fromCharCode(...bytes.slice(start, start + 4));
+    return bytes.length > 12 && text(4) === 'ftyp' && HEIC_BRANDS.includes(text(8));
+}
+
+/** ¿Es una foto HEIC? Por la extensión o por el contenido. */
+export async function isHeicFile(file: File): Promise<boolean> {
+    if (/\.(heic|heif)$/i.test(file.name) || /image\/hei[cf]/.test(file.type)) return true;
+    return isHeicBytes(new Uint8Array(await file.slice(0, 16).arrayBuffer()));
+}
+
+/**
+ * Convierte una foto HEIC a JPEG. La librería pesa unos 3 MB, así que solo
+ * se descarga cuando alguien sube una foto de este tipo.
+ */
+async function heicToJpeg(file: Blob): Promise<Blob> {
+    try {
+        const { heicTo } = await import('heic-to');
+        return await heicTo({ blob: file, type: 'image/jpeg', quality: 0.92 });
+    } catch (error) {
+        console.error('Error convirtiendo HEIC:', error);
+        throw new Error('No se pudo leer la foto HEIC del iPhone. Intenta exportarla como JPG.');
+    }
+}
+
+/**
+ * Orientación EXIF de un JPEG (1 = normal). Las fotos de celular suelen
+ * venir giradas con esta marca: el navegador la aplica al mostrarlas, pero
+ * un PDF no, así que hay que redibujarlas.
+ */
+export function jpegOrientation(bytes: Uint8Array): number {
+    if (!isJpg(bytes)) return 1;
+    let offset = 2;
+    while (offset + 4 < bytes.length && bytes[offset] === 0xff) {
+        const marker = bytes[offset + 1];
+        const length = (bytes[offset + 2] << 8) | bytes[offset + 3];
+        if (marker === 0xda) break;
+        if (marker === 0xe1 && String.fromCharCode(...bytes.slice(offset + 4, offset + 8)) === 'Exif') {
+            const tiff = offset + 10;
+            const little = bytes[tiff] === 0x49;
+            const read16 = (at: number) => (little ? bytes[at] | (bytes[at + 1] << 8) : (bytes[at] << 8) | bytes[at + 1]);
+            const read32 = (at: number) => (little ? read16(at) | (read16(at + 2) << 16) : (read16(at) << 16) | read16(at + 2));
+            const directory = tiff + read32(tiff + 4);
+            const entries = read16(directory);
+            for (let i = 0; i < entries; i++) {
+                const entry = directory + 2 + i * 12;
+                if (entry + 10 > bytes.length) break;
+                if (read16(entry) === 0x0112) return read16(entry + 8);
+            }
+            return 1;
+        }
+        offset += 2 + length;
+    }
+    return 1;
+}
 
 export function loadImageElement(url: string): Promise<HTMLImageElement> {
     return new Promise((resolve, reject) => {
@@ -83,40 +144,58 @@ export function trimCanvas(source: HTMLCanvasElement, padding = 4): HTMLCanvasEl
     return trimmed;
 }
 
-export async function canvasToImage(canvas: HTMLCanvasElement): Promise<LoadedImage> {
-    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
+export async function canvasToImage(canvas: HTMLCanvasElement, jpegQuality?: number): Promise<LoadedImage> {
+    const type = jpegQuality !== undefined ? 'image/jpeg' : 'image/png';
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, type, jpegQuality));
     if (!blob) throw new Error('No se pudo generar la imagen.');
-    return fromBytes(new Uint8Array(await blob.arrayBuffer()), 'png');
+    return fromBytes(new Uint8Array(await blob.arrayBuffer()), jpegQuality !== undefined ? 'jpg' : 'png');
 }
 
 /**
- * Lee una imagen subida por el usuario y la deja en PNG o JPG. Si hay que
- * quitar el fondo, recortarla, reducirla o no es PNG/JPG, se redibuja en un
- * canvas y se exporta como PNG.
+ * Lee una imagen subida por el usuario y la deja en PNG o JPG. Convierte las
+ * fotos HEIC del iPhone y endereza las que traen giro EXIF. Si hay que
+ * quitar el fondo, recortarla, reducirla, comprimirla o no es PNG/JPG, se
+ * redibuja en un canvas.
  */
 export async function loadImageFile(file: Blob, options: LoadImageOptions = {}): Promise<LoadedImage> {
-    const bytes = new Uint8Array(await file.arrayBuffer());
+    let source = file;
+    let bytes = new Uint8Array(await source.arrayBuffer());
+    if (isHeicBytes(bytes)) {
+        source = await heicToJpeg(file);
+        bytes = new Uint8Array(await source.arrayBuffer());
+    }
     const format = isPng(bytes) ? 'png' : isJpg(bytes) ? 'jpg' : null;
 
-    const url = URL.createObjectURL(file);
+    const url = URL.createObjectURL(source);
     let element: HTMLImageElement;
     try {
         element = await loadImageElement(url);
+    } catch {
+        throw new Error('El navegador no puede leer esta imagen. Usa JPG, PNG, WebP o HEIC.');
     } finally {
         URL.revokeObjectURL(url);
     }
 
+    // naturalWidth/Height ya vienen con el giro EXIF aplicado.
     const { naturalWidth: width, naturalHeight: height } = element;
     const maxDimension = options.maxDimension ?? Infinity;
     const scale = Math.min(1, maxDimension / Math.max(width, height));
+    const needsRedraw =
+        !format || scale < 1 || options.removeWhite || options.trim || options.jpegQuality !== undefined || jpegOrientation(bytes) > 1;
 
-    if (format && scale === 1 && !options.removeWhite && !options.trim) return fromBytes(bytes, format);
+    if (!needsRedraw) return fromBytes(bytes, format!);
 
     let canvas = document.createElement('canvas');
     canvas.width = Math.max(1, Math.round(width * scale));
     canvas.height = Math.max(1, Math.round(height * scale));
     const context = canvas.getContext('2d', { willReadFrequently: true });
     if (!context) throw new Error('El navegador no pudo procesar la imagen.');
+    if (options.jpegQuality !== undefined) {
+        // JPEG no tiene transparencia: fondo blanco, como el papel.
+        context.fillStyle = '#ffffff';
+        context.fillRect(0, 0, canvas.width, canvas.height);
+    }
+    context.imageSmoothingQuality = 'high';
     context.drawImage(element, 0, 0, canvas.width, canvas.height);
 
     if (options.removeWhite) removeWhiteBackground(context, canvas.width, canvas.height);
@@ -126,7 +205,10 @@ export async function loadImageFile(file: Blob, options: LoadImageOptions = {}):
         canvas = trimmed;
     }
 
-    return canvasToImage(canvas);
+    const image = await canvasToImage(canvas, options.removeWhite ? undefined : options.jpegQuality);
+    canvas.width = 0;
+    canvas.height = 0;
+    return image;
 }
 
 /** Carga una imagen publicada en el sitio (por ejemplo, el logo del hospital). */
