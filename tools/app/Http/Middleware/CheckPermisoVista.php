@@ -135,6 +135,8 @@ class CheckPermisoVista
                 $sub === null && $request->isMethod('POST') => 'radicar-solicitud-nueva',
                 // PUT /tools/radicar-solicitud/{caso}: botón Modificar Radicado.
                 $sub !== null && ctype_digit($sub) && $request->isMethod('PUT') => 'radicar-solicitud-modificar',
+                // Convenios de la EPS escogida en ese mismo modal.
+                $sub !== null && ctype_digit($sub) && $sub4 === 'convenios' => 'radicar-solicitud-modificar',
                 // POST /tools/radicar-solicitud/{caso}/seguimiento: formulario
                 // Aplicar Modificaciones del Historial.
                 $sub !== null && ctype_digit($sub) && $sub4 === 'seguimiento' => 'radicar-solicitud-seguimiento',

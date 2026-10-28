@@ -79,6 +79,7 @@ Route::prefix('tools')->name('tools.')->group(function () {
         Route::get('radicar-solicitud/editar-paciente', [App\Http\Controllers\RadicarCasoController::class, 'editarPaciente'])->name('radicar-solicitud.editar-paciente');
         Route::put('radicar-solicitud/paciente/{user}', [App\Http\Controllers\RadicarCasoController::class, 'actualizarPaciente'])->name('radicar-solicitud.actualizar-paciente');
         Route::get('radicar-solicitud/buscar-caso', [App\Http\Controllers\RadicarCasoController::class, 'buscarCaso'])->name('radicar-solicitud.buscar-caso');
+        Route::get('radicar-solicitud/{caso}/convenios', [App\Http\Controllers\RadicarCasoController::class, 'conveniosModificar'])->name('radicar-solicitud.convenios-modificar');
         Route::get('radicar-solicitud/{caso}/paquete', [App\Http\Controllers\RadicarCasoController::class, 'verPaquete'])->name('radicar-solicitud.paquete');
         Route::post('radicar-solicitud/{caso}/paquete', [App\Http\Controllers\RadicarCasoController::class, 'subirPaquete'])->name('radicar-solicitud.subir-paquete');
         // El adjunto de la cotización se entrega por una ruta con permisos,
