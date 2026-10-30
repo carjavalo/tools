@@ -1944,6 +1944,35 @@ test('la grilla del Historial muestra los códigos CUPS y procedimientos de cada
     ]);
 });
 
+test('quien ve la grilla abre el paquete de cada radicación', function () {
+    Storage::fake('public');
+    $rol = Role::create(['Nombre' => 'Solo Grilla', 'Estado' => true]);
+    $usuario = User::factory()->create(['rol' => 'Solo Grilla']);
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud', 'ver' => true]);
+    Permiso::create(['role_id' => $rol->id, 'vista' => 'radicar-solicitud-grilla', 'ver' => true]);
+
+    $ruta = UploadedFile::fake()
+        ->create('paquete.pdf', 20, 'application/pdf')
+        ->store('paquetes', 'public');
+    $conPaquete = RadicarCaso::create(['Ndocumento' => '9995', 'estRad' => '1', 'paquete' => $ruta]);
+    $sinPaquete = RadicarCaso::create(['Ndocumento' => '9996', 'estRad' => '1']);
+
+    $filas = collect(
+        $this->actingAs($usuario)
+            ->get('/tools/radicar-solicitud')
+            ->assertOk()
+            ->viewData('page')['props']['casosLista']
+    )->keyBy('codrad');
+
+    expect($filas[$conPaquete->codrad]['paqueteUrl'])->toContain("/{$conPaquete->codrad}/paquete")
+        ->and($filas[$sinPaquete->codrad]['paqueteUrl'])->toBeNull();
+
+    // Y la ruta del archivo lo deja pasar: sin esto el enlace daría 403.
+    $this->actingAs($usuario)
+        ->get($filas[$conPaquete->codrad]['paqueteUrl'])
+        ->assertOk();
+});
+
 test('quien ve la grilla verifica las cotizaciones aunque no las gestione', function () {
     // La columna existe para que cualquiera pueda verificar lo cotizado, así
     // que no depende del permiso del formulario de cotizaciones. Basta con ver

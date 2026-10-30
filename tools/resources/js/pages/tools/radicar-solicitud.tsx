@@ -113,6 +113,8 @@ interface CasoListaRow {
     // Nombre del servicio asignado ('—' si la radicación no tiene).
     servicio: string;
     estado: string;
+    // PDF del paquete; null si la radicación todavía no tiene.
+    paqueteUrl: string | null;
     // PDFs de los conceptos cotizados. Llega vacío para los roles que no
     // pueden ver las cotizaciones.
     cotizaciones: { id: number; tercero: string; url: string }[];
@@ -1114,6 +1116,7 @@ const COLS_HISTORIAL = [
     ['convenio', 'Convenio'],
     ['servicio', 'Servicio asignado'],
     ['estado', 'Estado'],
+    ['paquete', 'Paquete'],
     // Los PDF de los conceptos cotizados los ve todo el que ve la grilla:
     // sirven para verificar qué se cotizó.
     ['cotizacion', 'Cotización'],
@@ -1130,6 +1133,8 @@ const valorOrdenHistorial = (
             return c.codrad;
         case 'procedimientos':
             return textoOrden(c.procedimientos.map((p) => p.codigo).join(', '));
+        case 'paquete':
+            return c.paqueteUrl ? 1 : null;
         case 'cotizacion':
             return textoOrden(c.cotizaciones.map((t) => t.tercero).join(', '));
         default:
@@ -2335,6 +2340,7 @@ export default function RadicarSolicitud({
             Convenio: c.convenio,
             'Servicio asignado': c.servicio,
             Estado: c.estado,
+            Paquete: c.paqueteUrl ? 'Sí' : 'No',
             'Cotizaciones (PDF)': c.cotizaciones.length,
         }));
 
@@ -3582,6 +3588,7 @@ export default function RadicarSolicitud({
                 );
                 // Si el caso está abierto en el Historial, que se vea el PDF.
                 if (caso?.codrad === row.codrad) setCaso(d.caso);
+                router.reload({ only: ['casosLista'] });
                 setSinPaqueteOk(`Paquete del caso #${row.codrad} guardado.`);
             }
         } catch {
@@ -4153,6 +4160,8 @@ export default function RadicarSolicitud({
             const d = await r.json();
             if (d && d.ok) {
                 setCaso(d.caso);
+                // La columna Paquete de la grilla debe reflejar lo que se subió.
+                router.reload({ only: ['casosLista'] });
                 const docs =
                     archivos.length === 1
                         ? '1 documento'
@@ -6423,6 +6432,33 @@ export default function RadicarSolicitud({
                                                             </span>
                                                         </td>
                                                         <td className="px-3 py-2">
+                                                            {c.paqueteUrl ? (
+                                                                <a
+                                                                    href={
+                                                                        c.paqueteUrl
+                                                                    }
+                                                                    target="_blank"
+                                                                    rel="noreferrer"
+                                                                    // Igual que en Cotización: sin esto el
+                                                                    // clic también cargaría el caso.
+                                                                    onClick={(
+                                                                        e,
+                                                                    ) =>
+                                                                        e.stopPropagation()
+                                                                    }
+                                                                    title={`Abrir el paquete del caso #${c.codrad} en una pestaña nueva`}
+                                                                    className="inline-flex items-center gap-1 rounded-md bg-[#2d3e83]/10 px-2 py-0.5 text-xs font-medium text-[#2d3e83] transition-colors hover:bg-[#2d3e83]/20 dark:bg-white/10 dark:text-white"
+                                                                >
+                                                                    <Eye className="size-3" />
+                                                                    PDF
+                                                                </a>
+                                                            ) : (
+                                                                <span className="text-muted-foreground">
+                                                                    —
+                                                                </span>
+                                                            )}
+                                                        </td>
+                                                        <td className="px-3 py-2">
                                                             {c.cotizaciones
                                                                 .length ===
                                                             0 ? (
@@ -6471,7 +6507,9 @@ export default function RadicarSolicitud({
                                                     0 && (
                                                     <tr>
                                                         <td
-                                                            colSpan={10}
+                                                            colSpan={
+                                                                COLS_HISTORIAL.length
+                                                            }
                                                             className="px-3 py-8 text-center text-muted-foreground"
                                                         >
                                                             {gridHayFiltros ||

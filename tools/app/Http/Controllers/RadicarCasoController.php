@@ -397,7 +397,7 @@ class RadicarCasoController extends Controller
             ->when($filtros['especialidad'] !== '', fn ($q) => $q->where('Codesp', $filtros['especialidad']))
             ->when($filtros['medico'] !== '', fn ($q) => $q->where('codMed', $filtros['medico']));
 
-        $columnas = ['codrad', 'Ndocumento', 'estRad', 'convenio', 'codservicio', 'ambito', 'created_at'];
+        $columnas = ['codrad', 'Ndocumento', 'estRad', 'convenio', 'codservicio', 'ambito', 'paquete', 'created_at'];
 
         if (! $todo) {
             return $this->filasGrilla($query->limit($this->topeGrillaCasos($filtros))->get($columnas), $urgentes);
@@ -490,6 +490,9 @@ class RadicarCasoController extends Controller
                 // Las radicaciones anteriores al campo no tienen servicio.
                 'servicio' => $caso->codservicio ? ($servicios[$caso->codservicio] ?? '—') : '—',
                 'estado' => $estados[(int) $caso->estRad] ?? '—',
+                'paqueteUrl' => $caso->paquete
+                    ? route('tools.radicar-solicitud.paquete', $caso->codrad)
+                    : null,
                 'cotizaciones' => ($adjuntos->get($caso->codrad) ?? collect())
                     ->map(fn (CotizacionCaso $c) => [
                         'id' => $c->id,
