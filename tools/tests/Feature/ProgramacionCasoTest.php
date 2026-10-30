@@ -741,3 +741,125 @@ test('el informe rechaza una fecha de programacion invalida', function () {
         ->assertStatus(422)
         ->assertJsonValidationErrors(['programadoInicial']);
 });
+
+// Una programación con los mismos datos de otra —la fecha sin la hora— se
+// rechaza con la alerta, para que los programadores no la repitan.
+dataset('grillas de programados', [
+    'cirugía' => ['Programados', ''],
+    'hemodinamia' => ['Programado x Hemodinamia', '?tipo=hemo'],
+    'cardio vascular' => ['Programado Cirugia Cardio Vascular', '?tipo=cvascular'],
+    'endoscopia' => ['Programado x Endoscopia', '?tipo=endo'],
+]);
+
+test('la misma programación con otra hora se rechaza en cada grilla', function (string $estado, string $grilla) {
+    $admin = User::factory()->create();
+    $especialista = User::factory()->create(['rol' => 'Medico']);
+    $quirofano = QuirofanoQx::create(['nombre' => 'Sala 1', 'estado' => true]);
+    $qx = EstRadisecundario::create(['Nombre' => $estado, 'Estado' => true]);
+    $caso = RadicarCaso::create(['Ndocumento' => '4400', 'estRad' => '1']);
+
+    $datos = [
+        'codestsecundario' => (string) $qx->id,
+        'fecha_programacion' => '2026-11-05T08:00',
+        'especialista_medico_id' => $especialista->id,
+        'quirofano_id' => $quirofano->id,
+    ];
+    $url = "/tools/radicar-solicitud/{$caso->codrad}/seguimiento";
+
+    $this->actingAs($admin)->postJson($url, $datos)->assertOk();
+
+    $this->actingAs($admin)
+        ->postJson($url, [...$datos, 'fecha_programacion' => '2026-11-05T15:30', 'fecreci' => '2026-10-01'])
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors(['programacion_existente'])
+        ->assertJsonPath('errors.programacion_existente.0', fn (string $m) => str_starts_with($m, 'Radicación existente o programada') && str_contains($m, "#{$caso->codrad}"));
+
+    // Se rechaza todo el movimiento: ni otra fila ni los demás campos.
+    expect($caso->refresh()->fecreci)->toBeNull();
+    $this->actingAs($admin)->getJson('/tools/radicar-solicitud/programados'.$grilla)->assertJsonCount(1, 'rows');
+})->with('grillas de programados');
+
+test('la programación con cualquier dato distinto sí se registra', function () {
+    $admin = User::factory()->create();
+    $especialista = User::factory()->create(['rol' => 'Medico']);
+    $otroEspecialista = User::factory()->create(['rol' => 'Medico']);
+    $quirofano = QuirofanoQx::create(['nombre' => 'Sala 1', 'estado' => true]);
+    $otroQuirofano = QuirofanoQx::create(['nombre' => 'Sala 2', 'estado' => true]);
+    $programados = EstRadisecundario::create(['Nombre' => 'Programados', 'Estado' => true]);
+    $hemo = EstRadisecundario::create(['Nombre' => 'Programado x Hemodinamia', 'Estado' => true]);
+    $caso = RadicarCaso::create(['Ndocumento' => '4401', 'estRad' => '1']);
+
+    $datos = [
+        'codestsecundario' => (string) $programados->id,
+        'fecha_programacion' => '2026-11-05T08:00',
+        'especialista_medico_id' => $especialista->id,
+        'quirofano_id' => $quirofano->id,
+        'observaciones_prg' => 'Traer exámenes',
+    ];
+    $url = "/tools/radicar-solicitud/{$caso->codrad}/seguimiento";
+
+    $this->actingAs($admin)->postJson($url, $datos)->assertOk();
+
+    foreach ([
+        ['fecha_programacion' => '2026-11-06T08:00'],
+        ['especialista_medico_id' => $otroEspecialista->id],
+        ['quirofano_id' => $otroQuirofano->id],
+        ['observaciones_prg' => 'Requiere sangre'],
+        ['codestsecundario' => (string) $hemo->id],
+    ] as $cambio) {
+        $this->actingAs($admin)->postJson($url, [...$datos, ...$cambio])->assertOk();
+    }
+
+    expect(ProgramacionCaso::where('codrad', $caso->codrad)->count())->toBe(6);
+
+    // Repetir el texto ya registrado, o no escribir nada, no lo hace distinto.
+    $this->actingAs($admin)
+        ->postJson($url, [...$datos, 'observaciones_prg' => '  traer   EXÁMENES '])
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors(['programacion_existente']);
+    $this->actingAs($admin)
+        ->postJson($url, [...$datos, 'observaciones_prg' => ''])
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors(['programacion_existente']);
+});
+
+test('el mismo paciente radicado dos veces no se programa dos veces igual', function () {
+    $admin = User::factory()->create();
+    $programados = EstRadisecundario::create(['Nombre' => 'Programados', 'Estado' => true]);
+    $primero = RadicarCaso::create(['Ndocumento' => '4402', 'Codesp' => '10', 'estRad' => '1']);
+    $repetido = RadicarCaso::create(['Ndocumento' => '4402', 'Codesp' => '10', 'estRad' => '1']);
+    $otraEspecialidad = RadicarCaso::create(['Ndocumento' => '4402', 'Codesp' => '20', 'estRad' => '1']);
+
+    $datos = ['codestsecundario' => (string) $programados->id, 'fecha_programacion' => '2026-11-05T08:00'];
+
+    $this->actingAs($admin)->postJson("/tools/radicar-solicitud/{$primero->codrad}/seguimiento", $datos)->assertOk();
+
+    $this->actingAs($admin)
+        ->postJson("/tools/radicar-solicitud/{$repetido->codrad}/seguimiento", $datos)
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors(['programacion_existente']);
+
+    $this->actingAs($admin)->postJson("/tools/radicar-solicitud/{$otraEspecialidad->codrad}/seguimiento", $datos)->assertOk();
+});
+
+test('editar una programación no puede dejarla igual a otra', function () {
+    $admin = User::factory()->create();
+    $programados = EstRadisecundario::create(['Nombre' => 'Programados', 'Estado' => true]);
+    $caso = RadicarCaso::create(['Ndocumento' => '4403', 'estRad' => '1']);
+
+    $base = ['codrad' => $caso->codrad, 'codestsecundario' => (string) $programados->id];
+    ProgramacionCaso::create([...$base, 'fecha_programacion' => '2026-11-05 08:00']);
+    $otra = ProgramacionCaso::create([...$base, 'fecha_programacion' => '2026-11-06 08:00']);
+
+    $url = "/tools/radicar-solicitud/programacion/{$otra->id}";
+
+    $this->actingAs($admin)
+        ->putJson($url, ['fecha_programacion' => '2026-11-05T14:00'])
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors(['programacion_existente']);
+    expect($otra->refresh()->fecha_programacion->format('Y-m-d H:i'))->toBe('2026-11-06 08:00');
+
+    // Cambiarle solo la hora no la compara contra sí misma.
+    $this->actingAs($admin)->putJson($url, ['fecha_programacion' => '2026-11-06T14:00'])->assertOk();
+    expect($otra->refresh()->fecha_programacion->format('Y-m-d H:i'))->toBe('2026-11-06 14:00');
+});

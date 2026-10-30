@@ -73,6 +73,25 @@ Todo se ejecuta dentro de **una sola transacción**:
 Los campos de programación viajan aparte en la petición: se retiran antes de escribir el
 caso y el seguimiento, porque **no son columnas de ninguna de esas dos tablas**.
 
+### Programaciones repetidas
+
+Si ya existe una programación con los mismos datos, no se guarda nada del movimiento y
+aparece la alerta **"Radicación existente o programada"**, con el caso y la fecha de la
+que ya existe. Rige en las cuatro grillas (cirugía, Hemodinamia, Cirugía Cardio Vascular y
+Endoscopia), al programar y al editar una fila. Se considera la misma cuando coinciden:
+
+- La **grilla** (Estado QX): la misma cirugía en otra área no se considera repetida.
+- El **paciente, la especialidad y el médico tratante** de la radicación. No se compara
+  el N° de caso, para detectar también al paciente radicado dos veces.
+- El **día** de la programación. La hora no cuenta.
+- El **especialista** y el **quirófano**.
+- Las **observaciones**: no aporta ningún texto que la otra no tenga. Se comparan sin
+  firma, sin mayúsculas y sin diferencias de espacios.
+
+Cualquier dato distinto, incluida una observación nueva, permite guardarla. Una
+programación de un caso que luego cambió de Estado QX sigue en la grilla y por eso también
+cuenta: para volver a programar lo mismo se edita o se borra la fila existente.
+
 ---
 
 ## 4. Consulta: "Ver programados"

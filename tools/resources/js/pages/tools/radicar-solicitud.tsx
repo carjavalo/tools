@@ -25,6 +25,7 @@ import { dashboard } from '@/routes';
 import { type BreadcrumbItem, type SharedData } from '@/types';
 import { Head, router, useForm, usePage } from '@inertiajs/react';
 import {
+    AlertTriangle,
     ArrowDown,
     ArrowUp,
     ArrowUpDown,
@@ -2107,6 +2108,11 @@ export default function RadicarSolicitud({
     });
     const [progEditSaving, setProgEditSaving] = useState(false);
     const [progEditError, setProgEditError] = useState<string | null>(null);
+    // Alerta de "Radicación existente o programada": el aviso del formulario
+    // queda arriba de todo y se pierde de vista al pulsar guardar.
+    const [alertaProgramacion, setAlertaProgramacion] = useState<string | null>(
+        null,
+    );
     // Borrar una programación: la fila pendiente de confirmación.
     const [progBorrarRow, setProgBorrarRow] = useState<ProgramadoRow | null>(
         null,
@@ -3194,6 +3200,9 @@ export default function RadicarSolicitud({
                     setProgEditError(
                         primero ?? 'Revisa los datos de la programación.',
                     );
+                    setAlertaProgramacion(
+                        d.errors?.programacion_existente?.[0] ?? null,
+                    );
                     return null;
                 }
                 if (!r.ok) {
@@ -3986,6 +3995,9 @@ export default function RadicarSolicitud({
                         (d.errors ?? {}) as Record<string, string[]>,
                     )[0]?.[0];
                     setError(primero ?? 'Revisa los datos de la modificación.');
+                    setAlertaProgramacion(
+                        d.errors?.programacion_existente?.[0] ?? null,
+                    );
                     return null;
                 }
                 if (!r.ok) {
@@ -10236,6 +10248,34 @@ export default function RadicarSolicitud({
                                 <Save className="size-4" />
                             )}
                             Guardar cambios
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Alerta al repetir una programación, desde cualquier formulario. */}
+            <Dialog
+                open={alertaProgramacion !== null}
+                onOpenChange={(open) => {
+                    if (!open) setAlertaProgramacion(null);
+                }}
+            >
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2 text-red-600">
+                            <AlertTriangle className="size-5" />
+                            Radicación existente o programada
+                        </DialogTitle>
+                        <DialogDescription>
+                            {alertaProgramacion}
+                        </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter>
+                        <Button
+                            type="button"
+                            onClick={() => setAlertaProgramacion(null)}
+                        >
+                            Entendido
                         </Button>
                     </DialogFooter>
                 </DialogContent>

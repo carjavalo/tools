@@ -1544,6 +1544,10 @@ class RadicarCasoController extends Controller
             $esProgramado = $estadoQx !== null && $this->esEstadoProgramado($estadoQx->Nombre);
         }
 
+        // Lo escrito ahora, sin lo acumulado: es lo que dice si la programación
+        // trae algo distinto de la que ya existe.
+        $tramosNuevosPrg = $this->tramosObservacion($datosProgramacion['observaciones_prg'] ?? null);
+
         // Observaciones de la programación: acumulables. La nueva programación
         // arranca con lo ya registrado en el caso para su misma grilla y le
         // anexa, firmado, el texto nuevo.
@@ -1561,7 +1565,18 @@ class RadicarCasoController extends Controller
             ) ?? $previas;
         }
 
-        DB::transaction(function () use ($caso, $data, $request, $entradaCcx, $acumuladoCcx, $acumuladoRevisionHemo, $esProgramado, $datosProgramacion) {
+        DB::transaction(function () use ($caso, $data, $request, $entradaCcx, $acumuladoCcx, $acumuladoRevisionHemo, $esProgramado, $datosProgramacion, $tramosNuevosPrg) {
+            // Antes de escribir nada: si la programación ya existe, se rechaza
+            // todo el movimiento y el usuario conserva lo que diligenció.
+            if ($esProgramado) {
+                $this->rechazarProgramacionExistente(
+                    $caso->codrad,
+                    ProgramacionCaso::tipoDeEstadoQx($data['codestsecundario']),
+                    $datosProgramacion,
+                    $tramosNuevosPrg,
+                );
+            }
+
             // Foto del seguimiento. Estado y MAOS no se guardan aquí porque
             // seguimiento_caso no tiene esas columnas: sus cambios quedan en
             // la bitácora, que además registra el valor anterior y el nuevo.
@@ -1900,21 +1915,35 @@ class RadicarCasoController extends Controller
             $antes[$campo] = $this->valorProgramacion($campo, $programacion->$campo);
         }
 
-        // Fecha, especialista y quirófano se corrigen: un campo que el usuario
-        // dejó vacío se guarda vacío. Las observaciones, en cambio, son
-        // acumulables: el texto nuevo se firma y se anexa a lo registrado.
-        $programacion->update([
-            'fecha_programacion' => ($data['fecha_programacion'] ?? '') !== '' ? $data['fecha_programacion'] : null,
-            'especialista_medico_id' => ($data['especialista_medico_id'] ?? '') !== '' ? $data['especialista_medico_id'] : null,
-            'quirofano_id' => ($data['quirofano_id'] ?? '') !== '' ? $data['quirofano_id'] : null,
-            'observaciones_prg' => $this->acumularObservacion(
-                $programacion->observaciones_prg,
-                $data['observaciones_prg'] ?? null,
-                $request,
-                'observaciones_prg',
-                'Las observaciones de programación',
-            ) ?? $programacion->observaciones_prg,
-        ]);
+        // Corregir una fila tampoco puede dejarla igual a otra de su grilla.
+        DB::transaction(function () use ($programacion, $data, $request) {
+            $this->rechazarProgramacionExistente(
+                $programacion->codrad,
+                $programacion->tipoGrilla(),
+                $data,
+                [
+                    ...$this->tramosObservacion($programacion->observaciones_prg),
+                    ...$this->tramosObservacion($data['observaciones_prg'] ?? null),
+                ],
+                $programacion->id,
+            );
+
+            // Fecha, especialista y quirófano se corrigen: un campo que el usuario
+            // dejó vacío se guarda vacío. Las observaciones, en cambio, son
+            // acumulables: el texto nuevo se firma y se anexa a lo registrado.
+            $programacion->update([
+                'fecha_programacion' => ($data['fecha_programacion'] ?? '') !== '' ? $data['fecha_programacion'] : null,
+                'especialista_medico_id' => ($data['especialista_medico_id'] ?? '') !== '' ? $data['especialista_medico_id'] : null,
+                'quirofano_id' => ($data['quirofano_id'] ?? '') !== '' ? $data['quirofano_id'] : null,
+                'observaciones_prg' => $this->acumularObservacion(
+                    $programacion->observaciones_prg,
+                    $data['observaciones_prg'] ?? null,
+                    $request,
+                    'observaciones_prg',
+                    'Las observaciones de programación',
+                ) ?? $programacion->observaciones_prg,
+            ]);
+        });
 
         // La corrección queda en la bitácora del caso, igual que los cambios
         // del formulario de seguimiento: una programación reescrita sin rastro
@@ -1968,6 +1997,75 @@ class RadicarCasoController extends Controller
         );
 
         return response()->json(['ok' => true]);
+    }
+
+    /**
+     * Rechaza una programación con los mismos datos de otra ya registrada en
+     * su grilla: mismo paciente, especialidad y médico tratante, mismo día
+     * (la hora no cuenta), especialista y quirófano, y sin observaciones que
+     * la otra no tenga. Se compara por los datos del caso y no por su número
+     * para alcanzar también al paciente radicado dos veces. Bloquea esas
+     * radicaciones hasta el final de la transacción, para que dos programadores
+     * a la vez no pasen ambos la revisión.
+     *
+     * @param  array<string, mixed>  $datos
+     * @param  list<string>  $tramos  Observaciones que aporta, de tramosObservacion().
+     */
+    private function rechazarProgramacionExistente(int $codrad, string $tipo, array $datos, array $tramos, ?int $exceptoId = null): void
+    {
+        $caso = RadicarCaso::find($codrad);
+
+        $codrads = $caso && $caso->Ndocumento
+            ? RadicarCaso::where('Ndocumento', $caso->Ndocumento)
+                ->where('Codesp', $caso->Codesp)
+                ->where('codMed', $caso->codMed)
+                ->lockForUpdate()
+                ->pluck('codrad')
+            : collect([$codrad]);
+
+        $fecha = $datos['fecha_programacion'] ?? null;
+
+        $existente = ProgramacionCaso::query()
+            ->tap(fn ($q) => $this->filtrarTipoProgramacion($q, $tipo))
+            ->whereIn('codrad', $codrads)
+            ->when($exceptoId, fn ($q) => $q->whereKeyNot($exceptoId))
+            ->when(
+                $fecha,
+                fn ($q) => $q->whereDate('fecha_programacion', \Illuminate\Support\Carbon::parse($fecha)->toDateString()),
+                fn ($q) => $q->whereNull('fecha_programacion'),
+            )
+            ->where('especialista_medico_id', ($datos['especialista_medico_id'] ?? null) ?: null)
+            ->where('quirofano_id', ($datos['quirofano_id'] ?? null) ?: null)
+            ->orderByDesc('id')
+            ->get()
+            ->first(fn (ProgramacionCaso $p) => array_diff($tramos, $this->tramosObservacion($p->observaciones_prg)) === []);
+
+        if ($existente) {
+            throw ValidationException::withMessages([
+                'programacion_existente' => sprintf(
+                    'Radicación existente o programada: el caso #%d ya está programado para el %s con los mismos datos. Revísalo en la grilla de programados antes de registrar otra.',
+                    $existente->codrad,
+                    $this->valorProgramacion('fecha_programacion', $existente->fecha_programacion),
+                ),
+            ]);
+        }
+    }
+
+    /**
+     * Tramos de unas observaciones acumuladas, sin la firma que entradaObservacionCcx
+     * les agrega, para comparar lo que se escribió y no quién ni cuándo lo firmó.
+     * Las mayúsculas y las diferencias de espacios tampoco cuentan.
+     *
+     * @return list<string>
+     */
+    private function tramosObservacion(?string $observaciones): array
+    {
+        $tramos = preg_split('/\n— [^\n]* · \d{4}-\d{2}-\d{2} \d{2}:\d{2}(?:\n+|$)/u', (string) $observaciones) ?: [];
+
+        return array_values(array_filter(array_map(
+            fn (string $tramo) => mb_strtolower(trim((string) preg_replace('/\s+/u', ' ', $tramo))),
+            $tramos,
+        ), fn (string $tramo) => $tramo !== ''));
     }
 
     /**
