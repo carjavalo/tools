@@ -6,6 +6,10 @@
 *.md diff=markdown
 *.php diff=php
 
+# Compilado de Vite: un conflicto aquí se resuelve con npm run build. Sin esto,
+# Git escribe marcas de conflicto en manifest.json y la aplicación deja de cargar.
+public/build/** -merge
+
 CHANGELOG.md export-ignore
 README.md export-ignore
 .github/workflows/browser-tests.yml export-ignore
